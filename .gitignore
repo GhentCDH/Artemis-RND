@@ -6,6 +6,7 @@ app/.svelte-kit
 app/build
 app/dist
 app/.pnpm-store
+app/static/annotations
 
 # OS noise
 .DS_Store

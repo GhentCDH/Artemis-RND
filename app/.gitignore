@@ -8,6 +8,8 @@ node_modules
 /.svelte-kit
 /build
 
+./static
+
 # OS
 .DS_Store
 Thumbs.db

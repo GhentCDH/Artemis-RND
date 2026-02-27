@@ -1,59 +1,46 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import maplibregl from "maplibre-gl";
-  import { WarpedMapLayer } from "@allmaps/maplibre";
-  import { generateId } from "@allmaps/id";
 
-  type StepTiming = {
-    step: string;
-    ms: number;
-    ok: boolean;
-    detail?: string;
-  };
+  import type { RunResult, UILog } from "$lib/artemis/types";
+  import { CancelToken } from "$lib/artemis/cancel";
+  import { ensureMapContext, destroyMapContext } from "$lib/artemis/map/mapInit";
+  import { runOneManifest, runOneFromAnnotationUrl } from "$lib/artemis/runner";
+  import { expandInputsToManifests } from "$lib/artemis/iiif/crawl";
 
-  type RunResult = {
+  type MirrorItem = {
     manifestUrl: string;
-    annotationUrl?: string;
-    startedAtISO: string;
-    totalMs: number;
-    steps: StepTiming[];
+    localUrl?: string;
     ok: boolean;
+    status?: number;
     error?: string;
+    cached?: boolean;
   };
 
   let mapDiv: HTMLDivElement;
 
-  // UI inputs
-  let manifestUrlInput =
-    "https://iiif.ghentcdh.ugent.be/iiif/manifests/gereduceerd_kadaster:Termonde:Appels";
   let bulkInput = "";
+  let mirrorEnabled = false;
+
   let status = "Idle";
   let isRunning = false;
 
-  // Results
   let results: RunResult[] = [];
+  let mirrorReport: MirrorItem[] = [];
 
-  // Map state
-  let map: maplibregl.Map | null = null;
-  let warpedMapLayer: WarpedMapLayer | null = null;
+  let uiLogs: UILog[] = [];
+  const MAX_UI_LOGS = 300;
 
-  // Simple cancel mechanism
-  let runToken = 0;
+  const cancelToken = new CancelToken();
 
-  async function tlog(tag: string, message: string) {
-    try {
-      await fetch("/api/log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag, message, time: new Date().toISOString() })
-      });
-    } catch {
-      // ignore
-    }
-  }
+  const RUN_TIMEOUT_MS = 30000;
+  const APPLY_TIMEOUT_MS = 15000;
 
-  function nowMs() {
-    return performance.now();
+  function log(level: "INFO" | "WARN" | "ERROR", msg: string) {
+    if (level === "ERROR") console.error(msg);
+    else if (level === "WARN") console.warn(msg);
+    else console.log(msg);
+
+    uiLogs = [{ atISO: new Date().toISOString(), level, msg }, ...uiLogs].slice(0, MAX_UI_LOGS);
   }
 
   function parseBulk(text: string): string[] {
@@ -61,296 +48,212 @@
       .split(/\r?\n/g)
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
-      // remove obvious duplicates while preserving order
       .filter((s, idx, arr) => arr.indexOf(s) === idx);
   }
 
-  function ensureMap() {
-    if (map) return;
+  async function ensureReady(localToken: number) {
+    cancelToken.guard(localToken);
 
-    map = new maplibregl.Map({
-      container: mapDiv,
-      style: "https://demotiles.maplibre.org/style.json",
-      center: [4.35, 50.85],
-      zoom: 10,
-      maxPitch: 0
-    });
+    if (!mapDiv) throw new Error("Map container not ready");
 
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    await ensureMapContext(mapDiv, log);
+
+    cancelToken.guard(localToken);
   }
 
-  async function waitForMapLoad(localToken: number) {
-    if (!map) throw new Error("Map not initialized");
+  async function clearAllMaps() {
+    const ctx = await ensureMapContext(mapDiv, log);
 
-    if (map.loaded()) return;
+    const before = ctx.warped.getMapIds?.()?.length ?? 0;
 
-    await new Promise<void>((resolve, reject) => {
-      const onLoad = () => {
-        cleanup();
-        resolve();
-      };
-      const onErr = (e: any) => {
-        cleanup();
-        reject(e);
-      };
-      const cleanup = () => {
-        map?.off("load", onLoad);
-        map?.off("error", onErr);
-      };
-
-      map.on("load", onLoad);
-      map.on("error", onErr);
-
-      // cancellation guard
-      const check = () => {
-        if (localToken !== runToken) {
-          cleanup();
-          reject(new Error("Cancelled"));
-          return;
-        }
-        requestAnimationFrame(check);
-      };
-      requestAnimationFrame(check);
-    });
-  }
-
-  function resetWarpedLayer() {
-    // Remove previous layer cleanly to avoid stacking memory/state.
-    if (!map) return;
-
-    try {
-      // WarpedMapLayer is a custom layer; MapLibre removeLayer works by id.
-      // The plugin layerId is the id passed in constructor.
-      if (map.getLayer("warped-map-layer")) {
-        map.removeLayer("warped-map-layer");
-      }
-    } catch {
-      // ignore
+    if (typeof (ctx.warped as any).clear === "function") {
+      (ctx.warped as any).clear();
+    } else {
+      log("WARN", "WarpedMapLayer.clear() not found; cannot guarantee clean reruns");
     }
 
-    warpedMapLayer = new WarpedMapLayer({ layerId: "warped-map-layer" });
-    // TS friction between plugin types and MapLibre types: safe cast for prototype work.
-    map.addLayer(warpedMapLayer as any);
+    const after = ctx.warped.getMapIds?.()?.length ?? 0;
+    log("INFO", `Cleared warped layer: before=${before} after=${after}`);
   }
 
-  async function benchmarkOne(manifestUrl: string, localToken: number): Promise<RunResult> {
-    const startedAtISO = new Date().toISOString();
-    const steps: StepTiming[] = [];
-    const t0 = nowMs();
+  async function mirrorManifests(manifests: string[]): Promise<MirrorItem[]> {
+    const res = await fetch("/api/mirror", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manifests })
+    });
 
-    const pushStep = (step: string, ms: number, ok: boolean, detail?: string) => {
-      steps.push({ step, ms, ok, detail });
-    };
-
-    const guardCancel = () => {
-      if (localToken !== runToken) throw new Error("Cancelled");
-    };
-
-    try {
-      status = `Running: ${manifestUrl}`;
-      await tlog("RUN", `Start manifest: ${manifestUrl}`);
-
-      // Step: map init
-      {
-        const s0 = nowMs();
-        ensureMap();
-        guardCancel();
-        const ms = nowMs() - s0;
-        pushStep("map_init", ms, true);
-        await tlog("STEP", `map_init ${ms.toFixed(1)}ms`);
-      }
-
-      // Step: wait map load (first time only)
-      {
-        const s0 = nowMs();
-        await waitForMapLoad(localToken);
-        guardCancel();
-        const ms = nowMs() - s0;
-        pushStep("map_load_wait", ms, true);
-        await tlog("STEP", `map_load_wait ${ms.toFixed(1)}ms`);
-      }
-
-      // Step: generate allmaps id
-      let annotationUrl = "";
-      {
-        const s0 = nowMs();
-        const id = await generateId(manifestUrl);
-        guardCancel();
-        annotationUrl = `https://annotations.allmaps.org/manifests/${id}`;
-        const ms = nowMs() - s0;
-        pushStep("allmaps_generate_id", ms, true, id);
-        await tlog("STEP", `allmaps_generate_id ${ms.toFixed(1)}ms id=${id}`);
-      }
-
-      // Step: fetch annotation (so you can measure dependency on allmaps service)
-      {
-        const s0 = nowMs();
-        const r = await fetch(annotationUrl);
-        guardCancel();
-        const ms = nowMs() - s0;
-        const ok = r.ok;
-        pushStep("allmaps_fetch_annotation", ms, ok, `status=${r.status}`);
-        await tlog("STEP", `allmaps_fetch_annotation ${ms.toFixed(1)}ms status=${r.status}`);
-        if (!r.ok) throw new Error(`Annotation fetch failed: ${r.status}`);
-      }
-
-      // Step: reset layer + add layer
-      {
-        const s0 = nowMs();
-        resetWarpedLayer();
-        guardCancel();
-        const ms = nowMs() - s0;
-        pushStep("map_add_warped_layer", ms, true);
-        await tlog("STEP", `map_add_warped_layer ${ms.toFixed(1)}ms`);
-      }
-
-      // Step: load annotation into layer (warping setup)
-      {
-        const s0 = nowMs();
-        await warpedMapLayer!.addGeoreferenceAnnotationByUrl(annotationUrl);
-        guardCancel();
-        const ms = nowMs() - s0;
-        pushStep("allmaps_apply_annotation", ms, true);
-        await tlog("STEP", `allmaps_apply_annotation ${ms.toFixed(1)}ms`);
-      }
-
-      // Step: fit bounds (optional UX step)
-      {
-        const s0 = nowMs();
-        const bounds = warpedMapLayer!.getBounds();
-        if (bounds) {
-          map!.fitBounds(bounds as any, { padding: 40, duration: 0 });
-        }
-        guardCancel();
-        const ms = nowMs() - s0;
-        pushStep("map_fit_bounds", ms, true, bounds ? "ok" : "no_bounds");
-        await tlog("STEP", `map_fit_bounds ${ms.toFixed(1)}ms`);
-      }
-
-      const totalMs = nowMs() - t0;
-      await tlog("RUN", `Done manifest in ${totalMs.toFixed(1)}ms: ${manifestUrl}`);
-
-      return {
-        manifestUrl,
-        annotationUrl,
-        startedAtISO,
-        totalMs,
-        steps,
-        ok: true
-      };
-    } catch (e: any) {
-      const totalMs = nowMs() - t0;
-      const msg = e?.message ?? String(e);
-      await tlog("ERROR", `Manifest failed in ${totalMs.toFixed(1)}ms: ${manifestUrl} :: ${msg}`);
-
-      return {
-        manifestUrl,
-        startedAtISO,
-        totalMs,
-        steps,
-        ok: false,
-        error: msg
-      };
+    if (!res.ok) {
+      throw new Error(`Mirror failed: HTTP ${res.status} (is /api/mirror implemented?)`);
     }
+
+    const payload = await res.json();
+    return (payload?.results ?? []) as MirrorItem[];
   }
 
-  async function runQueue(urls: string[]) {
-    // Increment token so any previous run cancels
-    runToken += 1;
-    const localToken = runToken;
+  async function runBulk() {
+    const inputs = parseBulk(bulkInput);
+    if (inputs.length === 0) return;
+
+    const localToken = cancelToken.next();
 
     isRunning = true;
     results = [];
-    status = `Queued ${urls.length} manifest(s)`;
-    await tlog("QUEUE", `Queue size: ${urls.length}`);
+    mirrorReport = [];
+    status = `Preparing ${inputs.length} input(s)…`;
 
-    // Sequential: load -> report -> load -> report ...
-    for (let i = 0; i < urls.length; i++) {
-      if (localToken !== runToken) break;
+    try {
+      log("INFO", `Queue: inputs count=${inputs.length}`);
+      await ensureReady(localToken);
 
-      const u = urls[i];
-      status = `(${i + 1}/${urls.length}) ${u}`;
-      await tlog("QUEUE", `Processing ${i + 1}/${urls.length}`);
+      status = "Resolving inputs (collections -> manifests)…";
+      log("INFO", status);
 
-      const res = await benchmarkOne(u, localToken);
-      results = [res, ...results];
+      const manifests = await expandInputsToManifests(inputs, (m) => {
+        status = m;
+        log("INFO", m);
+      });
 
-      // Small breath to keep UI responsive when you do big batches
-      await new Promise((r) => setTimeout(r, 30));
+      cancelToken.guard(localToken);
+
+      if (manifests.length === 0) {
+        status = "No manifests resolved";
+        log("WARN", status);
+        return;
+      }
+
+      log("INFO", `Resolved manifests: ${manifests.length}`);
+      status = `Resolved ${manifests.length} manifest(s)`;
+
+      status = "Clearing previous maps…";
+      await clearAllMaps();
+
+      const ctx = await ensureMapContext(mapDiv, log);
+
+      if (mirrorEnabled) {
+        status = `Mirroring ${manifests.length} manifest(s)…`;
+        log("INFO", "Mirror enabled: calling /api/mirror");
+
+        mirrorReport = await mirrorManifests(manifests);
+
+        const okItems = mirrorReport.filter((x) => x.ok && x.localUrl);
+        const failed = mirrorReport.filter((x) => !x.ok);
+
+        log("INFO", `Mirror done: ok=${okItems.length} failed=${failed.length}`);
+
+        for (let i = 0; i < okItems.length; i++) {
+          cancelToken.guard(localToken);
+
+          const it = okItems[i];
+
+          status = `Warp ${i + 1}/${okItems.length}: ${it.manifestUrl}`;
+          log("INFO", status);
+
+          const res = await runOneFromAnnotationUrl(
+            it.manifestUrl,
+            it.localUrl!,
+            localToken,
+            (t) => cancelToken.guard(t),
+            ctx,
+            log,
+            {
+              runTimeoutMs: RUN_TIMEOUT_MS,
+              applyTimeoutMs: APPLY_TIMEOUT_MS
+            }
+          );
+
+          results = [res, ...results];
+
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      } else {
+        for (let i = 0; i < manifests.length; i++) {
+          cancelToken.guard(localToken);
+
+          const u = manifests[i];
+
+          status = `Run ${i + 1}/${manifests.length}: ${u}`;
+          log("INFO", status);
+
+          const res = await runOneManifest(
+            u,
+            localToken,
+            (t) => cancelToken.guard(t),
+            ctx,
+            log,
+            {
+              runTimeoutMs: RUN_TIMEOUT_MS,
+              applyTimeoutMs: APPLY_TIMEOUT_MS,
+              clearBeforeAdd: false
+            }
+          );
+
+          results = [res, ...results];
+
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      }
+
+      status = localToken === cancelToken.current() ? "Done" : "Cancelled";
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      status = `Bulk failed: ${msg}`;
+      log("ERROR", status);
+    } finally {
+      isRunning = false;
     }
-
-    if (localToken === runToken) {
-      status = "Done";
-      await tlog("QUEUE", "Queue complete");
-    } else {
-      status = "Cancelled";
-      await tlog("QUEUE", "Queue cancelled");
-    }
-
-    isRunning = false;
-  }
-
-  function goSingle() {
-    const u = manifestUrlInput.trim();
-    if (!u) return;
-    runQueue([u]);
-  }
-
-  function goBulk() {
-    const urls = parseBulk(bulkInput);
-    if (urls.length === 0) return;
-    runQueue(urls);
   }
 
   function cancel() {
-    runToken += 1;
+    cancelToken.next();
     isRunning = false;
     status = "Cancelling…";
+    log("WARN", "Queue: cancel requested");
   }
 
   onMount(async () => {
-    await tlog("BOOT", "UI mounted");
+    log("INFO", "UI mounted");
+
+    try {
+      await ensureMapContext(mapDiv, log);
+      log("INFO", "Map ready");
+    } catch (e: any) {
+      log("ERROR", `Map init failed: ${e?.message ?? String(e)}`);
+    }
   });
 
   onDestroy(() => {
-    try {
-      map?.remove();
-    } catch {
-      // ignore
-    }
+    destroyMapContext();
   });
 </script>
 
 <div class="wrap">
   <div class="controls">
     <div class="row">
-      <label>Single 3IF manifest URL</label>
-      <input
-        class="input"
-        bind:value={manifestUrlInput}
-        placeholder="https://…/iiif/manifests/…"
-        disabled={isRunning}
-      />
-      <button class="btn" on:click={goSingle} disabled={isRunning || !manifestUrlInput.trim()}>
-        Go
-      </button>
-    </div>
+      <label for="bulkManifests">Manifest or Collection URLs (one per line)</label>
 
-    <div class="row">
-      <label>Bulk manifest URLs (one per line)</label>
       <textarea
+        id="bulkManifests"
         class="textarea"
         bind:value={bulkInput}
-        placeholder="Paste many manifest URLs here, one per line"
+        placeholder="Paste IIIF manifest or collection URLs here, one per line"
         disabled={isRunning}
-      />
+      ></textarea>
+
       <div class="rowButtons">
-        <button class="btn" on:click={goBulk} disabled={isRunning || parseBulk(bulkInput).length === 0}>
-          Run bulk
+        <label class="chk">
+          <input type="checkbox" bind:checked={mirrorEnabled} disabled={isRunning} />
+          Mirror annotation data before warping
+        </label>
+
+        <button class="btn" on:click={runBulk} disabled={isRunning || parseBulk(bulkInput).length === 0}>
+          Run
         </button>
+
         <button class="btn secondary" on:click={cancel} disabled={!isRunning}>
           Cancel
         </button>
+
         <div class="status">Status: {status}</div>
       </div>
     </div>
@@ -359,51 +262,112 @@
   <div class="main">
     <div class="map" bind:this={mapDiv}></div>
 
-    <div class="report">
-      <h3>Runs (latest first)</h3>
+    <div class="right">
+      <div class="panel">
+        <h3>Runs (latest first)</h3>
 
-      {#if results.length === 0}
-        <div class="muted">No runs yet.</div>
-      {:else}
-        {#each results as r}
-          <div class="card">
-            <div class="cardTop">
-              <div class="url">{r.manifestUrl}</div>
-              <div class={"badge " + (r.ok ? "ok" : "bad")}>
-                {r.ok ? "OK" : "FAIL"} · {r.totalMs.toFixed(1)} ms
+        {#if results.length === 0}
+          <div class="muted">No runs yet.</div>
+        {:else}
+          {#each results as r}
+            <div class="card">
+              <div class="cardTop">
+                <div class="url">{r.manifestUrl}</div>
+
+                <div class={"badge " + (r.ok ? "ok" : "bad")}>
+                  {r.ok ? "OK" : "FAIL"} · {r.totalMs.toFixed(1)} ms
+                </div>
               </div>
-            </div>
 
-            {#if r.annotationUrl}
-              <div class="muted">Annotation: {r.annotationUrl}</div>
-            {/if}
-            {#if r.error}
-              <div class="error">Error: {r.error}</div>
-            {/if}
+              {#if r.annotationUrl}
+                <div class="muted">Annotation: {r.annotationUrl}</div>
+              {/if}
 
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Step</th>
-                  <th>ms</th>
-                  <th>ok</th>
-                  <th>detail</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each r.steps as s}
+              {#if r.error}
+                <div class="error">Error: {r.error}</div>
+              {/if}
+
+              <table class="table">
+                <thead>
                   <tr>
-                    <td class="mono">{s.step}</td>
-                    <td class="mono">{s.ms.toFixed(1)}</td>
-                    <td>{s.ok ? "yes" : "no"}</td>
-                    <td class="mono">{s.detail ?? ""}</td>
+                    <th>Step</th>
+                    <th>ms</th>
+                    <th>ok</th>
+                    <th>detail</th>
                   </tr>
-                {/each}
-              </tbody>
-            </table>
+                </thead>
+
+                <tbody>
+                  {#each r.steps as s}
+                    <tr>
+                      <td class="mono">{s.step}</td>
+                      <td class="mono">{s.ms.toFixed(1)}</td>
+                      <td>{s.ok ? "yes" : "no"}</td>
+                      <td class="mono">{s.detail ?? ""}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
+      <div class="panel">
+        <h3>Mirror report</h3>
+
+        {#if mirrorReport.length === 0}
+          <div class="muted">No mirror run yet.</div>
+        {:else}
+          <table class="table">
+            <thead>
+              <tr>
+                <th>manifest</th>
+                <th>ok</th>
+                <th>cached</th>
+                <th>localUrl</th>
+                <th>error</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {#each mirrorReport as m}
+                <tr>
+                  <td class="mono" style="max-width: 260px; word-break: break-all;">
+                    {m.manifestUrl}
+                  </td>
+                  <td>{m.ok ? "yes" : "no"}</td>
+                  <td>{m.cached ? "yes" : "no"}</td>
+                  <td class="mono" style="max-width: 220px; word-break: break-all;">
+                    {m.localUrl ?? ""}
+                  </td>
+                  <td class="mono" style="max-width: 220px; word-break: break-all;">
+                    {m.error ?? ""}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+
+      <div class="panel">
+        <h3>Live log</h3>
+
+        {#if uiLogs.length === 0}
+          <div class="muted">No logs yet.</div>
+        {:else}
+          <div class="logWrap">
+            {#each uiLogs as l}
+              <div class={"logLine " + l.level.toLowerCase()}>
+                <span class="mono">{l.atISO}</span>
+                <span class="lvl">{l.level}</span>
+                <span class="msg mono">{l.msg}</span>
+              </div>
+            {/each}
           </div>
-        {/each}
-      {/if}
+        {/if}
+      </div>
     </div>
   </div>
 </div>
@@ -432,23 +396,27 @@
     opacity: 0.8;
   }
 
-  .input {
-    padding: 8px 10px;
-    font-size: 14px;
-  }
-
   .textarea {
-    min-height: 90px;
+    min-height: 110px;
     padding: 8px 10px;
     font-size: 12px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+      "Courier New", monospace;
   }
 
   .rowButtons {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     align-items: center;
     flex-wrap: wrap;
+  }
+
+  .chk {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+    opacity: 0.9;
   }
 
   .btn {
@@ -486,11 +454,19 @@
     min-height: 0;
   }
 
-  .report {
+  .right {
     border-left: 1px solid #ddd;
-    padding: 12px;
     overflow: auto;
     min-height: 0;
+    padding: 12px;
+    display: grid;
+    gap: 12px;
+    align-content: start;
+  }
+
+  .panel {
+    border: 1px solid #ddd;
+    padding: 10px;
   }
 
   h3 {
@@ -550,7 +526,8 @@
     font-size: 12px;
   }
 
-  th, td {
+  th,
+  td {
     border-top: 1px solid #eee;
     padding: 6px 6px;
     vertical-align: top;
@@ -563,6 +540,44 @@
   }
 
   .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+      "Courier New", monospace;
+  }
+
+  .logWrap {
+    max-height: 260px;
+    overflow: auto;
+    border: 1px solid #eee;
+    padding: 6px;
+  }
+
+  .logLine {
+    display: grid;
+    grid-template-columns: 170px 56px 1fr;
+    gap: 8px;
+    padding: 2px 0;
+    border-top: 1px solid #f3f3f3;
+    font-size: 12px;
+  }
+
+  .logLine:first-child {
+    border-top: 0;
+  }
+
+  .lvl {
+    font-weight: 600;
+    opacity: 0.8;
+  }
+
+  .logLine.error .lvl {
+    color: #c33;
+  }
+
+  .logLine.warn .lvl {
+    color: #b80;
+  }
+
+  .msg {
+    word-break: break-word;
   }
 </style>
