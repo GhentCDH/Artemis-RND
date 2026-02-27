@@ -1,0 +1,11 @@
+# Node dependencies
+app/node_modules
+
+# SvelteKit generated files
+app/.svelte-kit
+app/build
+app/dist
+app/.pnpm-store
+
+# OS noise
+.DS_Store
