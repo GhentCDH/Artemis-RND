@@ -7,6 +7,16 @@
   import { runOneManifest, runOneFromAnnotationUrl } from "$lib/artemis/runner";
   import { expandInputsToManifests } from "$lib/artemis/iiif/crawl";
 
+  // Bulk metrics (new)
+  import {
+    bulkSummary,
+    startBulkRun,
+    endBulkRun,
+    resetBulkMetrics,
+    ingestRunResult,
+    fmtMs
+  } from "$lib/artemis/metrics";
+
   type MirrorItem = {
     manifestUrl: string;
     localUrl?: string;
@@ -102,6 +112,10 @@
     mirrorReport = [];
     status = `Preparing ${inputs.length} input(s)…`;
 
+    // Bulk metrics (new)
+    resetBulkMetrics();
+    startBulkRun(mirrorEnabled ? "mirror" : "direct");
+
     try {
       log("INFO", `Queue: inputs count=${inputs.length}`);
       await ensureReady(localToken);
@@ -163,6 +177,7 @@
           );
 
           results = [res, ...results];
+          ingestRunResult(res); // Bulk metrics (new)
 
           await new Promise((r) => setTimeout(r, 20));
         }
@@ -189,6 +204,7 @@
           );
 
           results = [res, ...results];
+          ingestRunResult(res); // Bulk metrics (new)
 
           await new Promise((r) => setTimeout(r, 20));
         }
@@ -200,6 +216,7 @@
       status = `Bulk failed: ${msg}`;
       log("ERROR", status);
     } finally {
+      endBulkRun(); // Bulk metrics (new)
       isRunning = false;
     }
   }
@@ -263,6 +280,73 @@
     <div class="map" bind:this={mapDiv}></div>
 
     <div class="right">
+      <!-- Bulk report (new) -->
+      <div class="panel">
+        <h3>Bulk report</h3>
+
+        {#if !$bulkSummary || $bulkSummary.manifestCount === 0}
+          <div class="muted">No bulk run yet.</div>
+        {:else}
+          <div class="muted">Mode: {$bulkSummary.label ?? "–"}</div>
+
+          <table class="table">
+            <tbody>
+              <tr>
+                <th>Start</th>
+                <td class="mono">{$bulkSummary.startISO ?? "–"}</td>
+              </tr>
+              <tr>
+                <th>End</th>
+                <td class="mono">{$bulkSummary.endISO ?? "–"}</td>
+              </tr>
+              <tr>
+                <th>Duration</th>
+                <td class="mono">{fmtMs($bulkSummary.runDurationMs)}</td>
+              </tr>
+              <tr>
+                <th>Manifests</th>
+                <td>{$bulkSummary.manifestCount}</td>
+              </tr>
+              <tr>
+                <th>OK</th>
+                <td>{$bulkSummary.okCount}</td>
+              </tr>
+              <tr>
+                <th>FAIL</th>
+                <td>{$bulkSummary.failCount}</td>
+              </tr>
+              <tr>
+                <th>Avg total per manifest</th>
+                <td class="mono">{fmtMs($bulkSummary.avgManifestTotalMs)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="margin-top: 12px;">Average per step</h3>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th>step</th>
+                <th>avg ms</th>
+                <th>count</th>
+                <th>ok</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each $bulkSummary.steps as s}
+                <tr>
+                  <td class="mono">{s.step}</td>
+                  <td class="mono">{fmtMs(s.avgMs)}</td>
+                  <td>{s.count}</td>
+                  <td>{s.okCount}/{s.count}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+
       <div class="panel">
         <h3>Runs (latest first)</h3>
 

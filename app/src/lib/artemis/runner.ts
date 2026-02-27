@@ -13,6 +13,14 @@ type RunnerOpts = {
    * Can be turned ON if you ever want "replace per item".
    */
   clearBeforeAdd?: boolean;
+
+  /**
+   * If true, we prefetch the annotation JSON and apply using a blob: URL.
+   * This avoids a second network fetch inside addGeoreferenceAnnotationByUrl().
+   *
+   * Keep this ON for clean benchmarking and for mirror mode resilience.
+   */
+  applyViaBlobUrl?: boolean;
 };
 
 type StepResult = { ok: boolean; detail?: string };
@@ -63,6 +71,65 @@ function makeStepRecorder(steps: StepTiming[]) {
       throw e;
     }
   };
+}
+
+function mustOk(r: StepResult, ctxMsg: string) {
+  if (!r.ok) throw new Error(ctxMsg + (r.detail ? ` (${r.detail})` : ""));
+}
+
+function isLikelyAnnotationShapeError(msg: string) {
+  return (
+    msg.includes("Invalid literal value") ||
+    msg.includes("expected \"Annotation\"") ||
+    msg.includes("expected: \"Annotation\"") ||
+    (msg.includes("path") && msg.includes("\"type\"")) ||
+    (msg.includes("Required") && (msg.includes("\"target\"") || msg.includes("\"body\"")))
+  );
+}
+
+type UsableCheck = { usable: boolean; reason: string; count: number };
+
+function checkUsableAnnotations(json: any): UsableCheck {
+  if (!json || typeof json !== "object") {
+    return { usable: false, reason: "not_object", count: 0 };
+  }
+
+  const t = String((json as any).type ?? "");
+
+  if (t === "AnnotationPage" && Array.isArray((json as any).items)) {
+    const items = (json as any).items as any[];
+
+    const valid = items.filter((it) => {
+      if (!it || typeof it !== "object") return false;
+      const itType = String((it as any).type ?? "");
+      if (itType !== "Annotation") return false;
+      if (!(it as any).target) return false;
+      if (!(it as any).body) return false;
+      return true;
+    });
+
+    if (valid.length === 0) {
+      return { usable: false, reason: "annotation_page_no_valid_items", count: 0 };
+    }
+
+    return { usable: true, reason: "annotation_page_items", count: valid.length };
+  }
+
+  if (t === "Annotation") {
+    const hasTarget = !!(json as any).target;
+    const hasBody = !!(json as any).body;
+    if (!hasTarget || !hasBody) {
+      return { usable: false, reason: "annotation_missing_body_or_target", count: 0 };
+    }
+    return { usable: true, reason: "single_annotation", count: 1 };
+  }
+
+  return { usable: false, reason: `unknown_type:${t || "none"}`, count: 0 };
+}
+
+function makeJsonBlobUrl(jsonText: string): string {
+  const blob = new Blob([jsonText], { type: "application/json" });
+  return URL.createObjectURL(blob);
 }
 
 /**
@@ -157,6 +224,12 @@ export async function runOneFromAnnotationUrl(
 
 /**
  * Internal shared implementation so both public functions behave identically.
+ *
+ * Clean runner policy:
+ * - Always fetch + parse once (needed for resilience + "is there anything to apply?")
+ * - Apply via blob URL by default to avoid second NETWORK fetch during apply
+ * - Missing/invalid annotations => SKIP (ok=true, apply step says skipped)
+ * - True apply failures => FAIL
  */
 async function runOneFromAnnotationUrlImpl(
   manifestUrl: string,
@@ -171,6 +244,16 @@ async function runOneFromAnnotationUrlImpl(
   t0: number
 ): Promise<RunResult> {
   const step = makeStepRecorder(steps);
+
+  const applyViaBlobUrl = opts.applyViaBlobUrl !== false; // default true
+
+  let fetchedText: string | null = null;
+  let fetchedJson: any = null;
+
+  let skipApply = false;
+  let skipReason = "";
+
+  let blobUrl: string | null = null;
 
   try {
     await withTimeout(
@@ -190,29 +273,105 @@ async function runOneFromAnnotationUrlImpl(
 
         guardCancel(localToken);
 
-        await step("fetch_annotation", async () => {
-          const res = await fetch(annotationUrl);
-          return { ok: res.ok, detail: `status=${res.status}` };
+        const fetchRes = await step("fetch_annotation", async () => {
+          const res = await fetch(annotationUrl, { cache: "default" });
+          const text = await res.text();
+          fetchedText = text;
+
+          if (res.status === 404) {
+            skipApply = true;
+            skipReason = "allmaps_404";
+            return { ok: true, detail: `skip:status=404 bytes=${text.length}` };
+          }
+
+          return { ok: res.ok, detail: `status=${res.status} bytes=${text.length}` };
         });
+
+        if (!skipApply) mustOk(fetchRes, "Annotation fetch failed");
 
         guardCancel(localToken);
 
-        await step("allmaps_apply_annotation", async () => {
-          const added = await withTimeout(
-            ctx.warped.addGeoreferenceAnnotationByUrl(annotationUrl),
-            opts.applyTimeoutMs,
-            "apply"
-          );
+        // 2) Parse once
+        const parseRes = await step("parse_annotation_json", async () => {
+          if (fetchedText == null) return { ok: false, detail: "no_text" };
 
-          const addedIds = Array.isArray(added) ? added.map(String) : [String(added)];
-          const total = ctx.warped.getMapIds?.()?.length ?? 0;
-
-          return { ok: true, detail: `added=${addedIds.join(",")} total=${total}` };
+          try {
+            fetchedJson = JSON.parse(fetchedText);
+            return { ok: true, detail: "ok" };
+          } catch {
+            const snippet = fetchedText.slice(0, 180).replace(/\s+/g, " ").trim();
+            return { ok: false, detail: `json_parse_failed :: ${snippet}` };
+          }
         });
+        mustOk(parseRes, "Annotation JSON parse failed");
+
+        guardCancel(localToken);
+
+        // 3) Check usability and decide SKIP vs apply
+        const usableRes = await step("detect_usable_annotations", async () => {
+          const usable = checkUsableAnnotations(fetchedJson);
+
+          if (!usable.usable) {
+            skipApply = true;
+            skipReason = `no_usable_annotations:${usable.reason}`;
+            return { ok: true, detail: `skip:${usable.reason}` };
+          }
+
+          return { ok: true, detail: `usable:${usable.reason} count=${usable.count}` };
+        });
+        mustOk(usableRes, "Annotation usability check failed");
+
+        guardCancel(localToken);
+
+        // 4) Apply (prefer blob URL so apply doesn't hit network again)
+        await step("allmaps_apply_annotation", async () => {
+          if (skipApply) return { ok: true, detail: `skipped_${skipReason || "no_usable_annotations"}` };
+
+          const urlToApply = (() => {
+            if (!applyViaBlobUrl) return annotationUrl;
+            if (!fetchedText) return annotationUrl;
+            blobUrl = makeJsonBlobUrl(fetchedText);
+            return blobUrl;
+          })();
+
+          try {
+            const added = await withTimeout(
+              ctx.warped.addGeoreferenceAnnotationByUrl(urlToApply),
+              opts.applyTimeoutMs,
+              "apply"
+            );
+
+            const addedIds = Array.isArray(added) ? added.map(String) : [String(added)];
+            const total = ctx.warped.getMapIds?.()?.length ?? 0;
+
+            const src = urlToApply.startsWith("blob:") ? "blob" : "url";
+            return { ok: true, detail: `src=${src} added=${addedIds.join(",")} total=${total}` };
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+
+            // If the plugin rejects the shape, treat as SKIP (not FAIL)
+            if (isLikelyAnnotationShapeError(msg)) {
+              skipApply = true;
+              skipReason = "plugin_validation";
+              return { ok: true, detail: `skipped_plugin_validation :: ${msg}` };
+            }
+
+            // Otherwise: real failure
+            return { ok: false, detail: msg };
+          }
+        });
+
+        // Enforce fail if apply step truly failed.
+        const lastApply = steps.find((s) => s.step === "allmaps_apply_annotation");
+        if (lastApply && !lastApply.ok) {
+          throw new Error(`Apply failed (${lastApply.detail ?? "no detail"})`);
+        }
 
         guardCancel(localToken);
 
         await step("map_fit_bounds", async () => {
+          if (skipApply) return { ok: true, detail: "skipped" };
+
           const bounds = ctx.warped.getBounds?.();
           if (bounds) ctx.map.fitBounds(bounds as any, { padding: 40, duration: 0 });
           return { ok: true, detail: bounds ? "ok" : "no_bounds" };
@@ -223,7 +382,9 @@ async function runOneFromAnnotationUrlImpl(
     );
 
     const totalMs = nowMs() - t0;
-    log("INFO", `RUN ok (${totalMs.toFixed(1)}ms): ${manifestUrl}`);
+
+    if (skipApply) log("WARN", `RUN skip (${totalMs.toFixed(1)}ms): ${manifestUrl} :: ${skipReason || "no usable annotations"}`);
+    else log("INFO", `RUN ok (${totalMs.toFixed(1)}ms): ${manifestUrl}`);
 
     return {
       manifestUrl,
@@ -248,5 +409,7 @@ async function runOneFromAnnotationUrlImpl(
       ok: false,
       error: msg
     };
+  } finally {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
   }
 }
