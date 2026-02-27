@@ -15,7 +15,7 @@ To recreate this project with the same configuration:
 
 ```sh
 # recreate this project
-pnpm dlx sv create --template minimal --types ts --install pnpm .
+pnpm dlx sv create --template minimal --types ts --install pnpm app
 ```
 
 ## Developing
