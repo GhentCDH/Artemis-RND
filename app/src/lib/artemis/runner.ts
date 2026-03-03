@@ -1,415 +1,416 @@
-// src/lib/artemis/runner.ts
-import type { RunResult, StepTiming } from "./types";
-import { isoNow, nowMs, withTimeout } from "./timing";
-import { buildAllmapsAnnotationUrl } from "./allmaps";
-import type { MapContext } from "./map/mapContext";
+// $lib/artemis/runner.ts
+//
+// Compiled-only runner (NO runtime Allmaps discovery):
+// - Fetch compiled IIIF manifest from GitHub-hosted dataset
+// - Fetch matching mirrored Allmaps annotation JSON (GitHub-hosted)
+// - Normalize annotation payload (prefer .items if present)
+// - Construct WarpedMapLayer
+// - Add it to a provided MapLibre map
+//
+// Instrumented to debug "layer added but nothing renders":
+// - Logs layer interface (onAdd/render/onRemove)
+// - Wraps onAdd/onRemove to confirm MapLibre calls them
+// - Adds layer (retry without beforeId if needed)
+// - Keeps last added layer id for deterministic removal
+//
+// If after this you still see no map tiles AND no Allmaps events, the next step is:
+// - onAdd not being called => your WarpedMapLayer instance is not a valid MapLibre custom layer in this version.
+// - onAdd is called but you see maperror events => payload shape/content issue.
 
-type RunnerOpts = {
-  runTimeoutMs: number;
-  applyTimeoutMs: number;
+import type maplibregl from "maplibre-gl";
+import { WarpedMapLayer } from "@allmaps/maplibre";
+import type { RunResult } from "$lib/artemis/types";
 
-  /**
-   * Normally OFF for bulk runs (page clears once before the loop).
-   * Can be turned ON if you ever want "replace per item".
-   */
-  clearBeforeAdd?: boolean;
+type StepTiming = { step: string; ms: number; ok: boolean; detail?: string };
 
-  /**
-   * If true, we prefetch the annotation JSON and apply using a blob: URL.
-   * This avoids a second network fetch inside addGeoreferenceAnnotationByUrl().
-   *
-   * Keep this ON for clean benchmarking and for mirror mode resilience.
-   */
-  applyViaBlobUrl?: boolean;
+export type CompiledIndexEntry = {
+  label: string;
+  sourceManifestUrl: string;
+  compiledManifestPath: string;
+  mirroredAllmapsAnnotationPath: string;
+  canvasCount: number;
+  manifestAllmapsId: string;
+  manifestAllmapsUrl: string;
+  manifestAllmapsStatus: number;
+  canvasIds: string[];
 };
 
-type StepResult = { ok: boolean; detail?: string };
+export type CompiledIndex = {
+  collectionUrl: string;
+  generatedAt: string;
+  totalManifests: number;
+  georefManifests: number;
+  mirroredOk: number;
+  compiledOk: number;
+  index: CompiledIndexEntry[];
+};
 
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+export type CompiledRunnerConfig = {
+  datasetBaseUrl: string;
+  indexPath?: string; // default "index.json"
+  fetchTimeoutMs?: number; // default 30000
+};
+
+type RunnerLog = (level: "INFO" | "WARN" | "ERROR", msg: string) => void;
+
+function nowMs() {
+  return performance.now();
 }
 
-async function clearWarpedIfRequested(ctx: MapContext, enabled: boolean) {
-  if (!enabled) return;
+function joinUrl(base: string, path: string) {
+  return base.replace(/\/+$/, "") + "/" + path.replace(/^\/+/, "");
+}
 
-  if (typeof (ctx.warped as any).clear === "function") {
-    (ctx.warped as any).clear();
-    await nextFrame();
-    return;
-  }
+function stemFromPathOrUrl(s: string) {
+  const m = s.match(/\/([^\/]+)\.json$/);
+  return m?.[1] ?? s;
+}
 
-  const ids: string[] = ctx.warped.getMapIds?.() ?? [];
+async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
 
-  const remove =
-    (ctx.warped as any).removeGeoreferencedMapById ??
-    (ctx.warped as any).removeWarpedMapById ??
-    null;
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const text = await res.text();
 
-  if (typeof remove === "function") {
-    for (const id of ids) {
-      await remove.call(ctx.warped, id);
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+
+    const trimmed = text.trim().toLowerCase();
+    if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+      throw new Error(`Expected JSON but got HTML from ${url} (wrong datasetBaseUrl?)`);
     }
-    await nextFrame();
+
+    return JSON.parse(text) as T;
+  } finally {
+    clearTimeout(t);
   }
 }
 
-function makeStepRecorder(steps: StepTiming[]) {
-  return async (name: string, fn: () => Promise<StepResult>) => {
-    const s0 = nowMs();
+// ---- Index cache (fetch once) ----
+let cachedIndex: CompiledIndex | null = null;
 
-    try {
-      const r = await fn();
-      steps.push({ step: name, ms: nowMs() - s0, ok: r.ok, detail: r.detail });
-      return r;
-    } catch (e: any) {
-      steps.push({
-        step: name,
-        ms: nowMs() - s0,
-        ok: false,
-        detail: e?.message ?? String(e)
-      });
-      throw e;
-    }
-  };
+export function resetCompiledIndexCache() {
+  cachedIndex = null;
 }
 
-function mustOk(r: StepResult, ctxMsg: string) {
-  if (!r.ok) throw new Error(ctxMsg + (r.detail ? ` (${r.detail})` : ""));
+export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<CompiledIndex> {
+  if (cachedIndex) return cachedIndex;
+
+  const indexUrl = joinUrl(cfg.datasetBaseUrl, cfg.indexPath ?? "index.json");
+  cachedIndex = await fetchJson<CompiledIndex>(indexUrl, cfg.fetchTimeoutMs ?? 30000);
+  return cachedIndex;
 }
 
-function isLikelyAnnotationShapeError(msg: string) {
+export function findEntryById(index: CompiledIndex, id: string): CompiledIndexEntry | null {
+  return index.index.find((m) => m.compiledManifestPath.endsWith(`${id}.json`)) ?? null;
+}
+
+export function findEntryByCompiledManifestUrl(
+  index: CompiledIndex,
+  compiledManifestUrl: string
+): CompiledIndexEntry | null {
+  const id = stemFromPathOrUrl(compiledManifestUrl);
   return (
-    msg.includes("Invalid literal value") ||
-    msg.includes("expected \"Annotation\"") ||
-    msg.includes("expected: \"Annotation\"") ||
-    (msg.includes("path") && msg.includes("\"type\"")) ||
-    (msg.includes("Required") && (msg.includes("\"target\"") || msg.includes("\"body\"")))
+    index.index.find((m) => stemFromPathOrUrl(m.compiledManifestPath) === id) ??
+    index.index.find((m) => m.compiledManifestPath.endsWith(`${id}.json`)) ??
+    null
   );
 }
 
-type UsableCheck = { usable: boolean; reason: string; count: number };
+// ---------------------------------------------------------------------------
+// Map readiness
+// ---------------------------------------------------------------------------
 
-function checkUsableAnnotations(json: any): UsableCheck {
-  if (!json || typeof json !== "object") {
-    return { usable: false, reason: "not_object", count: 0 };
-  }
+function waitForMapReady(map: maplibregl.Map): Promise<void> {
+  if (map.isStyleLoaded()) return Promise.resolve();
 
-  const t = String((json as any).type ?? "");
-
-  if (t === "AnnotationPage" && Array.isArray((json as any).items)) {
-    const items = (json as any).items as any[];
-
-    const valid = items.filter((it) => {
-      if (!it || typeof it !== "object") return false;
-      const itType = String((it as any).type ?? "");
-      if (itType !== "Annotation") return false;
-      if (!(it as any).target) return false;
-      if (!(it as any).body) return false;
-      return true;
-    });
-
-    if (valid.length === 0) {
-      return { usable: false, reason: "annotation_page_no_valid_items", count: 0 };
-    }
-
-    return { usable: true, reason: "annotation_page_items", count: valid.length };
-  }
-
-  if (t === "Annotation") {
-    const hasTarget = !!(json as any).target;
-    const hasBody = !!(json as any).body;
-    if (!hasTarget || !hasBody) {
-      return { usable: false, reason: "annotation_missing_body_or_target", count: 0 };
-    }
-    return { usable: true, reason: "single_annotation", count: 1 };
-  }
-
-  return { usable: false, reason: `unknown_type:${t || "none"}`, count: 0 };
+  return new Promise((resolve) => {
+    const onLoad = () => {
+      map.off("load", onLoad);
+      resolve();
+    };
+    map.on("load", onLoad);
+  });
 }
 
-function makeJsonBlobUrl(jsonText: string): string {
-  const blob = new Blob([jsonText], { type: "application/json" });
-  return URL.createObjectURL(blob);
+// ---------------------------------------------------------------------------
+// Allmaps payload normalization (adapter point)
+// ---------------------------------------------------------------------------
+
+function normalizeAllmapsPayload(raw: unknown, log?: RunnerLog): unknown {
+  if (Array.isArray(raw)) return raw;
+
+  if (raw && typeof raw === "object") {
+    const o = raw as any;
+
+    if (Array.isArray(o.items)) {
+      log?.("INFO", `Allmaps payload: using .items (${o.items.length})`);
+      return o.items;
+    }
+
+    if (Array.isArray(o.georeferenceAnnotations)) {
+      log?.("INFO", `Allmaps payload: using .georeferenceAnnotations (${o.georeferenceAnnotations.length})`);
+      return o.georeferenceAnnotations;
+    }
+  }
+
+  log?.("WARN", "Allmaps payload: unknown shape, passing through raw JSON");
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Warped layer lifecycle
+// ---------------------------------------------------------------------------
+
+let activeLayerId: string | null = null;
+
+async function removeWarpedLayerIfPresent(map: maplibregl.Map, layerId: string, log?: RunnerLog) {
+  await waitForMapReady(map);
+
+  try {
+    if (map.getLayer(layerId)) {
+      map.removeLayer(layerId);
+      log?.("INFO", `Removed existing layer id=${layerId}`);
+    }
+  } catch (e: any) {
+    log?.("WARN", `Failed removing layer id=${layerId}: ${e?.message ?? String(e)}`);
+  }
 }
 
 /**
- * Public: run from a manifest URL (computes annotation URL, then runs).
+ * Construct WarpedMapLayer across possible @allmaps/maplibre signatures.
+ * IMPORTANT: do not override layer.id. Your install reports "warped-map-layer".
  */
-export async function runOneManifest(
-  manifestUrl: string,
-  localToken: number,
-  guardCancel: (t: number) => void,
-  ctx: MapContext,
-  log: (level: "INFO" | "WARN" | "ERROR", msg: string) => void,
-  opts: RunnerOpts
-): Promise<RunResult> {
-  const startedAtISO = isoNow();
-  const steps: StepTiming[] = [];
-  const t0 = nowMs();
+function createWarpedMapLayer(manifestJson: unknown, georeferenceAnnotations: unknown, log?: RunnerLog) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Ctor: any = WarpedMapLayer;
 
-  const step = makeStepRecorder(steps);
+  const attempts: Array<{ name: string; build: () => any }> = [
+    {
+      name: "new WarpedMapLayer({ manifest, georeferenceAnnotations })",
+      build: () =>
+        new Ctor({
+          manifest: manifestJson,
+          georeferenceAnnotations
+        })
+    },
+    {
+      name: "new WarpedMapLayer({ manifest, annotation })",
+      build: () =>
+        new Ctor({
+          manifest: manifestJson,
+          annotation: georeferenceAnnotations
+        })
+    },
+    {
+      name: "new WarpedMapLayer({ annotations })",
+      build: () =>
+        new Ctor({
+          annotations: georeferenceAnnotations
+        })
+    },
+    {
+      name: "new WarpedMapLayer(georeferenceAnnotations, { manifest })",
+      build: () => new Ctor(georeferenceAnnotations, { manifest: manifestJson })
+    },
+    {
+      name: "new WarpedMapLayer(georeferenceAnnotations)",
+      build: () => new Ctor(georeferenceAnnotations)
+    }
+  ];
 
-  try {
-    log("INFO", `RUN start: ${manifestUrl}`);
-    guardCancel(localToken);
+  const errors: string[] = [];
 
-    const gen = await step("allmaps_generate_id", async () => {
-      const { id, url } = await buildAllmapsAnnotationUrl(manifestUrl);
-      return { ok: true, detail: `${id} :: ${url}` };
-    });
+  for (const a of attempts) {
+    try {
+      const layer: any = a.build();
+      log?.("INFO", `WarpedMapLayer ctor OK: ${a.name}`);
 
-    const parts = (gen.detail ?? "").split("::").map((s) => s.trim());
-    const annotationUrl = parts[1];
+      const lid = typeof layer?.id === "string" ? layer.id : "(no id)";
+      log?.("INFO", `WarpedMapLayer reports layer.id=${lid}`);
 
-    if (!annotationUrl) throw new Error("Invalid annotation URL");
+      return layer;
+    } catch (e: any) {
+      errors.push(`${a.name}: ${e?.message ?? String(e)}`);
+    }
+  }
 
-    return await runOneFromAnnotationUrlImpl(
-      manifestUrl,
-      annotationUrl,
-      localToken,
-      guardCancel,
-      ctx,
-      log,
-      opts,
-      steps,
-      startedAtISO,
-      t0
-    );
-  } catch (e: any) {
-    const totalMs = nowMs() - t0;
-    const msg = e?.message ?? String(e);
+  throw new Error(
+    `Could not construct WarpedMapLayer (tried ${attempts.length} signatures).\n` + errors.join("\n")
+  );
+}
 
-    log("ERROR", `RUN fail (${totalMs.toFixed(1)}ms): ${manifestUrl} :: ${msg}`);
+async function addWarpedLayer(opts: {
+  map: maplibregl.Map;
+  manifestJson: unknown;
+  allmapsRaw: unknown;
+  log?: RunnerLog;
+}) {
+  const { map, manifestJson, allmapsRaw, log } = opts;
 
-    return {
-      manifestUrl,
-      startedAtISO,
-      totalMs,
-      steps,
-      ok: false,
-      error: msg
+  await waitForMapReady(map);
+
+  // Remove previously added layer if we know its id
+  if (activeLayerId) {
+    await removeWarpedLayerIfPresent(map, activeLayerId, log);
+    activeLayerId = null;
+  }
+
+  const georeferenceAnnotations = normalizeAllmapsPayload(allmapsRaw, log);
+
+  const layer: any = createWarpedMapLayer(manifestJson, georeferenceAnnotations, log);
+
+  const actualId = typeof layer?.id === "string" ? layer.id : null;
+  if (!actualId) {
+    throw new Error("WarpedMapLayer instance has no string `id`; cannot register with MapLibre.");
+  }
+
+  // If the layer uses a fixed id (yours does), ensure it isn't still present
+  await removeWarpedLayerIfPresent(map, actualId, log);
+
+  // Instrumentation: prove whether MapLibre calls onAdd/onRemove/render
+  log?.(
+    "INFO",
+    `Layer interface: id=${actualId} type=${String(layer?.type)} onAdd=${typeof layer?.onAdd} render=${typeof layer?.render} onRemove=${typeof layer?.onRemove}`
+  );
+
+  if (typeof layer?.onAdd === "function") {
+    const origOnAdd = layer.onAdd.bind(layer);
+    layer.onAdd = (m: any, gl: any) => {
+      log?.("INFO", `WarpedMapLayer.onAdd called (id=${actualId})`);
+      return origOnAdd(m, gl);
+    };
+  } else {
+    log?.("WARN", `WarpedMapLayer has no onAdd() (id=${actualId}).`);
+  }
+
+  if (typeof layer?.onRemove === "function") {
+    const origOnRemove = layer.onRemove.bind(layer);
+    layer.onRemove = (m: any, gl: any) => {
+      log?.("INFO", `WarpedMapLayer.onRemove called (id=${actualId})`);
+      return origOnRemove(m, gl);
     };
   }
+
+  // Add at top. Retry without `beforeId` if MapLibre complains for custom layers.
+  try {
+    map.addLayer(layer);
+  } catch (e: any) {
+    log?.("ERROR", `map.addLayer failed: ${e?.message ?? String(e)}`);
+    throw e;
+  }
+
+  map.triggerRepaint();
+
+  activeLayerId = actualId;
+  log?.("INFO", `Added WarpedMapLayer id=${actualId}`);
+
+  if (!map.getLayer(actualId)) {
+    log?.("ERROR", `MapLibre does not report the layer after addLayer (id=${actualId}).`);
+  } else {
+    log?.("INFO", `MapLibre reports layer present (id=${actualId}).`);
+  }
 }
 
-/**
- * Public: run from a known annotation URL (Allmaps URL or mirrored local URL).
- */
-export async function runOneFromAnnotationUrl(
-  manifestUrl: string,
-  annotationUrl: string,
-  localToken: number,
-  guardCancel: (t: number) => void,
-  ctx: MapContext,
-  log: (level: "INFO" | "WARN" | "ERROR", msg: string) => void,
-  opts: RunnerOpts
-): Promise<RunResult> {
-  const startedAtISO = isoNow();
+// ---------------------------------------------------------------------------
+// Main runner
+// ---------------------------------------------------------------------------
+
+export async function runOneCompiledManifest(opts: {
+  map: maplibregl.Map;
+  cfg: CompiledRunnerConfig;
+
+  id?: string;
+  compiledManifestUrl?: string;
+
+  log?: RunnerLog;
+}): Promise<RunResult> {
+  const { cfg, map, log } = opts;
+
   const steps: StepTiming[] = [];
+  const startedAtISO = new Date().toISOString();
   const t0 = nowMs();
 
-  return runOneFromAnnotationUrlImpl(
-    manifestUrl,
-    annotationUrl,
-    localToken,
-    guardCancel,
-    ctx,
-    log,
-    opts,
-    steps,
-    startedAtISO,
-    t0
-  );
-}
-
-/**
- * Internal shared implementation so both public functions behave identically.
- *
- * Clean runner policy:
- * - Always fetch + parse once (needed for resilience + "is there anything to apply?")
- * - Apply via blob URL by default to avoid second NETWORK fetch during apply
- * - Missing/invalid annotations => SKIP (ok=true, apply step says skipped)
- * - True apply failures => FAIL
- */
-async function runOneFromAnnotationUrlImpl(
-  manifestUrl: string,
-  annotationUrl: string,
-  localToken: number,
-  guardCancel: (t: number) => void,
-  ctx: MapContext,
-  log: (level: "INFO" | "WARN" | "ERROR", msg: string) => void,
-  opts: RunnerOpts,
-  steps: StepTiming[],
-  startedAtISO: string,
-  t0: number
-): Promise<RunResult> {
-  const step = makeStepRecorder(steps);
-
-  const applyViaBlobUrl = opts.applyViaBlobUrl !== false; // default true
-
-  let fetchedText: string | null = null;
-  let fetchedJson: any = null;
-
-  let skipApply = false;
-  let skipReason = "";
-
-  let blobUrl: string | null = null;
+  const pushStep = (step: string, tStart: number, ok: boolean, detail?: string) => {
+    steps.push({ step, ms: nowMs() - tStart, ok, detail });
+  };
 
   try {
-    await withTimeout(
-      (async () => {
-        guardCancel(localToken);
+    // 1) Load index
+    {
+      const ts = nowMs();
+      await loadCompiledIndex(cfg);
+      pushStep("loadIndex", ts, true);
+    }
 
-        await step("allmaps_clear_previous", async () => {
-          const before = ctx.warped.getMapIds?.()?.length ?? 0;
+    const index = cachedIndex!;
+    let entry: CompiledIndexEntry | null = null;
 
-          await clearWarpedIfRequested(ctx, !!opts.clearBeforeAdd);
+    // 2) Resolve entry
+    {
+      const ts = nowMs();
 
-          const after = ctx.warped.getMapIds?.()?.length ?? 0;
+      if (opts.id) entry = findEntryById(index, opts.id);
+      else if (opts.compiledManifestUrl) entry = findEntryByCompiledManifestUrl(index, opts.compiledManifestUrl);
+      else throw new Error("Missing id or compiledManifestUrl");
 
-          if (!opts.clearBeforeAdd) return { ok: true, detail: "skipped" };
-          return { ok: true, detail: `before=${before} after=${after}` };
-        });
+      if (!entry) throw new Error("Manifest not found in index.json");
 
-        guardCancel(localToken);
+      pushStep("resolveIndexEntry", ts, true, entry.compiledManifestPath);
+      log?.("INFO", `Resolved entry ${entry.label} id=${entry.manifestAllmapsId}`);
+    }
 
-        const fetchRes = await step("fetch_annotation", async () => {
-          const res = await fetch(annotationUrl, { cache: "default" });
-          const text = await res.text();
-          fetchedText = text;
+    // 3) Fetch compiled manifest
+    const compiledManifestUrl = joinUrl(cfg.datasetBaseUrl, entry.compiledManifestPath);
+    const manifestJson = await (async () => {
+      const ts = nowMs();
+      const mj = await fetchJson<unknown>(compiledManifestUrl, cfg.fetchTimeoutMs ?? 30000);
+      pushStep("fetchCompiledManifest", ts, true);
+      return mj;
+    })();
 
-          if (res.status === 404) {
-            skipApply = true;
-            skipReason = "allmaps_404";
-            return { ok: true, detail: `skip:status=404 bytes=${text.length}` };
-          }
+    // 4) Fetch mirrored Allmaps annotation JSON
+    if (!entry.mirroredAllmapsAnnotationPath || !entry.mirroredAllmapsAnnotationPath.trim()) {
+      throw new Error(`Missing mirroredAllmapsAnnotationPath for ${entry.compiledManifestPath}`);
+    }
 
-          return { ok: res.ok, detail: `status=${res.status} bytes=${text.length}` };
-        });
+    const mirroredAnnoUrl = joinUrl(cfg.datasetBaseUrl, entry.mirroredAllmapsAnnotationPath);
+    const allmapsRaw = await (async () => {
+      const ts = nowMs();
+      const aj = await fetchJson<unknown>(mirroredAnnoUrl, cfg.fetchTimeoutMs ?? 30000);
+      pushStep("fetchMirroredAllmapsAnnotation", ts, true);
+      return aj;
+    })();
 
-        if (!skipApply) mustOk(fetchRes, "Annotation fetch failed");
-
-        guardCancel(localToken);
-
-        // 2) Parse once
-        const parseRes = await step("parse_annotation_json", async () => {
-          if (fetchedText == null) return { ok: false, detail: "no_text" };
-
-          try {
-            fetchedJson = JSON.parse(fetchedText);
-            return { ok: true, detail: "ok" };
-          } catch {
-            const snippet = fetchedText.slice(0, 180).replace(/\s+/g, " ").trim();
-            return { ok: false, detail: `json_parse_failed :: ${snippet}` };
-          }
-        });
-        mustOk(parseRes, "Annotation JSON parse failed");
-
-        guardCancel(localToken);
-
-        // 3) Check usability and decide SKIP vs apply
-        const usableRes = await step("detect_usable_annotations", async () => {
-          const usable = checkUsableAnnotations(fetchedJson);
-
-          if (!usable.usable) {
-            skipApply = true;
-            skipReason = `no_usable_annotations:${usable.reason}`;
-            return { ok: true, detail: `skip:${usable.reason}` };
-          }
-
-          return { ok: true, detail: `usable:${usable.reason} count=${usable.count}` };
-        });
-        mustOk(usableRes, "Annotation usability check failed");
-
-        guardCancel(localToken);
-
-        // 4) Apply (prefer blob URL so apply doesn't hit network again)
-        await step("allmaps_apply_annotation", async () => {
-          if (skipApply) return { ok: true, detail: `skipped_${skipReason || "no_usable_annotations"}` };
-
-          const urlToApply = (() => {
-            if (!applyViaBlobUrl) return annotationUrl;
-            if (!fetchedText) return annotationUrl;
-            blobUrl = makeJsonBlobUrl(fetchedText);
-            return blobUrl;
-          })();
-
-          try {
-            const added = await withTimeout(
-              ctx.warped.addGeoreferenceAnnotationByUrl(urlToApply),
-              opts.applyTimeoutMs,
-              "apply"
-            );
-
-            const addedIds = Array.isArray(added) ? added.map(String) : [String(added)];
-            const total = ctx.warped.getMapIds?.()?.length ?? 0;
-
-            const src = urlToApply.startsWith("blob:") ? "blob" : "url";
-            return { ok: true, detail: `src=${src} added=${addedIds.join(",")} total=${total}` };
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-
-            // If the plugin rejects the shape, treat as SKIP (not FAIL)
-            if (isLikelyAnnotationShapeError(msg)) {
-              skipApply = true;
-              skipReason = "plugin_validation";
-              return { ok: true, detail: `skipped_plugin_validation :: ${msg}` };
-            }
-
-            // Otherwise: real failure
-            return { ok: false, detail: msg };
-          }
-        });
-
-        // Enforce fail if apply step truly failed.
-        const lastApply = steps.find((s) => s.step === "allmaps_apply_annotation");
-        if (lastApply && !lastApply.ok) {
-          throw new Error(`Apply failed (${lastApply.detail ?? "no detail"})`);
-        }
-
-        guardCancel(localToken);
-
-        await step("map_fit_bounds", async () => {
-          if (skipApply) return { ok: true, detail: "skipped" };
-
-          const bounds = ctx.warped.getBounds?.();
-          if (bounds) ctx.map.fitBounds(bounds as any, { padding: 40, duration: 0 });
-          return { ok: true, detail: bounds ? "ok" : "no_bounds" };
-        });
-      })(),
-      opts.runTimeoutMs,
-      "run"
-    );
+    // 5) Render on map
+    await (async () => {
+      const ts = nowMs();
+      await addWarpedLayer({ map, manifestJson, allmapsRaw, log });
+      pushStep("renderWarpedLayer", ts, true);
+    })();
 
     const totalMs = nowMs() - t0;
 
-    if (skipApply) log("WARN", `RUN skip (${totalMs.toFixed(1)}ms): ${manifestUrl} :: ${skipReason || "no usable annotations"}`);
-    else log("INFO", `RUN ok (${totalMs.toFixed(1)}ms): ${manifestUrl}`);
-
     return {
-      manifestUrl,
-      annotationUrl,
+      manifestUrl: compiledManifestUrl,
+      annotationUrl: mirroredAnnoUrl,
       startedAtISO,
       totalMs,
       steps,
       ok: true
-    };
-  } catch (e: any) {
+    } as RunResult;
+  } catch (err: any) {
     const totalMs = nowMs() - t0;
-    const msg = e?.message ?? String(e);
-
-    log("ERROR", `RUN fail (${totalMs.toFixed(1)}ms): ${manifestUrl} :: ${msg}`);
+    log?.("ERROR", `Runner failed: ${err?.message ?? String(err)}`);
 
     return {
-      manifestUrl,
-      annotationUrl,
+      manifestUrl: opts.compiledManifestUrl ?? (opts.id ? `id:${opts.id}` : "unknown"),
       startedAtISO,
       totalMs,
       steps,
       ok: false,
-      error: msg
-    };
-  } finally {
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
+      error: String(err?.message ?? err)
+    } as RunResult;
   }
 }

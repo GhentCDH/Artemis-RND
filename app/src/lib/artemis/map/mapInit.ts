@@ -1,56 +1,36 @@
+// $lib/artemis/map/mapInit.ts
 import maplibregl from "maplibre-gl";
-import { WarpedMapLayer } from "@allmaps/maplibre";
-import type { MapContext } from "./mapContext";
-import { attachAllmapsDebugEvents } from "./mapEvents";
 
-let ctx: MapContext | null = null;
+let map: maplibregl.Map | null = null;
 
-export async function ensureMapContext(
-  container: HTMLElement,
-  log: (level: "INFO" | "WARN" | "ERROR", msg: string) => void
-): Promise<MapContext> {
-  if (ctx) return ctx;
+export function ensureMapContext(container: HTMLElement): maplibregl.Map {
+  if (map) return map;
 
-  log("INFO", "Map: init");
-
-  const map = new maplibregl.Map({
+  map = new maplibregl.Map({
     container,
     style: "https://demotiles.maplibre.org/style.json",
     center: [4.35, 50.85],
-    zoom: 10,
-    maxPitch: 0
+    zoom: 12
   });
 
-  map.addControl(new maplibregl.NavigationControl(), "top-right");
-  attachAllmapsDebugEvents(map, log);
-
-  await new Promise<void>((resolve, reject) => {
-    const onLoad = () => {
-      map.off("error", onErr);
-      resolve();
-    };
-    const onErr = (e: any) => {
-      map.off("load", onLoad);
-      reject(e);
-    };
-    map.once("load", onLoad);
-    map.once("error", onErr);
+  // Resize once style is loaded (helps when container size settles after layout mount)
+  map.once("load", () => {
+    try {
+      map?.resize();
+    } catch {
+      // ignore
+    }
   });
 
-  const warped = new WarpedMapLayer({ layerId: "warped-map-layer" });
-  map.addLayer(warped as any);
-
-  log("INFO", "Allmaps: WarpedMapLayer added");
-  ctx = { map, warped };
-  return ctx;
+  return map;
 }
 
 export function destroyMapContext() {
-  try {
-    ctx?.map.remove();
-  } catch {
-    // ignore
-  } finally {
-    ctx = null;
-  }
+  map?.remove();
+  map = null;
+}
+
+export function getMapContext(): maplibregl.Map {
+  if (!map) throw new Error("Map context not initialized");
+  return map;
 }
