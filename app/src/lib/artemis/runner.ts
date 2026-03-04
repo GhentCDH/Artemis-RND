@@ -374,7 +374,16 @@ export async function runAllCompiledManifests(opts: {
     const t0 = nowMs();
 
     if (!entry.mirroredAllmapsAnnotationPath?.trim()) {
-      const result: RunResult = { manifestUrl: compiledManifestUrl, startedAtISO, totalMs: 0, steps: [], ok: false, error: "noAnnotation" };
+      const result: RunResult = {
+        manifestUrl: compiledManifestUrl,
+        startedAtISO,
+        totalMs: 0,
+        steps: [
+          { step: "fetch_annotation", ms: 0, ok: true, detail: "skip:noAnnotation" },
+          { step: "allmaps_apply_annotation", ms: 0, ok: true, detail: "skipped_noAnnotation" }
+        ],
+        ok: true
+      };
       done++;
       opts.onProgress?.(done, entries.length, result);
       tasks.push(Promise.resolve(result));
@@ -406,14 +415,15 @@ export async function runAllCompiledManifests(opts: {
         const allmapsRaw = await (prefetch.get(mirroredAnnoUrl) ?? fetchJson<unknown>(mirroredAnnoUrl, timeout));
         prefetch.delete(mirroredAnnoUrl);
         if (!allmapsRaw) throw new Error("Annotation fetch failed");
-        steps.push({ step: "fetchAnnotation", ms: nowMs() - ts, ok: true });
+        steps.push({ step: "fetch_annotation", ms: nowMs() - ts, ok: true, detail: `status=200` });
 
         const ts2 = nowMs();
         const annoResults = await layer.addGeoreferenceAnnotation(normalizeAllmapsPayload(allmapsRaw));
         const failed = annoResults.filter((r): r is Error => r instanceof Error);
         for (const err of failed) log?.("ERROR", `annotation error: ${err.message}`);
         if (!annoResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from annotation.");
-        steps.push({ step: "addGeoreferenceAnnotation", ms: nowMs() - ts2, ok: true });
+        const succeeded = annoResults.filter((r): r is string => typeof r === "string");
+        steps.push({ step: "allmaps_apply_annotation", ms: nowMs() - ts2, ok: true, detail: `added=${succeeded.join(",")}` });
 
         map.triggerRepaint();
 

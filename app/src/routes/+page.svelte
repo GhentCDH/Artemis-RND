@@ -6,7 +6,7 @@
   import { ensureMapContext, destroyMapContext } from "$lib/artemis/map/mapInit";
   import { attachAllmapsDebugEvents } from "$lib/artemis/debug/attachAllmapsDebugEvents";
   import { runAllCompiledManifests, resetCompiledIndexCache } from "$lib/artemis/runner";
-  import type { RunResult } from "$lib/artemis/types";
+  import { bulkSummary, startBulkRun, endBulkRun, resetBulkMetrics, ingestRunResult, fmtMs } from "$lib/artemis/metrics";
 
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
@@ -23,60 +23,34 @@
     logs = [{ atISO: new Date().toISOString(), level, msg }, ...logs].slice(0, MAX_LOGS);
   }
 
-  // --- Metrics ---
-  type Metrics = {
-    ok: number;
-    skipped: number;
-    failed: number;
-    totalMs: number;
-    avgFetchMs: number | null;
-    avgRenderMs: number | null;
-  };
-  let metrics: Metrics | null = null;
   let progress: { done: number; total: number } | null = null;
-
-  function computeMetrics(results: RunResult[], totalMs: number): Metrics {
-    const ok = results.filter((r) => r.ok);
-    const avg = (step: string) => {
-      const times = ok.map((r) => r.steps.find((s) => s.step === step)?.ms).filter((v): v is number => v !== undefined);
-      return times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
-    };
-    return {
-      ok: ok.length,
-      skipped: results.filter((r) => r.error === "noAnnotation").length,
-      failed: results.filter((r) => !r.ok && r.error !== "noAnnotation").length,
-      totalMs,
-      avgFetchMs: avg("fetchAnnotation"),
-      avgRenderMs: avg("addLayer")
-    };
-  }
 
   async function run() {
     if (isRunning || !datasetBaseUrl.trim()) return;
     isRunning = true;
-    metrics = null;
     progress = { done: 0, total: 0 };
     status = "Loading...";
     resetCompiledIndexCache();
+    resetBulkMetrics();
+    startBulkRun("mirror");
 
     try {
-      const t0 = performance.now();
-      const results = await runAllCompiledManifests({
+      await runAllCompiledManifests({
         map,
         cfg: { datasetBaseUrl: datasetBaseUrl.trim(), fetchTimeoutMs: 30000 },
         log,
-        onProgress: (done, total) => {
+        onProgress: (done, total, result) => {
           progress = { done, total };
           status = `${done} / ${total}`;
+          ingestRunResult(result);
         }
       });
-      const totalMs = performance.now() - t0;
-      metrics = computeMetrics(results, totalMs);
-      status = `Done in ${(totalMs / 1000).toFixed(1)}s`;
+      status = `Done in ${fmtMs($bulkSummary?.runDurationMs)}`;
     } catch (e: any) {
       status = `Failed: ${e?.message ?? String(e)}`;
       log("ERROR", status);
     } finally {
+      endBulkRun();
       isRunning = false;
       progress = null;
     }
@@ -119,36 +93,54 @@
 
     <div class="status" class:running={isRunning}>{status}</div>
 
-    {#if metrics}
+    {#if $bulkSummary && $bulkSummary.manifestCount > 0}
       <div class="metrics">
-        <div class="metrics-title">Metrics</div>
-        <div class="metric-row">
-          <span class="label">Total time</span>
-          <span class="value">{(metrics.totalMs / 1000).toFixed(2)}s</span>
-        </div>
-        <div class="metric-row">
-          <span class="label">Loaded</span>
-          <span class="value ok">{metrics.ok}</span>
-        </div>
-        <div class="metric-row">
-          <span class="label">Skipped</span>
-          <span class="value muted">{metrics.skipped}</span>
-        </div>
-        <div class="metric-row">
-          <span class="label">Failed</span>
-          <span class="value fail">{metrics.failed}</span>
-        </div>
-        {#if metrics.avgFetchMs !== null}
-          <div class="metric-row">
-            <span class="label">Avg fetch</span>
-            <span class="value">{metrics.avgFetchMs}ms</span>
-          </div>
-        {/if}
-        {#if metrics.avgRenderMs !== null}
-          <div class="metric-row">
-            <span class="label">Avg render</span>
-            <span class="value">{metrics.avgRenderMs}ms</span>
-          </div>
+        <div class="metrics-title">Bulk report</div>
+
+        <table class="mtable">
+          <tbody>
+            <tr><th>Duration</th><td>{fmtMs($bulkSummary.runDurationMs)}</td></tr>
+            <tr><th>Manifests</th><td>{$bulkSummary.manifestCount}</td></tr>
+            <tr><th>Applied</th><td class="ok">{$bulkSummary.appliedCount}</td></tr>
+            <tr><th>No annotation</th><td class="muted">{$bulkSummary.noAnnotationsCount}</td></tr>
+            <tr><th>Failed</th><td class="fail">{$bulkSummary.failCount}</td></tr>
+            <tr><th>Avg total (all)</th><td>{fmtMs($bulkSummary.avgManifestTotalMs)}</td></tr>
+            <tr><th>Avg total (applied)</th><td>{fmtMs($bulkSummary.avgAppliedTotalMs)}</td></tr>
+          </tbody>
+        </table>
+
+        <div class="step-title">Steps — all runs</div>
+        <table class="mtable">
+          <thead><tr><th>step</th><th>avg ms</th><th>n</th><th>ok</th></tr></thead>
+          <tbody>
+            {#each $bulkSummary.steps as s}
+              <tr>
+                <td class="mono">{s.step}</td>
+                <td class="mono">{fmtMs(s.avgMs)}</td>
+                <td>{s.count}</td>
+                <td>{s.okCount}/{s.count}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+
+        <div class="step-title">Steps — applied only ({$bulkSummary.appliedCount})</div>
+        {#if $bulkSummary.stepsApplied.length === 0}
+          <div class="muted-text">No applied runs yet.</div>
+        {:else}
+          <table class="mtable">
+            <thead><tr><th>step</th><th>avg ms</th><th>n</th><th>ok</th></tr></thead>
+            <tbody>
+              {#each $bulkSummary.stepsApplied as s}
+                <tr>
+                  <td class="mono">{s.step}</td>
+                  <td class="mono">{fmtMs(s.avgMs)}</td>
+                  <td>{s.count}</td>
+                  <td>{s.okCount}/{s.count}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         {/if}
       </div>
     {/if}
@@ -271,24 +263,42 @@
     font-size: 12px;
   }
 
-  .metric-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 2px 0;
+  .step-title {
+    font-size: 11px;
+    font-weight: 600;
+    margin: 8px 0 4px;
+    opacity: 0.7;
   }
 
-  .metric-row .label {
-    color: #666;
+  .muted-text {
+    font-size: 11px;
+    opacity: 0.6;
   }
 
-  .metric-row .value {
-    font-variant-numeric: tabular-nums;
-    font-weight: 500;
+  .mtable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    table-layout: fixed;
   }
 
-  .value.ok   { color: #2a7a2a; }
-  .value.fail { color: #c0392b; }
-  .value.muted { color: #999; }
+  .mtable th, .mtable td {
+    padding: 3px 4px;
+    border-top: 1px solid #eee;
+    text-align: left;
+    overflow: hidden;
+    word-break: break-all;
+  }
+
+  .mtable thead th {
+    opacity: 0.6;
+    font-weight: 600;
+  }
+
+  .mtable td.ok   { color: #2a7a2a; }
+  .mtable td.fail { color: #c0392b; }
+  .mtable td.muted { color: #999; }
+  .mono { font-family: ui-monospace, "Courier New", monospace; }
 
   /* Logs */
   .log-details {
