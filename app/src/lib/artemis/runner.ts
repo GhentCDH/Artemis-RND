@@ -1,27 +1,11 @@
 // $lib/artemis/runner.ts
 //
-// Compiled-only runner (NO runtime Allmaps discovery):
-// - Fetch compiled IIIF manifest from GitHub-hosted dataset
-// - Fetch matching mirrored Allmaps annotation JSON (GitHub-hosted)
-// - Normalize annotation payload (prefer .items if present)
-// - Construct WarpedMapLayer
-// - Add it to a provided MapLibre map
-//
-// Instrumented to debug "layer added but nothing renders":
-// - Logs layer interface (onAdd/render/onRemove)
-// - Wraps onAdd/onRemove to confirm MapLibre calls them
-// - Adds layer (retry without beforeId if needed)
-// - Keeps last added layer id for deterministic removal
-//
-// If after this you still see no map tiles AND no Allmaps events, the next step is:
-// - onAdd not being called => your WarpedMapLayer instance is not a valid MapLibre custom layer in this version.
-// - onAdd is called but you see maperror events => payload shape/content issue.
+// Compiled-only runner — loads annotations from a GitHub Pages-hosted dataset.
+// Fetches the index, resolves entries, and renders them via @allmaps/maplibre.
 
 import type maplibregl from "maplibre-gl";
 import { WarpedMapLayer } from "@allmaps/maplibre";
-import type { RunResult } from "$lib/artemis/types";
-
-type StepTiming = { step: string; ms: number; ok: boolean; detail?: string };
+import type { RunResult, StepTiming } from "$lib/artemis/types";
 
 export type CompiledIndexEntry = {
   label: string;
@@ -135,27 +119,43 @@ function waitForMapReady(map: maplibregl.Map): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// IIIF tile cache
+// Shared across all layers for the page lifetime. IIIF tile URLs are stable
+// (same URL = same bytes), so caching eliminates re-fetches on pan/zoom.
+// ---------------------------------------------------------------------------
+
+const iiifTileCache = new Map<string, Promise<ArrayBuffer>>();
+
+function cachedFetch(input: Request | string | URL, init?: RequestInit): Promise<Response> {
+  const url =
+    typeof input === "string" ? input
+    : input instanceof URL ? input.toString()
+    : (input as Request).url;
+
+  if (!iiifTileCache.has(url)) {
+    iiifTileCache.set(
+      url,
+      fetch(input, init)
+        .then((r) => {
+          if (!r.ok) { iiifTileCache.delete(url); throw new Error(`HTTP ${r.status}`); }
+          return r.arrayBuffer();
+        })
+        .catch((err) => { iiifTileCache.delete(url); throw err; })
+    );
+  }
+
+  return iiifTileCache.get(url)!.then((buf) => new Response(buf));
+}
+
+// ---------------------------------------------------------------------------
 // Allmaps payload normalization (adapter point)
 // ---------------------------------------------------------------------------
 
-function normalizeAllmapsPayload(raw: unknown, log?: RunnerLog): unknown {
-  if (Array.isArray(raw)) return raw;
-
-  if (raw && typeof raw === "object") {
-    const o = raw as any;
-
-    if (Array.isArray(o.items)) {
-      log?.("INFO", `Allmaps payload: using .items (${o.items.length})`);
-      return o.items;
-    }
-
-    if (Array.isArray(o.georeferenceAnnotations)) {
-      log?.("INFO", `Allmaps payload: using .georeferenceAnnotations (${o.georeferenceAnnotations.length})`);
-      return o.georeferenceAnnotations;
-    }
+function normalizeAllmapsPayload(raw: unknown): unknown {
+  if (Array.isArray(raw)) {
+    return { "@context": "http://www.w3.org/ns/anno.jsonld", type: "AnnotationPage", items: raw };
   }
-
-  log?.("WARN", "Allmaps payload: unknown shape, passing through raw JSON");
   return raw;
 }
 
@@ -163,154 +163,56 @@ function normalizeAllmapsPayload(raw: unknown, log?: RunnerLog): unknown {
 // Warped layer lifecycle
 // ---------------------------------------------------------------------------
 
-let activeLayerId: string | null = null;
+// Track all active layer IDs so we can clear them
+let activeLayerIds: string[] = [];
 
-async function removeWarpedLayerIfPresent(map: maplibregl.Map, layerId: string, log?: RunnerLog) {
-  await waitForMapReady(map);
-
+async function removeLayerIfPresent(map: maplibregl.Map, layerId: string) {
   try {
-    if (map.getLayer(layerId)) {
-      map.removeLayer(layerId);
-      log?.("INFO", `Removed existing layer id=${layerId}`);
-    }
-  } catch (e: any) {
-    log?.("WARN", `Failed removing layer id=${layerId}: ${e?.message ?? String(e)}`);
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
+  } catch {
+    // ignore
   }
 }
 
-/**
- * Construct WarpedMapLayer across possible @allmaps/maplibre signatures.
- * IMPORTANT: do not override layer.id. Your install reports "warped-map-layer".
- */
-function createWarpedMapLayer(manifestJson: unknown, georeferenceAnnotations: unknown, log?: RunnerLog) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Ctor: any = WarpedMapLayer;
-
-  const attempts: Array<{ name: string; build: () => any }> = [
-    {
-      name: "new WarpedMapLayer({ manifest, georeferenceAnnotations })",
-      build: () =>
-        new Ctor({
-          manifest: manifestJson,
-          georeferenceAnnotations
-        })
-    },
-    {
-      name: "new WarpedMapLayer({ manifest, annotation })",
-      build: () =>
-        new Ctor({
-          manifest: manifestJson,
-          annotation: georeferenceAnnotations
-        })
-    },
-    {
-      name: "new WarpedMapLayer({ annotations })",
-      build: () =>
-        new Ctor({
-          annotations: georeferenceAnnotations
-        })
-    },
-    {
-      name: "new WarpedMapLayer(georeferenceAnnotations, { manifest })",
-      build: () => new Ctor(georeferenceAnnotations, { manifest: manifestJson })
-    },
-    {
-      name: "new WarpedMapLayer(georeferenceAnnotations)",
-      build: () => new Ctor(georeferenceAnnotations)
-    }
-  ];
-
-  const errors: string[] = [];
-
-  for (const a of attempts) {
-    try {
-      const layer: any = a.build();
-      log?.("INFO", `WarpedMapLayer ctor OK: ${a.name}`);
-
-      const lid = typeof layer?.id === "string" ? layer.id : "(no id)";
-      log?.("INFO", `WarpedMapLayer reports layer.id=${lid}`);
-
-      return layer;
-    } catch (e: any) {
-      errors.push(`${a.name}: ${e?.message ?? String(e)}`);
-    }
-  }
-
-  throw new Error(
-    `Could not construct WarpedMapLayer (tried ${attempts.length} signatures).\n` + errors.join("\n")
-  );
+export async function clearAllWarpedLayers(map: maplibregl.Map) {
+  await waitForMapReady(map);
+  for (const id of activeLayerIds) await removeLayerIfPresent(map, id);
+  activeLayerIds = [];
 }
 
 async function addWarpedLayer(opts: {
   map: maplibregl.Map;
-  manifestJson: unknown;
+  layerId: string;
   allmapsRaw: unknown;
   log?: RunnerLog;
-}) {
-  const { map, manifestJson, allmapsRaw, log } = opts;
+}): Promise<void> {
+  const { map, layerId, allmapsRaw, log } = opts;
 
-  await waitForMapReady(map);
+  await removeLayerIfPresent(map, layerId);
 
-  // Remove previously added layer if we know its id
-  if (activeLayerId) {
-    await removeWarpedLayerIfPresent(map, activeLayerId, log);
-    activeLayerId = null;
-  }
+  const layer = new WarpedMapLayer({ layerId } as any);
 
-  const georeferenceAnnotations = normalizeAllmapsPayload(allmapsRaw, log);
-
-  const layer: any = createWarpedMapLayer(manifestJson, georeferenceAnnotations, log);
-
-  const actualId = typeof layer?.id === "string" ? layer.id : null;
-  if (!actualId) {
-    throw new Error("WarpedMapLayer instance has no string `id`; cannot register with MapLibre.");
-  }
-
-  // If the layer uses a fixed id (yours does), ensure it isn't still present
-  await removeWarpedLayerIfPresent(map, actualId, log);
-
-  // Instrumentation: prove whether MapLibre calls onAdd/onRemove/render
-  log?.(
-    "INFO",
-    `Layer interface: id=${actualId} type=${String(layer?.type)} onAdd=${typeof layer?.onAdd} render=${typeof layer?.render} onRemove=${typeof layer?.onRemove}`
-  );
-
-  if (typeof layer?.onAdd === "function") {
-    const origOnAdd = layer.onAdd.bind(layer);
-    layer.onAdd = (m: any, gl: any) => {
-      log?.("INFO", `WarpedMapLayer.onAdd called (id=${actualId})`);
-      return origOnAdd(m, gl);
-    };
-  } else {
-    log?.("WARN", `WarpedMapLayer has no onAdd() (id=${actualId}).`);
-  }
-
-  if (typeof layer?.onRemove === "function") {
-    const origOnRemove = layer.onRemove.bind(layer);
-    layer.onRemove = (m: any, gl: any) => {
-      log?.("INFO", `WarpedMapLayer.onRemove called (id=${actualId})`);
-      return origOnRemove(m, gl);
-    };
-  }
-
-  // Add at top. Retry without `beforeId` if MapLibre complains for custom layers.
   try {
-    map.addLayer(layer);
+    map.addLayer(layer as any);
   } catch (e: any) {
-    log?.("ERROR", `map.addLayer failed: ${e?.message ?? String(e)}`);
+    log?.("ERROR", `addLayer failed (${layerId}): ${e?.message ?? String(e)}`);
     throw e;
   }
 
+  activeLayerIds.push(layerId);
+
+  const results = await layer.addGeoreferenceAnnotation(
+    normalizeAllmapsPayload(allmapsRaw),
+    { fetchFn: cachedFetch } as any
+  );
+  const succeeded = results.filter((r): r is string => typeof r === "string");
+  const failed = results.filter((r): r is Error => r instanceof Error);
+
+  for (const err of failed) log?.("ERROR", `annotation error: ${err.message}`);
+
+  if (succeeded.length === 0) throw new Error("No maps loaded from annotation.");
+
   map.triggerRepaint();
-
-  activeLayerId = actualId;
-  log?.("INFO", `Added WarpedMapLayer id=${actualId}`);
-
-  if (!map.getLayer(actualId)) {
-    log?.("ERROR", `MapLibre does not report the layer after addLayer (id=${actualId}).`);
-  } else {
-    log?.("INFO", `MapLibre reports layer present (id=${actualId}).`);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -358,21 +260,20 @@ export async function runOneCompiledManifest(opts: {
       if (!entry) throw new Error("Manifest not found in index.json");
 
       pushStep("resolveIndexEntry", ts, true, entry.compiledManifestPath);
-      log?.("INFO", `Resolved entry ${entry.label} id=${entry.manifestAllmapsId}`);
     }
 
-    // 3) Fetch compiled manifest
     const compiledManifestUrl = joinUrl(cfg.datasetBaseUrl, entry.compiledManifestPath);
-    const manifestJson = await (async () => {
-      const ts = nowMs();
-      const mj = await fetchJson<unknown>(compiledManifestUrl, cfg.fetchTimeoutMs ?? 30000);
-      pushStep("fetchCompiledManifest", ts, true);
-      return mj;
-    })();
 
-    // 4) Fetch mirrored Allmaps annotation JSON
+    // 3) Fetch mirrored Allmaps annotation JSON
     if (!entry.mirroredAllmapsAnnotationPath || !entry.mirroredAllmapsAnnotationPath.trim()) {
-      throw new Error(`Missing mirroredAllmapsAnnotationPath for ${entry.compiledManifestPath}`);
+      return {
+        manifestUrl: compiledManifestUrl,
+        startedAtISO,
+        totalMs: nowMs() - t0,
+        steps,
+        ok: false,
+        error: "noAnnotation"
+      } as RunResult;
     }
 
     const mirroredAnnoUrl = joinUrl(cfg.datasetBaseUrl, entry.mirroredAllmapsAnnotationPath);
@@ -384,9 +285,15 @@ export async function runOneCompiledManifest(opts: {
     })();
 
     // 5) Render on map
+    const layerId = `warped-map-layer-${entry.manifestAllmapsId}`;
     await (async () => {
       const ts = nowMs();
-      await addWarpedLayer({ map, manifestJson, allmapsRaw, log });
+      await clearAllWarpedLayers(map);
+      await addWarpedLayer({ map, layerId, allmapsRaw, log });
+      // Fit map to this layer's bounds
+      const layer = map.getLayer(layerId) as any;
+      const bounds = layer?.getBounds?.();
+      if (bounds) map.fitBounds(bounds as any, { padding: 40, animate: false });
       pushStep("renderWarpedLayer", ts, true);
     })();
 
@@ -413,4 +320,125 @@ export async function runOneCompiledManifest(opts: {
       error: String(err?.message ?? err)
     } as RunResult;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk runner — load all annotated entries onto the map
+// ---------------------------------------------------------------------------
+
+export async function runAllCompiledManifests(opts: {
+  map: maplibregl.Map;
+  cfg: CompiledRunnerConfig;
+  log?: RunnerLog;
+  onProgress?: (done: number, total: number, latest: RunResult) => void;
+}): Promise<RunResult[]> {
+  const { map, cfg, log } = opts;
+
+  await waitForMapReady(map);
+  await clearAllWarpedLayers(map);
+
+  const index = await loadCompiledIndex(cfg);
+  const entries = index.index;
+  const results: RunResult[] = [];
+
+  log?.("INFO", `Bulk run: ${entries.length} entries`);
+
+  // Fire all annotation fetches immediately — GitHub Pages is a CDN, handles concurrency well.
+  // By the time we reach each entry in the loop, its fetch is likely already resolved.
+  const timeout = cfg.fetchTimeoutMs ?? 30000;
+  const prefetch = new Map<string, Promise<unknown>>();
+  for (const entry of entries) {
+    const path = entry.mirroredAllmapsAnnotationPath?.trim();
+    if (path) {
+      const url = joinUrl(cfg.datasetBaseUrl, path);
+      prefetch.set(url, fetchJson<unknown>(url, timeout).catch(() => null));
+    }
+  }
+
+  // Single loop: register each layer then immediately fire its annotation load as a background task.
+  // addLayer stays sequential (safe for WebGL); addGeoreferenceAnnotation runs concurrently across all entries.
+  // Maps appear as each annotation resolves — progressive feedback from the first rAF cycle.
+  const RAF_BATCH = 5;
+  let done = 0;
+  let fittedToFirst = false;
+  const tasks: Promise<RunResult>[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    if (i % RAF_BATCH === 0) {
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    }
+
+    const entry = entries[i];
+    const compiledManifestUrl = joinUrl(cfg.datasetBaseUrl, entry.compiledManifestPath);
+    const startedAtISO = new Date().toISOString();
+    const t0 = nowMs();
+
+    if (!entry.mirroredAllmapsAnnotationPath?.trim()) {
+      const result: RunResult = { manifestUrl: compiledManifestUrl, startedAtISO, totalMs: 0, steps: [], ok: false, error: "noAnnotation" };
+      done++;
+      opts.onProgress?.(done, entries.length, result);
+      tasks.push(Promise.resolve(result));
+      continue;
+    }
+
+    const layerId = `warped-map-layer-${entry.manifestAllmapsId}`;
+    const mirroredAnnoUrl = joinUrl(cfg.datasetBaseUrl, entry.mirroredAllmapsAnnotationPath);
+
+    await removeLayerIfPresent(map, layerId);
+    const layer = new WarpedMapLayer({ layerId } as any);
+    try {
+      map.addLayer(layer as any);
+      activeLayerIds.push(layerId);
+    } catch (e: any) {
+      log?.("ERROR", `addLayer failed (${layerId}): ${e?.message ?? String(e)}`);
+      const result: RunResult = { manifestUrl: compiledManifestUrl, startedAtISO, totalMs: nowMs() - t0, steps: [], ok: false, error: String(e?.message ?? e) };
+      done++;
+      opts.onProgress?.(done, entries.length, result);
+      tasks.push(Promise.resolve(result));
+      continue;
+    }
+
+    // Fire annotation load immediately — do not await
+    tasks.push((async (): Promise<RunResult> => {
+      const steps: StepTiming[] = [];
+      try {
+        const ts = nowMs();
+        const allmapsRaw = await (prefetch.get(mirroredAnnoUrl) ?? fetchJson<unknown>(mirroredAnnoUrl, timeout));
+        prefetch.delete(mirroredAnnoUrl);
+        if (!allmapsRaw) throw new Error("Annotation fetch failed");
+        steps.push({ step: "fetchAnnotation", ms: nowMs() - ts, ok: true });
+
+        const ts2 = nowMs();
+        const annoResults = await layer.addGeoreferenceAnnotation(normalizeAllmapsPayload(allmapsRaw));
+        const failed = annoResults.filter((r): r is Error => r instanceof Error);
+        for (const err of failed) log?.("ERROR", `annotation error: ${err.message}`);
+        if (!annoResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from annotation.");
+        steps.push({ step: "addGeoreferenceAnnotation", ms: nowMs() - ts2, ok: true });
+
+        map.triggerRepaint();
+
+        if (!fittedToFirst) {
+          const bounds = (map.getLayer(layerId) as any)?.getBounds?.();
+          if (bounds) { map.fitBounds(bounds as any, { padding: 60, duration: 800 }); fittedToFirst = true; }
+        }
+
+        const result: RunResult = { manifestUrl: compiledManifestUrl, annotationUrl: mirroredAnnoUrl, startedAtISO, totalMs: nowMs() - t0, steps, ok: true };
+        done++; opts.onProgress?.(done, entries.length, result);
+        return result;
+      } catch (err: any) {
+        const result: RunResult = { manifestUrl: compiledManifestUrl, startedAtISO, totalMs: nowMs() - t0, steps, ok: false, error: String(err?.message ?? err) };
+        done++; opts.onProgress?.(done, entries.length, result);
+        return result;
+      }
+    })());
+  }
+
+  results.push(...(await Promise.all(tasks)));
+
+  const ok = results.filter((r) => r.ok).length;
+  const skipped = results.filter((r) => r.error === "noAnnotation").length;
+  const failed = results.filter((r) => !r.ok && r.error !== "noAnnotation").length;
+  log?.("INFO", `Bulk run done: ${ok} ok, ${skipped} skipped, ${failed} failed`);
+
+  return results;
 }

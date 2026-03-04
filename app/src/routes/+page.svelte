@@ -5,118 +5,86 @@
 
   import { ensureMapContext, destroyMapContext } from "$lib/artemis/map/mapInit";
   import { attachAllmapsDebugEvents } from "$lib/artemis/debug/attachAllmapsDebugEvents";
-
-  import type { CompiledIndex, CompiledIndexEntry, CompiledRunnerConfig } from "$lib/artemis/runner";
-  import { loadCompiledIndex, runOneCompiledManifest } from "$lib/artemis/runner";
+  import { runAllCompiledManifests, resetCompiledIndexCache } from "$lib/artemis/runner";
+  import type { RunResult } from "$lib/artemis/types";
 
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
 
   let datasetBaseUrl = "https://y2gkcsdef.github.io/ArtemisTestData";
-
-  let status = "Idle";
   let isRunning = false;
-
-  let index: CompiledIndex | null = null;
-  let entries: CompiledIndexEntry[] = [];
-  let selectedId: string | null = null;
+  let status = "Idle";
 
   type LogLine = { atISO: string; level: "INFO" | "WARN" | "ERROR"; msg: string };
   let logs: LogLine[] = [];
-  const MAX_LOGS = 600;
+  const MAX_LOGS = 500;
 
   function log(level: "INFO" | "WARN" | "ERROR", msg: string) {
     logs = [{ atISO: new Date().toISOString(), level, msg }, ...logs].slice(0, MAX_LOGS);
   }
 
-  function idFromCompiledManifestPath(p: string) {
-    const m = p.match(/\/([^\/]+)\.json$/);
-    return m?.[1] ?? p;
+  // --- Metrics ---
+  type Metrics = {
+    ok: number;
+    skipped: number;
+    failed: number;
+    totalMs: number;
+    avgFetchMs: number | null;
+    avgRenderMs: number | null;
+  };
+  let metrics: Metrics | null = null;
+  let progress: { done: number; total: number } | null = null;
+
+  function computeMetrics(results: RunResult[], totalMs: number): Metrics {
+    const ok = results.filter((r) => r.ok);
+    const avg = (step: string) => {
+      const times = ok.map((r) => r.steps.find((s) => s.step === step)?.ms).filter((v): v is number => v !== undefined);
+      return times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
+    };
+    return {
+      ok: ok.length,
+      skipped: results.filter((r) => r.error === "noAnnotation").length,
+      failed: results.filter((r) => !r.ok && r.error !== "noAnnotation").length,
+      totalMs,
+      avgFetchMs: avg("fetchAnnotation"),
+      avgRenderMs: avg("addLayer")
+    };
   }
 
-  async function loadIndex() {
-    log("INFO", `loadIndex() base=${datasetBaseUrl}`);
-
-    if (!datasetBaseUrl.trim()) {
-      status = "Missing dataset base URL";
-      log("ERROR", status);
-      return;
-    }
-
+  async function run() {
+    if (isRunning || !datasetBaseUrl.trim()) return;
     isRunning = true;
-    status = "Loading index.json...";
-    try {
-      const cfg: CompiledRunnerConfig = {
-        datasetBaseUrl: datasetBaseUrl.trim(),
-        indexPath: "index.json",
-        fetchTimeoutMs: 30000
-      };
-
-      const raw = await loadCompiledIndex(cfg);
-      index = raw;
-
-      const list = (raw as any).index ?? (raw as any).manifests ?? [];
-      entries = Array.isArray(list) ? (list as CompiledIndexEntry[]) : [];
-
-      selectedId = entries[0] ? idFromCompiledManifestPath(entries[0].compiledManifestPath) : null;
-
-      status = `Loaded ${entries.length} entries`;
-      log("INFO", status);
-
-      if (entries.length === 0) {
-        log("WARN", "Index loaded but contained 0 entries. Check /index.json shape.");
-      }
-    } catch (e: any) {
-      status = `Index load failed: ${e?.message ?? String(e)}`;
-      log("ERROR", status);
-    } finally {
-      isRunning = false;
-    }
-  }
-
-  async function runSelected() {
-    if (!selectedId) return;
-    if (isRunning) return;
-
-    isRunning = true;
-    status = `Running ${selectedId}...`;
-    log("INFO", status);
+    metrics = null;
+    progress = { done: 0, total: 0 };
+    status = "Loading...";
+    resetCompiledIndexCache();
 
     try {
-      const cfg: CompiledRunnerConfig = {
-        datasetBaseUrl: datasetBaseUrl.trim(),
-        indexPath: "index.json",
-        fetchTimeoutMs: 30000
-      };
-
-      const r = await runOneCompiledManifest({
+      const t0 = performance.now();
+      const results = await runAllCompiledManifests({
         map,
-        cfg,
-        id: selectedId,
-        log
+        cfg: { datasetBaseUrl: datasetBaseUrl.trim(), fetchTimeoutMs: 30000 },
+        log,
+        onProgress: (done, total) => {
+          progress = { done, total };
+          status = `${done} / ${total}`;
+        }
       });
-
-      status = r.ok ? `OK (${Math.round(r.totalMs)}ms)` : `FAIL: ${r.error ?? "unknown error"}`;
-      log(r.ok ? "INFO" : "ERROR", status);
+      const totalMs = performance.now() - t0;
+      metrics = computeMetrics(results, totalMs);
+      status = `Done in ${(totalMs / 1000).toFixed(1)}s`;
     } catch (e: any) {
-      status = `Run failed: ${e?.message ?? String(e)}`;
+      status = `Failed: ${e?.message ?? String(e)}`;
       log("ERROR", status);
     } finally {
       isRunning = false;
+      progress = null;
     }
-  }
-
-  function clearLogs() {
-    logs = [];
-    log("INFO", "Logs cleared");
   }
 
   onMount(() => {
     map = ensureMapContext(mapDiv);
     attachAllmapsDebugEvents(map, log);
-
-    // Load index on startup so you immediately see a request in Network
-    void loadIndex();
   });
 
   onDestroy(() => {
@@ -126,72 +94,93 @@
 
 <div class="wrap">
   <aside class="sidebar">
-    <h2>Compiled Viewer</h2>
+    <h2>Artemis</h2>
 
     <div class="field">
-      <label for="datasetBaseUrl">Dataset base URL</label>
+      <label for="datasetBaseUrl">Dataset URL</label>
       <input
         id="datasetBaseUrl"
         bind:value={datasetBaseUrl}
-        placeholder="https://y2gkcsdef.github.io/ArtemisTestData"
         spellcheck="false"
+        disabled={isRunning}
       />
     </div>
 
-    <div class="buttons">
-      <button type="button" on:click={loadIndex} disabled={isRunning || !datasetBaseUrl.trim()}>
-        Load index
-      </button>
+    <button type="button" class="run-btn" on:click={run} disabled={isRunning || !datasetBaseUrl.trim()}>
+      {isRunning ? "Running…" : "Load & Run All"}
+    </button>
 
-      <button type="button" on:click={runSelected} disabled={isRunning || !selectedId}>
-        Run
-      </button>
+    {#if progress}
+      <div class="progress">
+        <div class="bar" style="width: {progress.total ? (progress.done / progress.total) * 100 : 0}%"></div>
+        <span>{progress.done} / {progress.total}</span>
+      </div>
+    {/if}
 
-      <button type="button" on:click={clearLogs} disabled={isRunning}>
-        Clear logs
-      </button>
-    </div>
+    <div class="status" class:running={isRunning}>{status}</div>
 
-    <div class="status">{status}</div>
+    {#if metrics}
+      <div class="metrics">
+        <div class="metrics-title">Metrics</div>
+        <div class="metric-row">
+          <span class="label">Total time</span>
+          <span class="value">{(metrics.totalMs / 1000).toFixed(2)}s</span>
+        </div>
+        <div class="metric-row">
+          <span class="label">Loaded</span>
+          <span class="value ok">{metrics.ok}</span>
+        </div>
+        <div class="metric-row">
+          <span class="label">Skipped</span>
+          <span class="value muted">{metrics.skipped}</span>
+        </div>
+        <div class="metric-row">
+          <span class="label">Failed</span>
+          <span class="value fail">{metrics.failed}</span>
+        </div>
+        {#if metrics.avgFetchMs !== null}
+          <div class="metric-row">
+            <span class="label">Avg fetch</span>
+            <span class="value">{metrics.avgFetchMs}ms</span>
+          </div>
+        {/if}
+        {#if metrics.avgRenderMs !== null}
+          <div class="metric-row">
+            <span class="label">Avg render</span>
+            <span class="value">{metrics.avgRenderMs}ms</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
-    <div class="field">
-      <label for="entrySelect">Entry</label>
-      <select id="entrySelect" bind:value={selectedId} disabled={!entries.length || isRunning} size="10">
-        {#each entries as e}
-          {@const id = idFromCompiledManifestPath(e.compiledManifestPath)}
-          <option value={id}>
-            {e.label} ({e.canvasCount})
-          </option>
-        {/each}
-      </select>
-    </div>
-
-    <div class="field">
-      <label for="logPanel">Logs</label>
-      <div id="logPanel" class="logs" aria-label="logs">
+    <details class="log-details">
+      <summary>Logs {#if logs.length}({logs.length}){/if}</summary>
+      <div class="logs">
         {#each logs as l}
-          <div class={"log " + l.level}>
-            <div class="ts">{l.atISO}</div>
-            <div class="msg">{l.level}: {l.msg}</div>
+          <div class="log-line {l.level}">
+            <span class="ts">{l.atISO.slice(11, 23)}</span>
+            <span class="msg">{l.msg}</span>
           </div>
         {/each}
       </div>
-    </div>
+    </details>
   </aside>
 
-  <!-- IMPORTANT: do NOT self-close <main> -->
   <main class="map" bind:this={mapDiv}></main>
 </div>
 
 <style>
   .wrap {
     display: grid;
-    grid-template-columns: 390px 1fr;
+    grid-template-columns: 320px 1fr;
     height: 100vh;
   }
 
   .sidebar {
-    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
     border-right: 1px solid #ddd;
     overflow: auto;
   }
@@ -202,73 +191,148 @@
   }
 
   h2 {
-    margin: 0 0 12px 0;
-    font-size: 18px;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
   }
 
   .field {
-    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   label {
-    display: block;
-    font-size: 12px;
-    margin-bottom: 4px;
-    opacity: 0.85;
-  }
-
-  input,
-  select {
-    width: 100%;
-    box-sizing: border-box;
+    font-size: 11px;
+    opacity: 0.7;
   }
 
   input {
     padding: 6px 8px;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 12px;
   }
 
-  select {
-    padding: 6px 8px;
+  .run-btn {
+    padding: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
   }
 
-  .buttons {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
+  .run-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
-  button {
-    padding: 6px 10px;
+  .progress {
+    position: relative;
+    height: 16px;
+    background: #eee;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .bar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: #4a90d9;
+    transition: width 0.15s;
+  }
+
+  .progress span {
+    position: relative;
+    font-size: 10px;
+    padding: 0 5px;
+    line-height: 16px;
   }
 
   .status {
-    font-size: 13px;
-    padding: 6px 0;
-    margin-bottom: 12px;
+    font-size: 12px;
+    color: #555;
+  }
+
+  .status.running {
+    color: #4a90d9;
+  }
+
+  /* Metrics */
+  .metrics {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .metrics-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+  }
+
+  .metric-row .label {
+    color: #666;
+  }
+
+  .metric-row .value {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+
+  .value.ok   { color: #2a7a2a; }
+  .value.fail { color: #c0392b; }
+  .value.muted { color: #999; }
+
+  /* Logs */
+  .log-details {
+    border: 1px solid #eee;
+    border-radius: 3px;
+  }
+
+  .log-details summary {
+    padding: 5px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+    color: #666;
+  }
+
+  .log-details[open] summary {
+    border-bottom: 1px solid #eee;
   }
 
   .logs {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-      "Courier New", monospace;
-    font-size: 12px;
-    max-height: 320px;
+    max-height: 260px;
     overflow: auto;
-    border: 1px solid #eee;
+    font-family: ui-monospace, "Courier New", monospace;
+    font-size: 11px;
     padding: 6px;
-    background: white;
   }
 
-  .log {
-    padding: 4px 0;
-    border-bottom: 1px solid #f3f3f3;
+  .log-line {
+    display: flex;
+    gap: 6px;
+    padding: 1px 0;
+    border-bottom: 1px solid #f5f5f5;
   }
+
+  .log-line.ERROR .msg { color: #c0392b; }
+  .log-line.WARN  .msg { color: #b7800a; }
 
   .ts {
-    opacity: 0.7;
+    opacity: 0.5;
+    flex-shrink: 0;
   }
 
   .msg {
     white-space: pre-wrap;
+    word-break: break-all;
   }
 </style>

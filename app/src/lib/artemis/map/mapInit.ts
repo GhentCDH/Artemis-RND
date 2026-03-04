@@ -9,8 +9,8 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
   map = new maplibregl.Map({
     container,
     style: "https://demotiles.maplibre.org/style.json",
-    center: [4.35, 50.85],
-    zoom: 12
+    center: [4.23, 51.10], // Bornem, Scheldt valley
+    zoom: 10
   });
 
   // Resize once style is loaded (helps when container size settles after layout mount)
@@ -28,9 +28,4 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
 export function destroyMapContext() {
   map?.remove();
   map = null;
-}
-
-export function getMapContext(): maplibregl.Map {
-  if (!map) throw new Error("Map context not initialized");
-  return map;
 }
