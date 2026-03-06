@@ -21,6 +21,9 @@ const HISTCART_LAYERS: Record<
   }
 };
 
+const PRIMITIVE_SOURCE_ID = "primitive-parcels-source";
+const PRIMITIVE_LAYER_ID = "primitive-parcels-layer";
+
 function wmtsTiles(layerName: string): string[] {
   const url =
     "https://geo.api.vlaanderen.be/HISTCART/wmts" +
@@ -113,4 +116,48 @@ export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKe
   const cfg = HISTCART_LAYERS[key];
   if (!cfg || !map.getLayer(cfg.layerId)) return;
   map.moveLayer(cfg.layerId);
+}
+
+export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, geojsonUrl: string): void {
+  const hasSource = !!map.getSource(PRIMITIVE_SOURCE_ID);
+  const hasLayer = !!map.getLayer(PRIMITIVE_LAYER_ID);
+
+  if (visible) {
+    if (!hasSource) {
+      map.addSource(PRIMITIVE_SOURCE_ID, {
+        type: "geojson",
+        data: geojsonUrl
+      });
+    }
+    if (!hasLayer) {
+      map.addLayer({
+        id: PRIMITIVE_LAYER_ID,
+        type: "line",
+        source: PRIMITIVE_SOURCE_ID,
+        paint: {
+          "line-color": "#bf360c",
+          "line-width": 1.1,
+          "line-opacity": 1
+        }
+      });
+    }
+    return;
+  }
+
+  if (hasLayer) map.removeLayer(PRIMITIVE_LAYER_ID);
+  if (hasSource) map.removeSource(PRIMITIVE_SOURCE_ID);
+}
+
+export function setPrimitiveLayerOpacity(map: maplibregl.Map, opacity: number): void {
+  if (!map.getLayer(PRIMITIVE_LAYER_ID)) return;
+  const clamped = Math.max(0, Math.min(1, opacity));
+  map.setPaintProperty(PRIMITIVE_LAYER_ID, "line-opacity", clamped);
+}
+
+export function isPrimitiveLayerVisible(map: maplibregl.Map): boolean {
+  return !!map.getLayer(PRIMITIVE_LAYER_ID);
+}
+
+export function getPrimitiveLayerIds(): string[] {
+  return [PRIMITIVE_LAYER_ID];
 }

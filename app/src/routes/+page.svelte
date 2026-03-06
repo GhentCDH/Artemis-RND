@@ -8,7 +8,11 @@
     destroyMapContext,
     setHistCartLayerVisible,
     isHistCartLayerVisible,
-    setHistCartLayerOpacity
+    setHistCartLayerOpacity,
+    setPrimitiveLayerVisible,
+    isPrimitiveLayerVisible,
+    setPrimitiveLayerOpacity,
+    getPrimitiveLayerIds
   } from "$lib/artemis/map/mapInit";
   import { attachAllmapsDebugEvents } from "$lib/artemis/debug/attachAllmapsDebugEvents";
   import {
@@ -63,9 +67,11 @@
     ferraris: 1,
     vandermaelen: 1
   };
+  let primitiveEnabled = false;
+  let primitiveOpacity = 1;
   type StackItem = {
     id: string;
-    type: "iiif" | "wmts";
+    type: "iiif" | "wmts" | "geojson";
     label: string;
     layerId: string;
   };
@@ -73,6 +79,7 @@
     ferraris: "wmts:ferraris",
     vandermaelen: "wmts:vandermaelen"
   };
+  const PRIMITIVE_STACK_LAYER_ID = "geojson:primitive";
   let stackItems: StackItem[] = [];
   let draggedStackItemId: string | null = null;
 
@@ -90,6 +97,7 @@
     // UI order is top -> bottom.
     const defaults: StackItem[] = [
       ...iiifItems.toReversed(),
+      { id: PRIMITIVE_STACK_LAYER_ID, type: "geojson", label: "Primitive Parcels", layerId: "primitive" },
       { id: WMTS_STACK_LAYER_ID.vandermaelen, type: "wmts", label: "Vandermaelen 1846", layerId: "vandermaelen" },
       { id: WMTS_STACK_LAYER_ID.ferraris, type: "wmts", label: "Ferraris 1771", layerId: "ferraris" }
     ];
@@ -105,7 +113,13 @@
 
   function isStackItemEnabled(item: StackItem): boolean {
     if (item.type === "wmts") return wmtsEnabled[item.layerId as HistCartLayerKey];
+    if (item.type === "geojson") return primitiveEnabled;
     return !!layerEnabled[item.layerId];
+  }
+
+  function primitiveGeojsonUrl(): string {
+    const base = normalizeDatasetBaseUrl(datasetBaseUrl.trim());
+    return `${base}/Parcels/Primitive/index.geojson`;
   }
 
   function applyLayerStackOrder() {
@@ -117,6 +131,8 @@
         if (!isStackItemEnabled(item)) continue;
         if (item.type === "wmts") {
           orderedLayerIds.push(`histcart-${item.layerId}-layer`);
+        } else if (item.type === "geojson") {
+          orderedLayerIds.push(...getPrimitiveLayerIds());
         } else {
           orderedLayerIds.push(...getLayerGroupLayerIds(item.layerId));
         }
@@ -169,6 +185,7 @@
 
   function getStackItemOpacity(item: StackItem): number {
     if (item.type === "wmts") return wmtsOpacity[item.layerId as HistCartLayerKey] ?? 1;
+    if (item.type === "geojson") return primitiveOpacity;
     return layerOpacity[item.layerId] ?? 1;
   }
 
@@ -179,6 +196,7 @@
 
   function getStackItemCounts(item: StackItem): string {
     if (item.type === "wmts") return `${Math.round(getStackItemOpacity(item) * 100)}%`;
+    if (item.type === "geojson") return "geojson";
     const layerInfo = getLayerInfoFromStackItem(item);
     if (!layerInfo) return "";
     return `${layerInfo.georefCount}/${layerInfo.manifestCount}`;
@@ -189,6 +207,10 @@
       onWmtsSetEnabled(item.layerId as HistCartLayerKey, nextEnabled);
       return;
     }
+    if (item.type === "geojson") {
+      onPrimitiveSetEnabled(nextEnabled);
+      return;
+    }
     const layerInfo = getLayerInfoFromStackItem(item);
     if (!layerInfo) return;
     await setIiifLayerEnabled(layerInfo, nextEnabled);
@@ -197,6 +219,10 @@
   function onStackItemOpacityInput(item: StackItem, rawValue: string) {
     if (item.type === "wmts") {
       onWmtsOpacityInput(item.layerId as HistCartLayerKey, rawValue);
+      return;
+    }
+    if (item.type === "geojson") {
+      onPrimitiveOpacityInput(rawValue);
       return;
     }
     onLayerOpacityInput(item.layerId, rawValue);
@@ -387,6 +413,8 @@
     layers = [];
     layerEnabled = {};
     layerRenderStats = {};
+    setPrimitiveLayerVisible(map, false, primitiveGeojsonUrl());
+    primitiveEnabled = false;
     resetBulkMetrics();
     await fetchIndex();
   }
@@ -435,6 +463,26 @@
     const value = clampOpacity(Number(rawValue));
     wmtsOpacity = { ...wmtsOpacity, [layerKey]: value };
     if (wmtsEnabled[layerKey]) setHistCartLayerOpacity(map, layerKey, value);
+  }
+
+  function onPrimitiveSetEnabled(nextEnabled: boolean) {
+    if (primitiveEnabled === nextEnabled) return;
+    primitiveEnabled = nextEnabled;
+    const apply = () => {
+      setPrimitiveLayerVisible(map, nextEnabled, primitiveGeojsonUrl());
+      if (nextEnabled) setPrimitiveLayerOpacity(map, primitiveOpacity);
+      const status = isPrimitiveLayerVisible(map) ? "enabled" : "disabled";
+      log("INFO", `Primitive parcels "${status}"`);
+      applyLayerStackOrder();
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once("load", apply);
+  }
+
+  function onPrimitiveOpacityInput(rawValue: string) {
+    const value = clampOpacity(Number(rawValue));
+    primitiveOpacity = value;
+    if (primitiveEnabled) setPrimitiveLayerOpacity(map, value);
   }
 
   onMount(async () => {
