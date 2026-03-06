@@ -7,11 +7,16 @@ export type StepTiming = {
 
 export type RunResult = {
   manifestUrl: string;
+  manifestLabel?: string;
+  sourceManifestUrl?: string;
+  allmapsManifestUrl?: string;
   annotationUrl?: string;
   startedAtISO: string;
   totalMs: number;
   steps: StepTiming[];
   ok: boolean;
+  annotationErrorCount?: number;
+  annotationErrors?: string[];
   error?: string;
 };
 
