@@ -22,7 +22,11 @@ const HISTCART_LAYERS: Record<
 };
 
 const PRIMITIVE_SOURCE_ID = "primitive-parcels-source";
+const PRIMITIVE_FILL_LAYER_ID = "primitive-parcels-fill-layer";
 const PRIMITIVE_LAYER_ID = "primitive-parcels-layer";
+const PRIMITIVE_HOVER_SOURCE_ID = "primitive-parcels-hover-source";
+const PRIMITIVE_HOVER_LAYER_ID = "primitive-parcels-hover-layer";
+const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
 
 function wmtsTiles(layerName: string): string[] {
   const url =
@@ -120,20 +124,44 @@ export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKe
 
 export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, geojsonUrl: string): void {
   const hasSource = !!map.getSource(PRIMITIVE_SOURCE_ID);
+  const hasHoverSource = !!map.getSource(PRIMITIVE_HOVER_SOURCE_ID);
+  const hasFillLayer = !!map.getLayer(PRIMITIVE_FILL_LAYER_ID);
   const hasLayer = !!map.getLayer(PRIMITIVE_LAYER_ID);
+  const hasHoverLayer = !!map.getLayer(PRIMITIVE_HOVER_LAYER_ID);
+  console.debug(
+    `[primitive] set visible=${visible} hasSource=${hasSource} hasHoverSource=${hasHoverSource} hasFillLayer=${hasFillLayer} hasLayer=${hasLayer} hasHoverLayer=${hasHoverLayer} url=${geojsonUrl}`
+  );
 
   if (visible) {
     if (!hasSource) {
+      attachPrimitiveDebugListeners(map, geojsonUrl);
+      console.debug(`[primitive] addSource id=${PRIMITIVE_SOURCE_ID} data=${geojsonUrl}`);
       map.addSource(PRIMITIVE_SOURCE_ID, {
         type: "geojson",
         data: geojsonUrl
       });
     }
+    if (!hasFillLayer) {
+      console.debug(`[primitive] addLayer id=${PRIMITIVE_FILL_LAYER_ID} source=${PRIMITIVE_SOURCE_ID}`);
+      map.addLayer({
+        id: PRIMITIVE_FILL_LAYER_ID,
+        type: "fill",
+        source: PRIMITIVE_SOURCE_ID,
+        filter: ["==", ["get", "type"], "parcel"],
+        paint: {
+          // Invisible pick layer: captures hover inside polygons.
+          "fill-color": "#000000",
+          "fill-opacity": 0.001
+        }
+      });
+    }
     if (!hasLayer) {
+      console.debug(`[primitive] addLayer id=${PRIMITIVE_LAYER_ID} source=${PRIMITIVE_SOURCE_ID}`);
       map.addLayer({
         id: PRIMITIVE_LAYER_ID,
         type: "line",
         source: PRIMITIVE_SOURCE_ID,
+        filter: ["==", ["get", "type"], "parcel"],
         paint: {
           "line-color": "#bf360c",
           "line-width": 1.1,
@@ -141,11 +169,53 @@ export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, 
         }
       });
     }
+    if (!hasHoverSource) {
+      console.debug(`[primitive] addSource id=${PRIMITIVE_HOVER_SOURCE_ID} data=empty`);
+      map.addSource(PRIMITIVE_HOVER_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+    }
+    if (!hasHoverLayer) {
+      console.debug(`[primitive] addLayer id=${PRIMITIVE_HOVER_LAYER_ID} source=${PRIMITIVE_HOVER_SOURCE_ID}`);
+      map.addLayer({
+        id: PRIMITIVE_HOVER_LAYER_ID,
+        type: "fill",
+        source: PRIMITIVE_HOVER_SOURCE_ID,
+        paint: {
+          "fill-color": "#ff6f00",
+          "fill-opacity": 0.22
+        }
+      });
+    }
     return;
   }
 
-  if (hasLayer) map.removeLayer(PRIMITIVE_LAYER_ID);
-  if (hasSource) map.removeSource(PRIMITIVE_SOURCE_ID);
+  if (hasHoverLayer) {
+    console.debug(`[primitive] removeLayer id=${PRIMITIVE_HOVER_LAYER_ID}`);
+    map.removeLayer(PRIMITIVE_HOVER_LAYER_ID);
+  }
+  if (hasHoverSource) {
+    console.debug(`[primitive] removeSource id=${PRIMITIVE_HOVER_SOURCE_ID}`);
+    map.removeSource(PRIMITIVE_HOVER_SOURCE_ID);
+  }
+  if (hasFillLayer) {
+    console.debug(`[primitive] removeLayer id=${PRIMITIVE_FILL_LAYER_ID}`);
+    map.removeLayer(PRIMITIVE_FILL_LAYER_ID);
+  }
+  if (hasLayer) {
+    console.debug(`[primitive] removeLayer id=${PRIMITIVE_LAYER_ID}`);
+    map.removeLayer(PRIMITIVE_LAYER_ID);
+  }
+  if (hasSource) {
+    const detach = primitiveDebugDetachByMap.get(map);
+    if (detach) {
+      detach();
+      primitiveDebugDetachByMap.delete(map);
+    }
+    console.debug(`[primitive] removeSource id=${PRIMITIVE_SOURCE_ID}`);
+    map.removeSource(PRIMITIVE_SOURCE_ID);
+  }
 }
 
 export function setPrimitiveLayerOpacity(map: maplibregl.Map, opacity: number): void {
@@ -155,9 +225,73 @@ export function setPrimitiveLayerOpacity(map: maplibregl.Map, opacity: number): 
 }
 
 export function isPrimitiveLayerVisible(map: maplibregl.Map): boolean {
-  return !!map.getLayer(PRIMITIVE_LAYER_ID);
+  return !!map.getLayer(PRIMITIVE_LAYER_ID) || !!map.getLayer(PRIMITIVE_FILL_LAYER_ID);
 }
 
 export function getPrimitiveLayerIds(): string[] {
-  return [PRIMITIVE_LAYER_ID];
+  return [PRIMITIVE_FILL_LAYER_ID, PRIMITIVE_LAYER_ID];
+}
+
+export function setPrimitiveHoverFeature(map: maplibregl.Map, feature: any | null): void {
+  const source = map.getSource(PRIMITIVE_HOVER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  if (!feature) {
+    source.setData({ type: "FeatureCollection", features: [] });
+    return;
+  }
+  source.setData({
+    type: "FeatureCollection",
+    features: [feature]
+  });
+}
+
+function attachPrimitiveDebugListeners(map: maplibregl.Map, geojsonUrl: string): void {
+  if (primitiveDebugDetachByMap.has(map)) return;
+
+  let started = false;
+  let loaded = false;
+
+  const onSourceDataLoading = (e: any) => {
+    if (e?.sourceId !== PRIMITIVE_SOURCE_ID) return;
+    if (started) return;
+    started = true;
+    console.debug(`[primitive] source loading start source=${PRIMITIVE_SOURCE_ID} url=${geojsonUrl}`);
+  };
+
+  const onSourceData = (e: any) => {
+    if (e?.sourceId !== PRIMITIVE_SOURCE_ID) return;
+    if (loaded) return;
+    if (e?.isSourceLoaded !== true) return;
+    loaded = true;
+    const sourceFeatures = map.querySourceFeatures(PRIMITIVE_SOURCE_ID);
+    const featureCount = sourceFeatures.length;
+    let parcelCount = 0;
+    let textCount = 0;
+    for (const feature of sourceFeatures) {
+      const type = feature?.properties?.type;
+      if (type === "parcel") parcelCount++;
+      else if (type === "text") textCount++;
+    }
+    console.debug(
+      `[primitive] source loaded source=${PRIMITIVE_SOURCE_ID} featureCount=${featureCount} parcels=${parcelCount} text=${textCount} url=${geojsonUrl}`
+    );
+  };
+
+  const onError = (e: any) => {
+    const sourceId = e?.sourceId;
+    const sourceMatches = sourceId === PRIMITIVE_SOURCE_ID;
+    const message = e?.error?.message ?? e?.error ?? e?.message ?? "unknown error";
+    if (!sourceMatches && !String(message).includes(PRIMITIVE_SOURCE_ID)) return;
+    console.error(`[primitive] source/layer error source=${sourceId ?? "unknown"} msg=${String(message)}`);
+  };
+
+  map.on("sourcedataloading", onSourceDataLoading);
+  map.on("sourcedata", onSourceData);
+  map.on("error", onError);
+
+  primitiveDebugDetachByMap.set(map, () => {
+    map.off("sourcedataloading", onSourceDataLoading);
+    map.off("sourcedata", onSourceData);
+    map.off("error", onError);
+  });
 }

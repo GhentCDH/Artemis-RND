@@ -15,6 +15,8 @@ export type CompiledIndexEntry = {
   label: string;
   sourceManifestUrl: string;
   sourceCollectionUrl: string;
+  centerLon?: number;
+  centerLat?: number;
   compiledManifestPath: string;
   mirroredAllmapsAnnotationPath?: string;
   canvasCount: number;
