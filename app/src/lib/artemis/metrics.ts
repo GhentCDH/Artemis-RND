@@ -9,6 +9,14 @@ export type StepAgg = {
   avgMs: number;
 };
 
+export type ProblemManifest = {
+  manifestLabel: string;
+  sourceManifestUrl: string;
+  allmapsManifestUrl?: string;
+  annotationErrorCount: number;
+  annotationErrors: string[];
+};
+
 export type BulkSummary = {
   label: string | undefined;
   startISO: string | undefined;
@@ -19,6 +27,8 @@ export type BulkSummary = {
   failCount: number;
   appliedCount: number;
   noAnnotationsCount: number;
+  problematicCount: number;
+  problematicManifests: ProblemManifest[];
   avgManifestTotalMs: number | undefined;
   avgAppliedTotalMs: number | undefined;
   steps: StepAgg[];
@@ -93,12 +103,29 @@ export const bulkSummary: Readable<BulkSummary> = derived(bulkMetrics, ($m) => {
   let failedCount = 0;
   let appliedCount = 0;
   let noAnnotationsCount = 0;
+  const problemsByManifest = new Map<string, ProblemManifest>();
 
   for (const r of manifests) {
     const c = classifyRun(r);
     if (c.kind === "failed") failedCount += 1;
     else if (c.kind === "applied") appliedCount += 1;
     else if (c.kind === "noAnnotations") noAnnotationsCount += 1;
+
+    if ((r.annotationErrorCount ?? 0) > 0) {
+      const key = r.sourceManifestUrl ?? r.manifestUrl;
+      const existing = problemsByManifest.get(key);
+      const mergedErrors = new Set<string>([
+        ...(existing?.annotationErrors ?? []),
+        ...(r.annotationErrors ?? [])
+      ]);
+      problemsByManifest.set(key, {
+        manifestLabel: r.manifestLabel ?? key,
+        sourceManifestUrl: r.sourceManifestUrl ?? key,
+        allmapsManifestUrl: r.allmapsManifestUrl,
+        annotationErrorCount: (existing?.annotationErrorCount ?? 0) + (r.annotationErrorCount ?? 0),
+        annotationErrors: [...mergedErrors]
+      });
+    }
   }
 
   const runDurationMs =
@@ -137,6 +164,8 @@ export const bulkSummary: Readable<BulkSummary> = derived(bulkMetrics, ($m) => {
   const totalMsSum = manifests.reduce((a, r) => a + (r.totalMs ?? 0), 0);
   const applied = manifests.filter((r) => classifyRun(r).kind === "applied");
   const appliedMsSum = applied.reduce((a, r) => a + (r.totalMs ?? 0), 0);
+  const problematicManifests = [...problemsByManifest.values()]
+    .sort((a, b) => b.annotationErrorCount - a.annotationErrorCount);
 
   return {
     label: $m.label,
@@ -148,6 +177,8 @@ export const bulkSummary: Readable<BulkSummary> = derived(bulkMetrics, ($m) => {
     failCount: failedCount,
     appliedCount,
     noAnnotationsCount,
+    problematicCount: problematicManifests.length,
+    problematicManifests,
     avgManifestTotalMs: manifests.length > 0 ? totalMsSum / manifests.length : undefined,
     avgAppliedTotalMs: applied.length > 0 ? appliedMsSum / applied.length : undefined,
     steps: toAggs(allMap),
