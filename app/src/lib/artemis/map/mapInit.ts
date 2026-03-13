@@ -48,7 +48,7 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
 
   map = new maplibregl.Map({
     container,
-    style: "https://tiles.openfreemap.org/styles/positron",
+    style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
     center: [4.23, 51.10], // Bornem, Scheldt valley
     zoom: 10
   });

@@ -356,3 +356,26 @@ For each flagged manifest, always include:
 - `app/src/lib/artemis/runner.ts` `CompiledIndexEntry` now includes optional:
   - `centerLon?: number`
   - `centerLat?: number`
+
+---
+
+## Session Update — 2026-03-13 (Canvas info.json Pre-warm Cache)
+
+### What Changed
+- `app/src/lib/artemis/runner.ts`:
+  - Added `cachedCanvasInfoIndex` and `cachedInfoByServiceUrl` module-level caches.
+  - Added `loadCanvasInfoIndex(cfg)`: fetches `build/iiif/info/index.json` once (gracefully degrades to `{}` on 404/error). Builds a `serviceUrl → infoJson` lookup from the index values by extracting each entry's `@id` field.
+  - `resetCompiledIndexCache()` now also resets the canvas info caches.
+  - In `runLayerGroup`: `loadCompiledIndex` and `loadCanvasInfoIndex` are now fetched in parallel at layer startup (`Promise.all`).
+  - Pre-warm block updated: for each image service URL, checks `infoByServiceUrl` first; only falls back to individual `fetch({url}/info.json)` on a miss. Cache hit/miss counts logged.
+
+### Why
+- Previously, the pre-warm block fetched every `info.json` individually at runtime (N concurrent requests to the IIIF server).
+- `build/iiif/info/index.json` (produced by `Artemis-RnD-Data` pipeline) is a single committed JSON keyed by canvas ID, where each value is the full info.json with `@id` = image service URL.
+- One fetch of the committed index replaces N live IIIF server requests, reducing startup latency for the pre-warm step.
+
+### Lookup
+- Info index is keyed by image service base URL (exact string used to fetch `{serviceUrl}/info.json`).
+- Viewer pre-warm uses `wm.georeferencedMap?.resource?.id` — the same image service URL.
+- Direct `Map.get(url.replace(/\/+$/, ""))` lookup, no bridge needed.
+- `@id` / `id` normalization (forcing both to the fetched URL) is still applied to cached entries before passing to `addImageInfos()`, matching the existing convention for live-fetched entries.

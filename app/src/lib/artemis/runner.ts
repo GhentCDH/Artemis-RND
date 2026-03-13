@@ -125,9 +125,15 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
 // ---------------------------------------------------------------------------
 
 let cachedIndex: CompiledIndex | null = null;
+// Canvas info.json index: keyed by canvasId (IIIF canvas URL) → full info.json content.
+// Built by Artemis-RnD-Data pipeline; committed to build/iiif/info/index.json.
+// Values have @id = image service URL, so we build a serviceUrl lookup on load.
+// serviceUrl → infoJson, keyed by the exact image service base URL.
+let cachedInfoByServiceUrl: Map<string, any> | null = null;
 
 export function resetCompiledIndexCache() {
   cachedIndex = null;
+  cachedInfoByServiceUrl = null;
 }
 
 export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<CompiledIndex> {
@@ -136,6 +142,23 @@ export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<Comp
   const indexUrl = joinUrl(cfg.datasetBaseUrl, cfg.indexPath ?? "index.json");
   cachedIndex = await fetchJson<CompiledIndex>(indexUrl, cfg.fetchTimeoutMs ?? 30000);
   return cachedIndex;
+}
+
+export async function loadCanvasInfoIndex(cfg: CompiledRunnerConfig): Promise<Map<string, any>> {
+  if (cachedInfoByServiceUrl) return cachedInfoByServiceUrl;
+
+  let raw: Record<string, any> = {};
+  try {
+    const url = joinUrl(cfg.datasetBaseUrl, "iiif/info/index.json");
+    raw = await fetchJson<Record<string, any>>(url, cfg.fetchTimeoutMs ?? 30000);
+  } catch {
+    // Graceful degradation — fall back to individual info.json fetches.
+  }
+
+  // Index is keyed by image service URL (exact string used to fetch {serviceUrl}/info.json).
+  // Direct Map construction — no bridge needed.
+  cachedInfoByServiceUrl = new Map(Object.entries(raw));
+  return cachedInfoByServiceUrl;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +358,10 @@ export async function runLayerGroup(opts: {
   // Remove any previously loaded version of this layer group
   await removeLayerGroup(map, groupId);
 
-  const index = await loadCompiledIndex(cfg);
+  const [index, infoByServiceUrl] = await Promise.all([
+    loadCompiledIndex(cfg),
+    loadCanvasInfoIndex(cfg)
+  ]);
   const timeout = cfg.fetchTimeoutMs ?? 30000;
   const compiledCollectionUrl = joinUrl(cfg.datasetBaseUrl, layerInfo.compiledCollectionPath);
   const compiledCollection = await fetchJson<{ manifests?: Array<{ "@id"?: string }> }>(
@@ -802,8 +828,19 @@ export async function runLayerGroup(opts: {
     if (uniqueImageUrls.length > 0) {
       log?.("INFO", `[${label}] pre-warming ${uniqueImageUrls.length} image infos across ${layers.length} sub-layer(s)...`);
       const tsWarm = nowMs();
+      let cacheHits = 0;
+      let cacheMisses = 0;
       const infoJsons = await Promise.all(
         uniqueImageUrls.map(async (url) => {
+          const normalizedUrl = url.replace(/\/+$/, "");
+          const cached = infoByServiceUrl.get(normalizedUrl);
+          if (cached) {
+            cacheHits++;
+            // Normalize @id / id to the URL the warped map expects, same as the
+            // live-fetch path below.
+            return { ...cached, "@id": url, id: url };
+          }
+          cacheMisses++;
           try {
             const res = await fetch(`${url}/info.json`);
             if (!res.ok) return null;
@@ -817,6 +854,7 @@ export async function runLayerGroup(opts: {
           } catch { return null; }
         })
       );
+      log?.("INFO", `[${label}] info.json cache: ${cacheHits} hits / ${cacheMisses} misses (${uniqueImageUrls.length} total)`);
       const valid = infoJsons.filter(Boolean);
       if (valid.length > 0) {
         for (const l of layers) (l as any).addImageInfos?.(valid);
