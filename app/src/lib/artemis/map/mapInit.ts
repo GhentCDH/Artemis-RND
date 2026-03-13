@@ -21,13 +21,6 @@ const HISTCART_LAYERS: Record<
   }
 };
 
-const PRIMITIVE_SOURCE_ID = "primitive-parcels-source";
-const PRIMITIVE_FILL_LAYER_ID = "primitive-parcels-fill-layer";
-const PRIMITIVE_LAYER_ID = "primitive-parcels-layer";
-const PRIMITIVE_HOVER_SOURCE_ID = "primitive-parcels-hover-source";
-const PRIMITIVE_HOVER_LAYER_ID = "primitive-parcels-hover-layer";
-const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
-
 function wmtsTiles(layerName: string): string[] {
   const url =
     "https://geo.api.vlaanderen.be/HISTCART/wmts" +
@@ -36,6 +29,46 @@ function wmtsTiles(layerName: string): string[] {
     "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
   return [url];
 }
+
+// Land usage WMS overlay layers (rendered on top of the HISTCART WMTS base).
+// These are colour-coded index layers from the INBO WMS service.
+function wmsRasterTiles(baseUrl: string, layers: string): string[] {
+  return [
+    `${baseUrl}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0` +
+    `&LAYERS=${encodeURIComponent(layers)}&STYLES=` +
+    `&FORMAT=image%2Fpng&TRANSPARENT=TRUE` +
+    `&CRS=EPSG%3A3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256`
+  ];
+}
+
+const LAND_USAGE_LAYERS: Record<
+  HistCartLayerKey,
+  { sourceId: string; layerId: string; tiles: string[] }
+> = {
+  ferraris: {
+    sourceId: "landusage-ferraris-source",
+    layerId:  "landusage-ferraris-layer",
+    tiles: wmsRasterTiles("https://geo.api.vlaanderen.be/INBO/wms", "Lgbrk1778")
+  },
+  vandermaelen: {
+    sourceId: "landusage-vandermaelen-source",
+    layerId:  "landusage-vandermaelen-layer",
+    tiles: wmsRasterTiles("https://geo.api.vlaanderen.be/inbo/wms", "B1850")
+  }
+};
+
+const BELGIUM_BOUNDS: [number, number, number, number] = [2.53, 50.685, 5.92, 51.52];
+
+const IIIF_HOVER_SOURCE_ID = "iiif-hover-mask-source";
+const IIIF_HOVER_FILL_LAYER_ID = "iiif-hover-mask-fill";
+const IIIF_HOVER_LINE_LAYER_ID = "iiif-hover-mask-line";
+
+const PRIMITIVE_SOURCE_ID = "primitive-parcels-source";
+const PRIMITIVE_FILL_LAYER_ID = "primitive-parcels-fill-layer";
+const PRIMITIVE_LAYER_ID = "primitive-parcels-layer";
+const PRIMITIVE_HOVER_SOURCE_ID = "primitive-parcels-hover-source";
+const PRIMITIVE_HOVER_LAYER_ID = "primitive-parcels-hover-layer";
+const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
 
 function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
   const style = map.getStyle();
@@ -50,7 +83,8 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
     container,
     style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
     center: [4.23, 51.10], // Bornem, Scheldt valley
-    zoom: 10
+    zoom: 10,
+    attributionControl: false
   });
 
   // Resize once style is loaded (helps when container size settles after layout mount)
@@ -60,6 +94,7 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
     } catch {
       // ignore
     }
+    ensureIiifHoverLayers(map!);
   });
 
   return map;
@@ -82,7 +117,7 @@ export function setHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerK
         type: "raster",
         tiles: wmtsTiles(cfg.layerName),
         tileSize: 256,
-        bounds: [2.53, 50.685, 5.92, 51.52]
+        bounds: BELGIUM_BOUNDS
       });
     }
     if (!hasLayer) {
@@ -120,6 +155,85 @@ export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKe
   const cfg = HISTCART_LAYERS[key];
   if (!cfg || !map.getLayer(cfg.layerId)) return;
   map.moveLayer(cfg.layerId);
+}
+
+// ---------------------------------------------------------------------------
+// Land usage WMS overlay layers (on top of HISTCART WMTS base)
+// ---------------------------------------------------------------------------
+
+export function setLandUsageLayerVisible(map: maplibregl.Map, key: HistCartLayerKey, visible: boolean): void {
+  const cfg = LAND_USAGE_LAYERS[key];
+  if (!cfg) return;
+  const hasSource = !!map.getSource(cfg.sourceId);
+  const hasLayer  = !!map.getLayer(cfg.layerId);
+  if (visible) {
+    if (!hasSource) {
+      map.addSource(cfg.sourceId, {
+        type: "raster",
+        tiles: cfg.tiles,
+        tileSize: 256,
+        bounds: BELGIUM_BOUNDS
+      });
+    }
+    if (!hasLayer) {
+      map.addLayer({ id: cfg.layerId, type: "raster", source: cfg.sourceId, paint: { "raster-opacity": 1 } });
+    }
+    return;
+  }
+  if (hasLayer)  map.removeLayer(cfg.layerId);
+  if (hasSource) map.removeSource(cfg.sourceId);
+}
+
+export function setLandUsageLayerOpacity(map: maplibregl.Map, key: HistCartLayerKey, opacity: number): void {
+  const cfg = LAND_USAGE_LAYERS[key];
+  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  map.setPaintProperty(cfg.layerId, "raster-opacity", Math.max(0, Math.min(1, opacity)));
+}
+
+export function getLandUsageLayerId(key: HistCartLayerKey): string {
+  return LAND_USAGE_LAYERS[key].layerId;
+}
+
+function ensureIiifHoverLayers(m: maplibregl.Map): void {
+  if (!m.getSource(IIIF_HOVER_SOURCE_ID)) {
+    m.addSource(IIIF_HOVER_SOURCE_ID, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] }
+    });
+  }
+  if (!m.getLayer(IIIF_HOVER_FILL_LAYER_ID)) {
+    m.addLayer({
+      id: IIIF_HOVER_FILL_LAYER_ID,
+      type: "fill",
+      source: IIIF_HOVER_SOURCE_ID,
+      paint: { "fill-color": "#4ade80", "fill-opacity": 0.28 }
+    });
+  }
+  if (!m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) {
+    m.addLayer({
+      id: IIIF_HOVER_LINE_LAYER_ID,
+      type: "line",
+      source: IIIF_HOVER_SOURCE_ID,
+      paint: { "line-color": "#86efac", "line-width": 1.5, "line-opacity": 0.9 }
+    });
+  }
+}
+
+export function setIiifHoverMask(m: maplibregl.Map, ring: Array<[number, number]> | null): void {
+  const source = m.getSource(IIIF_HOVER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  if (!ring || ring.length < 3) {
+    source.setData({ type: "FeatureCollection", features: [] });
+    return;
+  }
+  const closed: Array<[number, number]> = [...ring, ring[0]];
+  source.setData({
+    type: "FeatureCollection",
+    features: [{ type: "Feature", geometry: { type: "Polygon", coordinates: [closed] }, properties: {} }]
+  });
+  // Move hover layers above the warped map layers so the fill renders on top.
+  try { if (m.getLayer(IIIF_HOVER_FILL_LAYER_ID)) m.moveLayer(IIIF_HOVER_FILL_LAYER_ID); } catch { /* ignore */ }
+  try { if (m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_HOVER_LINE_LAYER_ID); } catch { /* ignore */ }
 }
 
 export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, geojsonUrl: string): void {

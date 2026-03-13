@@ -134,6 +134,25 @@ let cachedInfoByServiceUrl: Map<string, any> | null = null;
 export function resetCompiledIndexCache() {
   cachedIndex = null;
   cachedInfoByServiceUrl = null;
+  parkedLayersByGroup.clear();
+  mapIdToManifestInfo.clear();
+}
+
+export function getManifestInfoForMapId(mapId: string) {
+  return mapIdToManifestInfo.get(mapId) ?? null;
+}
+
+export function getAllActiveWarpedMaps(): { mapId: string; warpedMap: any }[] {
+  const result: { mapId: string; warpedMap: any }[] = [];
+  for (const layers of activeWarpedLayersByGroup.values()) {
+    for (const layer of layers) {
+      for (const wm of layer.getWarpedMaps()) {
+        const mapId = (wm as any).mapId;
+        if (mapId) result.push({ mapId, warpedMap: wm });
+      }
+    }
+  }
+  return result;
 }
 
 export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<CompiledIndex> {
@@ -269,9 +288,24 @@ const activeLayersByGroup = new Map<string, string[]>();
 // Maps groupId -> active Allmaps custom layers (for runtime controls like opacity).
 const activeWarpedLayersByGroup = new Map<string, WarpedMapLayer[]>();
 
+// Maps Allmaps mapId → source manifest info (populated when annotations are applied).
+const mapIdToManifestInfo = new Map<string, {
+  sourceManifestUrl: string;
+  label: string;
+  compiledManifestPath: string;
+  manifestAllmapsUrl?: string;
+}>();
+
 // Maps groupId → cleanup fn (removes map.on handlers + clears keepalive interval)
 // Must be called before re-adding a layer group to prevent handler accumulation.
 const activeLayerCleanup = new Map<string, () => void>();
+
+// Parked layer groups — hidden (opacity 0) but still on the map so data is preserved.
+// Restoring from park is instant: no re-fetch, no re-parse, just opacity restore.
+const parkedLayersByGroup = new Map<string, {
+  layerIds: string[];
+  warpedLayers: WarpedMapLayer[];
+}>();
 
 async function removeMaplibreLayer(map: maplibregl.Map, layerId: string) {
   try {
@@ -283,6 +317,15 @@ async function removeMaplibreLayer(map: maplibregl.Map, layerId: string) {
 
 export async function removeLayerGroup(map: maplibregl.Map, groupId: string) {
   await waitForMapReady(map);
+
+  // Handle parked layers (hidden but still on the map)
+  if (parkedLayersByGroup.has(groupId)) {
+    const parked = parkedLayersByGroup.get(groupId)!;
+    parkedLayersByGroup.delete(groupId);
+    for (const id of parked.layerIds) await removeMaplibreLayer(map, id);
+    return;
+  }
+
   // Clean up stale event handlers and intervals BEFORE removing the MapLibre layer.
   // Without this, map.on handlers from previous loads accumulate — each reload adds
   // another full set of handlers, causing doubled/tripled event counts and flickering.
@@ -292,6 +335,24 @@ export async function removeLayerGroup(map: maplibregl.Map, groupId: string) {
   for (const id of ids) await removeMaplibreLayer(map, id);
   activeLayersByGroup.delete(groupId);
   activeWarpedLayersByGroup.delete(groupId);
+}
+
+// Park a layer group: hide it (opacity 0) without destroying it.
+// Restoring is instant — no re-fetch or re-parse needed.
+export async function parkLayerGroup(map: maplibregl.Map, groupId: string) {
+  await waitForMapReady(map);
+  const warpedLayers = activeWarpedLayersByGroup.get(groupId);
+  const layerIds = activeLayersByGroup.get(groupId);
+  if (!warpedLayers || !layerIds || layerIds.length === 0) return;
+  for (const l of warpedLayers) { try { l.setOpacity(0); } catch { /* ignore */ } }
+  parkedLayersByGroup.set(groupId, { layerIds: [...layerIds], warpedLayers: [...warpedLayers] });
+  activeLayersByGroup.delete(groupId);
+  activeWarpedLayersByGroup.delete(groupId);
+  // Event handlers and keepalive interval are intentionally left; keepalive self-terminates.
+}
+
+export function isLayerGroupParked(groupId: string): boolean {
+  return parkedLayersByGroup.has(groupId);
 }
 
 // Enforce z-order of layer groups. Pass orderedGroupIds bottom-to-top;
@@ -326,7 +387,7 @@ export function isLayerGroupRendered(map: maplibregl.Map, groupId: string): bool
 }
 
 export function getLayerGroupLayerIds(groupId: string): string[] {
-  return [...(activeLayersByGroup.get(groupId) ?? [])];
+  return [...(activeLayersByGroup.get(groupId) ?? parkedLayersByGroup.get(groupId)?.layerIds ?? [])];
 }
 
 export async function clearAllLayerGroups(map: maplibregl.Map) {
@@ -354,6 +415,17 @@ export async function runLayerGroup(opts: {
   await waitForMapReady(map);
 
   const groupId = getLayerGroupId(layerInfo);
+
+  // If parked (hidden but loaded), restore immediately — no re-fetch or re-parse needed.
+  if (parkedLayersByGroup.has(groupId)) {
+    const parked = parkedLayersByGroup.get(groupId)!;
+    parkedLayersByGroup.delete(groupId);
+    activeLayersByGroup.set(groupId, parked.layerIds);
+    activeWarpedLayersByGroup.set(groupId, parked.warpedLayers);
+    log?.("INFO", `Layer "${layerLabel}": restored from park (instant)`);
+    // Caller is responsible for setting correct opacity via setLayerGroupOpacity.
+    return [];
+  }
 
   // Remove any previously loaded version of this layer group
   await removeLayerGroup(map, groupId);
@@ -769,6 +841,12 @@ export async function runLayerGroup(opts: {
       for (const mapId of succeeded) {
         mapMetaByMapId.set(mapId, {
           label: item.entry.label,
+          manifestAllmapsUrl: item.entry.manifestAllmapsUrl
+        });
+        mapIdToManifestInfo.set(mapId, {
+          sourceManifestUrl: item.entry.sourceManifestUrl,
+          label: item.entry.label,
+          compiledManifestPath: item.entry.compiledManifestPath,
           manifestAllmapsUrl: item.entry.manifestAllmapsUrl
         });
       }

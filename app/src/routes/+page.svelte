@@ -9,22 +9,30 @@
     setHistCartLayerVisible,
     isHistCartLayerVisible,
     setHistCartLayerOpacity,
+    setLandUsageLayerVisible,
+    setLandUsageLayerOpacity,
+    getLandUsageLayerId,
     setPrimitiveLayerVisible,
     isPrimitiveLayerVisible,
     setPrimitiveLayerOpacity,
     getPrimitiveLayerIds,
-    setPrimitiveHoverFeature
+    setPrimitiveHoverFeature,
+    setIiifHoverMask
   } from "$lib/artemis/map/mapInit";
   import { attachAllmapsDebugEvents } from "$lib/artemis/debug/attachAllmapsDebugEvents";
   import {
     loadCompiledIndex,
     runLayerGroup,
     removeLayerGroup,
+    parkLayerGroup,
+    isLayerGroupParked,
     setLayerGroupOpacity,
     getLayerGroupLayerIds,
     resetCompiledIndexCache,
     getIiifCacheStats,
     getLayerGroupId,
+    getAllActiveWarpedMaps,
+    getManifestInfoForMapId,
     type LayerInfo,
     type CompiledIndex,
     type CompiledRunnerConfig,
@@ -33,6 +41,7 @@
   import {
     bulkSummary, startBulkRun, endBulkRun, resetBulkMetrics, ingestRunResult, fmtMs
   } from "$lib/artemis/metrics";
+  import IiifViewer from "$lib/artemis/viewer/IiifViewer.svelte";
 
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
@@ -60,7 +69,7 @@
 
   // --- Layer tree state ---
   type MainLayerId = 'gereduceerd' | 'primitief' | 'vandermaelen' | 'ferraris' | 'handdrawn';
-  type SubLayerKind = 'iiif' | 'geojson' | 'wmts' | 'searchable';
+  type SubLayerKind = 'iiif' | 'geojson' | 'wmts' | 'wms' | 'searchable';
 
   let mainLayerOrder: MainLayerId[] = ['ferraris', 'vandermaelen', 'primitief', 'gereduceerd', 'handdrawn'];
   let mainLayerEnabled: Record<string, boolean> = { gereduceerd: false, primitief: false, vandermaelen: false, ferraris: false, handdrawn: false };
@@ -68,8 +77,8 @@
   let mainLayerOpacity: Record<string, number> = { gereduceerd: 1, primitief: 1, vandermaelen: 1, ferraris: 1, handdrawn: 1 };
   let mainLayerExpanded: Record<string, boolean> = {};
   let subLayerEnabled: Record<string, boolean> = {
-    'ferraris-wmts': false, 'ferraris-toponyms': false,
-    'vandermaelen-wmts': false, 'vandermaelen-toponyms': false,
+    'ferraris-landusage': false, 'ferraris-toponyms': false,
+    'vandermaelen-landusage': false, 'vandermaelen-toponyms': false,
     'primitief-iiif': false, 'primitief-parcels': false, 'primitief-landusage': false,
     'gereduceerd-iiif': false, 'gereduceerd-parcels': false, 'gereduceerd-landusage': false,
     'handdrawn-iiif': false, 'handdrawn-parcels': false, 'handdrawn-water': false,
@@ -77,6 +86,38 @@
   let subLayerLoading: Record<string, boolean> = {};
 
   let primitiveHover: { x: number; y: number; parcelLabel: string; leafId: string } | null = null;
+
+  // IIIF warped map hover/click state
+  let iiifHoveredMap: { mapId: string; warpedMap: any } | null = null;
+  type IiifMapInfo = { title: string; sourceManifestUrl: string; imageServiceUrl?: string; manifestAllmapsUrl?: string };
+  let iiifInfoPanel: IiifMapInfo | null = null;
+  let viewerOpen = false;
+
+  let viewerManifest: { url: string; title: string } | null = null;
+
+  function pointInPolygon(point: [number, number], ring: Array<[number, number]>): boolean {
+    const [x, y] = point;
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function hitTestWarpedMaps(lon: number, lat: number): { mapId: string; warpedMap: any } | null {
+    for (const { mapId, warpedMap } of getAllActiveWarpedMaps()) {
+      const mask: Array<[number, number]> = warpedMap.geoMask ?? [];
+      if (mask.length < 3) continue;
+      const bbox: [number, number, number, number] | undefined = warpedMap.geoMaskBbox;
+      if (bbox && (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3])) continue;
+      if (pointInPolygon([lon, lat], mask)) return { mapId, warpedMap };
+    }
+    return null;
+  }
   type ToponymIndexItem = {
     id: string;
     text: string;
@@ -609,9 +650,9 @@
   }
 
   const SUB_LAYER_DEFS: Record<string, { label: string; kind: SubLayerKind }> = {
-    'ferraris-wmts':           { label: 'Land usage',          kind: 'wmts' },
+    'ferraris-landusage':      { label: 'Land usage',          kind: 'wms' },
     'ferraris-toponyms':       { label: 'Toponyms',            kind: 'searchable' },
-    'vandermaelen-wmts':       { label: 'Land usage',          kind: 'wmts' },
+    'vandermaelen-landusage':  { label: 'Land usage',          kind: 'wms' },
     'vandermaelen-toponyms':   { label: 'Toponyms',            kind: 'searchable' },
     'primitief-iiif':          { label: 'IIIF collection',     kind: 'iiif' },
     'primitief-parcels':       { label: 'Parcels',             kind: 'geojson' },
@@ -625,8 +666,8 @@
   };
 
   const MAIN_LAYER_SUBS: Record<string, string[]> = {
-    ferraris:    ['ferraris-wmts', 'ferraris-toponyms'],
-    vandermaelen: ['vandermaelen-wmts', 'vandermaelen-toponyms'],
+    ferraris:    ['ferraris-landusage', 'ferraris-toponyms'],
+    vandermaelen: ['vandermaelen-landusage', 'vandermaelen-toponyms'],
     primitief:   ['primitief-iiif', 'primitief-parcels', 'primitief-landusage'],
     gereduceerd: ['gereduceerd-iiif', 'gereduceerd-parcels', 'gereduceerd-landusage'],
     handdrawn:   ['handdrawn-iiif', 'handdrawn-parcels', 'handdrawn-water'],
@@ -653,12 +694,15 @@
     const wmtsKey = getMainWmtsKey(mainId);
     if (wmtsKey && mainLayerEnabled[mainId]) {
       setHistCartLayerOpacity(map, wmtsKey, opacity);
-      return;
     }
     for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
       if (!subLayerEnabled[subId]) continue;
       const subDef = SUB_LAYER_DEFS[subId];
-      if (subDef?.kind === 'iiif') {
+      if (subDef?.kind === 'wmts') {
+        setHistCartLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+      } else if (subDef?.kind === 'wms') {
+        setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+      } else if (subDef?.kind === 'iiif') {
         const info = getIiifInfoForSub(subId);
         if (info) setLayerGroupOpacity(map, info.uiLayerId, opacity);
       } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
@@ -678,7 +722,10 @@
       }
       for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
         const subDef = SUB_LAYER_DEFS[subId];
-        if (subDef?.kind === 'iiif') {
+        if (subDef?.kind === 'wms') {
+          const lid = getLandUsageLayerId(mainId as HistCartLayerKey);
+          try { if (map.getLayer(lid)) map.moveLayer(lid); } catch { /* ignore */ }
+        } else if (subDef?.kind === 'iiif') {
           const info = getIiifInfoForSub(subId);
           if (info) {
             for (const id of getLayerGroupLayerIds(info.uiLayerId)) {
@@ -721,46 +768,38 @@
     if (mainLayerEnabled[mainId] === enabled) return;
     mainLayerEnabled = { ...mainLayerEnabled, [mainId]: enabled };
 
-    // Find the primary sublayer for this era and delegate
-    const primarySub = MAIN_LAYER_SUBS[mainId]?.[0];
-    if (!primarySub) return;
-
-    const subDef = SUB_LAYER_DEFS[primarySub];
-    if (!subDef) return;
-
-    if (subDef.kind === 'wmts') {
-      const wmtsKey = getMainWmtsKey(mainId);
-      if (wmtsKey) {
-        setHistCartLayerVisible(map, wmtsKey, enabled);
-        if (enabled) setHistCartLayerOpacity(map, wmtsKey, mainLayerOpacity[mainId] ?? 1);
-      }
+    // WMTS eras: main toggle directly controls the HISTCART WMTS service
+    const wmtsKey = getMainWmtsKey(mainId);
+    if (wmtsKey) {
+      setHistCartLayerVisible(map, wmtsKey, enabled);
+      if (enabled) setHistCartLayerOpacity(map, wmtsKey, mainLayerOpacity[mainId] ?? 1);
       applyZOrder();
       return;
     }
 
-    if (subDef.kind === 'iiif') {
-      const info = getIiifInfoForSub(primarySub);
-      if (!info) return;
-      const gid = info.uiLayerId;
-      if (enabled) {
-        mainLayerLoading = { ...mainLayerLoading, [mainId]: true };
-        try {
-          await loadIiifLayer(info);
-          setLayerGroupOpacity(map, gid, mainLayerOpacity[mainId] ?? 1);
-          applyZOrder();
-        } catch (e: any) {
-          log("ERROR", `Layer load failed: ${e?.message ?? String(e)}`);
-          mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
-          const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
-        } finally {
-          mainLayerLoading = { ...mainLayerLoading, [mainId]: false };
-        }
-      } else {
-        await removeLayerGroup(map, gid);
-        const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
+    // IIIF eras: find the IIIF sublayer and load/park it
+    const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
+    if (!iiifSubId) return;
+    const info = getIiifInfoForSub(iiifSubId);
+    if (!info) return;
+    const gid = info.uiLayerId;
+    if (enabled) {
+      const restoring = isLayerGroupParked(gid);
+      if (!restoring) mainLayerLoading = { ...mainLayerLoading, [mainId]: true };
+      try {
+        await loadIiifLayer(info);
+        setLayerGroupOpacity(map, gid, mainLayerOpacity[mainId] ?? 1);
         applyZOrder();
+      } catch (e: any) {
+        log("ERROR", `Layer load failed: ${e?.message ?? String(e)}`);
+        mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
+        const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
+      } finally {
+        mainLayerLoading = { ...mainLayerLoading, [mainId]: false };
       }
-      return;
+    } else {
+      await parkLayerGroup(map, gid);
+      applyZOrder();
     }
   }
 
@@ -784,6 +823,14 @@
       return;
     }
 
+    if (subDef.kind === 'wms') {
+      const wmsKey = mainId as HistCartLayerKey;
+      setLandUsageLayerVisible(map, wmsKey, enabled);
+      if (enabled) setLandUsageLayerOpacity(map, wmsKey, opacity);
+      applyZOrder();
+      return;
+    }
+
     if (subDef.kind === 'geojson') {
       if (subId === 'primitief-parcels') {
         setPrimitiveLayerVisible(map, enabled, primitiveGeojsonUrl());
@@ -800,7 +847,8 @@
     const gid = info.uiLayerId;
 
     if (enabled) {
-      subLayerLoading = { ...subLayerLoading, [subId]: true };
+      const restoring = isLayerGroupParked(gid);
+      if (!restoring) subLayerLoading = { ...subLayerLoading, [subId]: true };
       try {
         await loadIiifLayer(info);
         setLayerGroupOpacity(map, gid, opacity);
@@ -813,8 +861,7 @@
         subLayerLoading = { ...subLayerLoading, [subId]: false };
       }
     } else {
-      await removeLayerGroup(map, gid);
-      const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
+      await parkLayerGroup(map, gid);
       applyZOrder();
     }
   }
@@ -869,8 +916,8 @@
     mainLayerEnabled = { gereduceerd: false, primitief: false, vandermaelen: false, ferraris: false, handdrawn: false };
     mainLayerLoading = {};
     subLayerEnabled = {
-      'ferraris-wmts': false, 'ferraris-toponyms': false,
-      'vandermaelen-wmts': false, 'vandermaelen-toponyms': false,
+      'ferraris-landusage': false, 'ferraris-toponyms': false,
+      'vandermaelen-landusage': false, 'vandermaelen-toponyms': false,
       'primitief-iiif': false, 'primitief-parcels': false, 'primitief-landusage': false,
       'gereduceerd-iiif': false, 'gereduceerd-parcels': false, 'gereduceerd-landusage': false,
       'handdrawn-iiif': false, 'handdrawn-parcels': false, 'handdrawn-water': false,
@@ -901,37 +948,67 @@
     attachAllmapsDebugEvents(map, log);
     map.on("load", () => applyZOrder());
     const onMapMouseMove = (e: any) => {
-      if (!subLayerEnabled['primitief-parcels'] || !map.getLayer("primitive-parcels-layer")) {
+      // --- Primitive parcel hover ---
+      let parcelHit = false;
+      if (subLayerEnabled['primitief-parcels'] && map.getLayer("primitive-parcels-layer")) {
+        const features = map.queryRenderedFeatures(e.point, { layers: getPrimitiveLayerIds() });
+        const feature = features[0];
+        const details = parcelHoverDetailsFromFeature(feature);
+        if (details) {
+          parcelHit = true;
+          setPrimitiveHoverFeature(map, feature);
+          primitiveHover = { x: e.point.x, y: e.point.y, parcelLabel: details.parcelLabel, leafId: details.leafId };
+        } else {
+          if (primitiveHover) primitiveHover = null;
+          setPrimitiveHoverFeature(map, null);
+        }
+      } else {
         if (primitiveHover) primitiveHover = null;
         setPrimitiveHoverFeature(map, null);
-        map.getCanvas().style.cursor = "";
-        return;
       }
-      const features = map.queryRenderedFeatures(e.point, { layers: getPrimitiveLayerIds() });
-      const feature = features[0];
-      const details = parcelHoverDetailsFromFeature(feature);
-      if (!details) {
-        if (primitiveHover) primitiveHover = null;
-        setPrimitiveHoverFeature(map, null);
-        map.getCanvas().style.cursor = "";
-        return;
+
+      // --- IIIF warped map hover ---
+      const lngLat = map.unproject(e.point);
+      const hit = hitTestWarpedMaps(lngLat.lng, lngLat.lat);
+      if (hit?.mapId !== iiifHoveredMap?.mapId) {
+        iiifHoveredMap = hit;
+        setIiifHoverMask(map, hit ? hit.warpedMap.geoMask : null);
       }
-      map.getCanvas().style.cursor = "pointer";
-      setPrimitiveHoverFeature(map, feature);
-      primitiveHover = { x: e.point.x, y: e.point.y, parcelLabel: details.parcelLabel, leafId: details.leafId };
+
+      map.getCanvas().style.cursor = (parcelHit || hit) ? "pointer" : "";
     };
+
     const onMapMouseOut = () => {
       primitiveHover = null;
       setPrimitiveHoverFeature(map, null);
+      iiifHoveredMap = null;
+      setIiifHoverMask(map, null);
       map.getCanvas().style.cursor = "";
     };
+
+    const onMapClick = (e: any) => {
+      if (!iiifHoveredMap) return;
+      const info = getManifestInfoForMapId(iiifHoveredMap.mapId);
+      if (!info) return;
+      const imageServiceUrl: string | undefined =
+        iiifHoveredMap.warpedMap?.georeferencedMap?.resource?.id ?? undefined;
+      iiifInfoPanel = {
+        title: info.label,
+        sourceManifestUrl: info.sourceManifestUrl,
+        imageServiceUrl,
+        manifestAllmapsUrl: info.manifestAllmapsUrl
+      };
+    };
+
     map.on("mousemove", onMapMouseMove);
     map.on("mouseout", onMapMouseOut);
+    map.on("click", onMapClick);
     void fetchIndex();
 
     return () => {
       map.off("mousemove", onMapMouseMove);
       map.off("mouseout", onMapMouseOut);
+      map.off("click", onMapClick);
     };
   });
 
@@ -1040,6 +1117,58 @@
         </div>
       </div>
     {/if}
+
+    <!-- IIIF map info panel — sweeps in from the right on click -->
+    <aside class="iiif-map-panel" class:open={iiifInfoPanel !== null}>
+      {#if iiifInfoPanel}
+        <div class="iiif-panel-header">
+          <span class="iiif-panel-title">{iiifInfoPanel.title}</span>
+          <button class="iiif-panel-close" type="button" on:click={() => (iiifInfoPanel = null)} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="iiif-panel-body">
+          <!-- Preview + View Document -->
+          <div class="iiif-view-doc-row">
+            {#if iiifInfoPanel.imageServiceUrl}
+              <img
+                class="iiif-thumb"
+                src="{iiifInfoPanel.imageServiceUrl}/full/!120,120/0/default.jpg"
+                alt={iiifInfoPanel.title}
+                loading="lazy"
+              />
+            {/if}
+            <button
+              type="button"
+              class="iiif-view-doc-btn"
+              on:click={() => { viewerOpen = true; }}
+            >
+              View Document
+            </button>
+          </div>
+
+          <div class="iiif-panel-section">
+            <div class="iiif-panel-label">Source manifest</div>
+            <div class="iiif-panel-url">{iiifInfoPanel.sourceManifestUrl}</div>
+            <div class="iiif-panel-actions">
+              <button type="button" on:click={async () => { try { await navigator.clipboard.writeText(iiifInfoPanel!.sourceManifestUrl); } catch { /* ignore */ } }}>
+                Copy URL
+              </button>
+            </div>
+          </div>
+          {#if iiifInfoPanel.manifestAllmapsUrl}
+            <div class="iiif-panel-section">
+              <div class="iiif-panel-label">Allmaps</div>
+              <button type="button" class="iiif-panel-link-btn" on:click={() => window.open(iiifInfoPanel!.manifestAllmapsUrl, "_blank", "noopener,noreferrer")}>
+                View annotation
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </aside>
 
     {#if primitiveHover}
       <div class="parcel-hover-tooltip" style={`left:${primitiveHover.x + 14}px; top:${primitiveHover.y + 14}px;`}>
@@ -1327,14 +1456,30 @@
   </main>
 </div>
 
+{#if viewerOpen && iiifInfoPanel}
+  <IiifViewer
+    imageServiceUrl={iiifInfoPanel.imageServiceUrl ?? ""}
+    title={iiifInfoPanel.title}
+    on:close={() => (viewerOpen = false)}
+  />
+{/if}
+
 <style>
+  :global(html, body) {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+  }
+
   .wrap {
     height: 100vh;
+    overflow: hidden;
   }
 
   .map-shell {
     position: relative;
-    width: 100%;
+    width: 100vw;
     height: 100vh;
   }
 
@@ -1555,6 +1700,158 @@
     margin-top: 2px;
     font-size: 10px;
     color: #555;
+  }
+
+  /* IIIF map info panel */
+  .iiif-map-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: min(380px, 92vw);
+    background: var(--panel-bg);
+    border-left: 0.5px solid var(--panel-border);
+    box-shadow: -6px 0 24px rgba(0, 0, 0, 0.32);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    overflow: hidden;
+  }
+
+  .iiif-map-panel.open {
+    transform: translateX(0);
+  }
+
+  .iiif-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 14px 12px;
+    border-bottom: 0.5px solid var(--panel-border);
+    flex-shrink: 0;
+  }
+
+  .iiif-panel-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.35;
+  }
+
+  .iiif-panel-close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .iiif-panel-close:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .iiif-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .iiif-panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .iiif-panel-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .iiif-panel-url {
+    font-size: 11px;
+    color: var(--text-primary);
+    word-break: break-all;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 5px;
+    padding: 7px 9px;
+    line-height: 1.5;
+    font-family: monospace;
+  }
+
+  .iiif-panel-url.small {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .iiif-panel-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .iiif-view-doc-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .iiif-thumb {
+    flex-shrink: 0;
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .iiif-view-doc-btn {
+    flex: 1;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: none;
+    background: #22c55e;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .iiif-view-doc-btn:hover {
+    background: #16a34a;
+  }
+
+  .iiif-panel-actions button,
+  .iiif-panel-link-btn {
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 5px;
+    border: 0.5px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .iiif-panel-actions button:hover,
+  .iiif-panel-link-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
   }
 
   .map-layers-panel {
@@ -1960,6 +2257,11 @@
   }
 
   .sublayer-badge.kind-wmts {
+    background: #e6f4ea;
+    color: #137333;
+  }
+
+  .sublayer-badge.kind-wms {
     background: #e6f4ea;
     color: #137333;
   }
