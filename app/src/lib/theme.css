@@ -1,0 +1,69 @@
+/* ============================================================
+   Artemis UI theme — edit here to restyle the entire viewer
+   ============================================================ */
+
+:root {
+  /* --- Surfaces -------------------------------------------- */
+  --panel-bg:      #fdfdfd;          /* floating panels (sidebar, search, debug) */
+  --panel-border:  rgba(0, 0, 0, 0.1);
+  --card-bg:       #ffffff;          /* cards / rows inside panels */
+  --card-border:   rgba(0, 0, 0, 0.09);
+  --sublayer-bg:   rgba(0, 0, 0, 0.04);
+  --overlay-bg:    rgba(238, 240, 244, 0.95); /* glass/frosted panels */
+  --backdrop-color: rgba(178, 207, 255, 0.22);       /* modal backdrop */
+
+  /* --- Text ------------------------------------------------ */
+  --text-primary:   #1a1a1a;
+  --text-muted:     rgba(0, 0, 0, 0.42);
+  --text-muted-log: #666;
+  --text-ok:        #2a7a2a;
+  --text-error:     #c0392b;
+  --text-warn:      #b7800a;
+
+  /* --- Input / search results ------------------------------ */
+  --input-bg:    #e6e8ec;
+  --result-bg:   #e6e8ec;
+  --result-hover: #d8dade;
+
+  /* --- Toggles --------------------------------------------- */
+  --toggle-off:   rgba(0, 0, 0, 0.14);
+  --toggle-on:    #22c55e;    /* overridden per card via --layer-color */
+  --toggle-thumb: #ffffff;
+
+  /* --- Borders --------------------------------------------- */
+  --border-light:  #e2e3e6;   /* table rows, log lines, metrics */
+  --border-subtle: #ececee;   /* very faint separators (log rows) */
+  --border-ui:     #c8c9cc;   /* chrome borders (debug button, modal) */
+
+  /* --- Sublayer type badges --------------------------------- */
+  --badge-iiif-bg:     #e8f0fe;
+  --badge-iiif-color:  #1a73e8;
+  --badge-geo-bg:      #e6f4ea;
+  --badge-geo-color:   #137333;
+  --badge-search-bg:   #fef7e0;
+  --badge-search-color: #b45309;
+
+  /* --- Problem / error blocks ------------------------------ */
+  --problem-border:       #e8d6d6;
+  --problem-bg:           #fff7f7;
+  --problem-error-color:  #8b1f1f;
+
+  /* --- Progress / spinners --------------------------------- */
+  --progress-bg:    #d8d9dc;
+  --spinner-color:  #4a90d9;
+
+  /* --- Shadows --------------------------------------------- */
+  --shadow-sm:           0 1px 3px rgba(0, 0, 0, 0.18);
+  --shadow-md:           0 4px 20px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
+  --shadow-lg:           0 6px 24px rgba(0, 0, 0, 0.12);
+  --shadow-debug:        0 3px 14px rgba(0, 0, 0, 0.12);
+  --shadow-modal:        0 10px 30px rgba(0, 0, 0, 0.22);
+  --shadow-panel-right:  -4px 0 20px rgba(0, 0, 0, 0.12);
+  --shadow-viewer:       0 24px 80px rgba(0, 0, 0, 0.35);
+
+  /* --- IIIF viewer overlay --------------------------------- */
+  --viewer-backdrop:    rgba(0, 0, 0, 0.45);
+  --viewer-bg:          var(--panel-bg);
+  --viewer-topbar-bg:   var(--card-bg);
+  --viewer-canvas-bg:   var(--panel-bg);
+}

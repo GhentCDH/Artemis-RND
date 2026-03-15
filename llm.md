@@ -379,3 +379,75 @@ For each flagged manifest, always include:
 - Viewer pre-warm uses `wm.georeferencedMap?.resource?.id` — the same image service URL.
 - Direct `Map.get(url.replace(/\/+$/, ""))` lookup, no bridge needed.
 - `@id` / `id` normalization (forcing both to the fetched URL) is still applied to cached entries before passing to `addImageInfos()`, matching the existing convention for live-fetched entries.
+
+---
+
+## Session Update — 2026-03-13 (UI Redesign + Layer Panel + Caching)
+
+### Layer Panel Redesign
+Complete rewrite of the layer panel UI in `app/src/routes/+page.svelte`:
+
+**Architecture:**
+- 5 eras: Ferraris, Vandermaelen, Primitief kadaster, Gereduceerd kadaster, Hand drawn collection
+- Hierarchical: each era card has a main toggle + expandable sublayer dropdown
+- Only one dropdown open at a time; order arrows close dropdown before reorder
+
+**Era card structure:**
+- Order arrows (▲/▼ SVG chevrons) — reorder eras, close dropdown first
+- Swatch (34×34px, era colour + per-era SVG pattern: hatch/grid/diagonal/crosshatch/wavy)
+- Meta button: era name (13px, weight 500) + date line (11px, muted)
+- Toggle pill (green=on/gray=off, sliding knob) — controls main layer
+- Chevron button (rotates 180° when open) — toggles sublayer dropdown
+
+**Sublayer dropdown:**
+- Coloured dot + label + kind badge (IIIF=blue, GeoJSON/WMTS/WMS=green, Searchable=amber)
+- Individual toggle pill per sublayer (omitted for searchable kind)
+- Opacity slider at bottom of dropdown
+
+**CSS:** CSS custom properties via `:global(:root)` for light/dark theming. Dark theme: `--panel-bg: #2c2c30`, `--card-bg: #353538`, `--text-primary: #f2f2f2`, etc.
+
+**Basemap:** switched to Carto dark-matter (`https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json`).
+
+**Attribution:** removed (`attributionControl: false`).
+
+**Fullscreen:** `html/body overflow: hidden`, map shell `100vw × 100vh`.
+
+### Sublayer Definitions (current state)
+```
+ferraris:    main toggle → HISTCART WMTS (Ferraris 1771)
+             sublayers: ferraris-landusage (WMS, displayable), ferraris-toponyms (searchable)
+
+vandermaelen: main toggle → HISTCART WMTS (Vandermaelen 1846)
+              sublayers: vandermaelen-landusage (WMS, displayable), vandermaelen-toponyms (searchable)
+
+primitief:   main toggle → IIIF collection (default renderLayer)
+             sublayers: primitief-iiif, primitief-parcels (GeoJSON), primitief-landusage (no-op)
+
+gereduceerd: main toggle → IIIF collection (default renderLayer)
+             sublayers: gereduceerd-iiif, gereduceerd-parcels (no-op), gereduceerd-landusage (no-op)
+
+handdrawn:   no-op (placeholder for future data)
+             sublayers: handdrawn-iiif, handdrawn-parcels, handdrawn-water (all no-op)
+```
+
+### Land Usage WMS Layers (mapInit.ts)
+- `ferraris-landusage` → `https://geo.api.vlaanderen.be/INBO/wms` layer `Lgbrk1778`
+- `vandermaelen-landusage` → `https://geo.api.vlaanderen.be/inbo/wms` layer `B1850`
+- Both use `image/png` + `TRANSPARENT=TRUE` + `CRS=EPSG:3857` + `{bbox-epsg-3857}`
+- **Status: untested** — WMS PNG transparency not yet verified in browser; may need format or CRS adjustment
+- Managed via `setLandUsageLayerVisible`, `setLandUsageLayerOpacity`, `getLandUsageLayerId`
+- Z-order: WMTS base moved first, then WMS land usage on top, then IIIF/GeoJSON above that
+
+### Park/Restore Caching (runner.ts)
+- **Problem:** toggling an IIIF layer off then on again caused full reload every time (re-fetch annotations, re-parse, re-prewarm).
+- **Solution:** `parkLayerGroup(map, groupId)` — sets opacity to 0, keeps WarpedMapLayer on the map, moves to `parkedLayersByGroup` cache.
+- **Restore:** `runLayerGroup` checks `parkedLayersByGroup` first; if found, moves straight back to active and returns `[]` (instant, no reload).
+- Loading spinner suppressed on restore via `isLayerGroupParked(gid)` check before setting loading state.
+- `removeLayerGroup` handles both active and parked layers (full removal on reload/cleanup).
+- `resetCompiledIndexCache` clears parked cache too.
+
+### Pending / To Revisit
+- Land usage WMS transparency: test in browser; if server rejects PNG, may need to check WMS GetCapabilities or use a different approach.
+- Hand drawn collection: no data wired yet, UI placeholder only.
+- Gereduceerd/Primitief GeoJSON sublayers (parcels, land usage) beyond `primitief-parcels` are no-ops pending data pipeline work.
+- Search panel dark theme: applied, uses CSS variables throughout.

@@ -68,6 +68,9 @@ const PRIMITIVE_FILL_LAYER_ID = "primitive-parcels-fill-layer";
 const PRIMITIVE_LAYER_ID = "primitive-parcels-layer";
 const PRIMITIVE_HOVER_SOURCE_ID = "primitive-parcels-hover-source";
 const PRIMITIVE_HOVER_LAYER_ID = "primitive-parcels-hover-layer";
+const PRIMITIVE_SELECT_SOURCE_ID = "primitive-parcels-select-source";
+const PRIMITIVE_SELECT_FILL_LAYER_ID = "primitive-parcels-select-fill";
+const PRIMITIVE_SELECT_LINE_LAYER_ID = "primitive-parcels-select-line";
 const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
 
 function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
@@ -81,7 +84,7 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
 
   map = new maplibregl.Map({
     container,
-    style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    style: "https://tiles.openfreemap.org/styles/positron",
     center: [4.23, 51.10], // Bornem, Scheldt valley
     zoom: 10,
     attributionControl: false
@@ -206,7 +209,10 @@ function ensureIiifHoverLayers(m: maplibregl.Map): void {
       id: IIIF_HOVER_FILL_LAYER_ID,
       type: "fill",
       source: IIIF_HOVER_SOURCE_ID,
-      paint: { "fill-color": "#4ade80", "fill-opacity": 0.28 }
+      paint: {
+        "fill-color": ["get", "fillColor"] as any,
+        "fill-opacity": 0.28
+      }
     });
   }
   if (!m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) {
@@ -214,23 +220,32 @@ function ensureIiifHoverLayers(m: maplibregl.Map): void {
       id: IIIF_HOVER_LINE_LAYER_ID,
       type: "line",
       source: IIIF_HOVER_SOURCE_ID,
-      paint: { "line-color": "#86efac", "line-width": 1.5, "line-opacity": 0.9 }
+      paint: {
+        "line-color": ["get", "lineColor"] as any,
+        "line-width": 1.5,
+        "line-opacity": 0.9
+      }
     });
   }
 }
 
-export function setIiifHoverMask(m: maplibregl.Map, ring: Array<[number, number]> | null): void {
+export type IiifHoverMask = { ring: Array<[number, number]>; fillColor: string; lineColor: string };
+
+export function setIiifHoverMasks(m: maplibregl.Map, masks: IiifHoverMask[] | null): void {
   const source = m.getSource(IIIF_HOVER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
   if (!source) return;
-  if (!ring || ring.length < 3) {
+  if (!masks || masks.length === 0) {
     source.setData({ type: "FeatureCollection", features: [] });
     return;
   }
-  const closed: Array<[number, number]> = [...ring, ring[0]];
-  source.setData({
-    type: "FeatureCollection",
-    features: [{ type: "Feature", geometry: { type: "Polygon", coordinates: [closed] }, properties: {} }]
-  });
+  const features = masks
+    .filter(({ ring }) => ring.length >= 3)
+    .map(({ ring, fillColor, lineColor }) => ({
+      type: "Feature" as const,
+      geometry: { type: "Polygon" as const, coordinates: [[...ring, ring[0]]] },
+      properties: { fillColor, lineColor }
+    }));
+  source.setData({ type: "FeatureCollection", features });
   // Move hover layers above the warped map layers so the fill renders on top.
   try { if (m.getLayer(IIIF_HOVER_FILL_LAYER_ID)) m.moveLayer(IIIF_HOVER_FILL_LAYER_ID); } catch { /* ignore */ }
   try { if (m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_HOVER_LINE_LAYER_ID); } catch { /* ignore */ }
@@ -277,7 +292,7 @@ export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, 
         source: PRIMITIVE_SOURCE_ID,
         filter: ["==", ["get", "type"], "parcel"],
         paint: {
-          "line-color": "#bf360c",
+          "line-color": "#2980b9",
           "line-width": 1.1,
           "line-opacity": 1
         }
@@ -302,9 +317,42 @@ export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, 
         }
       });
     }
+    if (!map.getSource(PRIMITIVE_SELECT_SOURCE_ID)) {
+      map.addSource(PRIMITIVE_SELECT_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+    }
+    if (!map.getLayer(PRIMITIVE_SELECT_FILL_LAYER_ID)) {
+      map.addLayer({
+        id: PRIMITIVE_SELECT_FILL_LAYER_ID,
+        type: "fill",
+        source: PRIMITIVE_SELECT_SOURCE_ID,
+        paint: {
+          "fill-color": "#2980b9",
+          "fill-opacity": 0.28
+        }
+      });
+    }
+    if (!map.getLayer(PRIMITIVE_SELECT_LINE_LAYER_ID)) {
+      map.addLayer({
+        id: PRIMITIVE_SELECT_LINE_LAYER_ID,
+        type: "line",
+        source: PRIMITIVE_SELECT_SOURCE_ID,
+        paint: {
+          "line-color": "#2980b9",
+          "line-width": 2,
+          "line-opacity": 1
+        }
+      });
+    }
     return;
   }
 
+  for (const id of [PRIMITIVE_SELECT_LINE_LAYER_ID, PRIMITIVE_SELECT_FILL_LAYER_ID]) {
+    if (map.getLayer(id)) map.removeLayer(id);
+  }
+  if (map.getSource(PRIMITIVE_SELECT_SOURCE_ID)) map.removeSource(PRIMITIVE_SELECT_SOURCE_ID);
   if (hasHoverLayer) {
     console.debug(`[primitive] removeLayer id=${PRIMITIVE_HOVER_LAYER_ID}`);
     map.removeLayer(PRIMITIVE_HOVER_LAYER_ID);
@@ -346,6 +394,12 @@ export function getPrimitiveLayerIds(): string[] {
   return [PRIMITIVE_FILL_LAYER_ID, PRIMITIVE_LAYER_ID];
 }
 
+function renderedFeatureToPolygon(feature: any): { type: "Feature"; geometry: any; properties: Record<string, never> } | null {
+  const geom = feature?.geometry;
+  if (!geom || (geom.type !== "Polygon" && geom.type !== "MultiPolygon")) return null;
+  return { type: "Feature", geometry: geom, properties: {} };
+}
+
 export function setPrimitiveHoverFeature(map: maplibregl.Map, feature: any | null): void {
   const source = map.getSource(PRIMITIVE_HOVER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
   if (!source) return;
@@ -353,10 +407,24 @@ export function setPrimitiveHoverFeature(map: maplibregl.Map, feature: any | nul
     source.setData({ type: "FeatureCollection", features: [] });
     return;
   }
-  source.setData({
-    type: "FeatureCollection",
-    features: [feature]
-  });
+  const poly = renderedFeatureToPolygon(feature);
+  if (!poly) return;
+  source.setData({ type: "FeatureCollection", features: [poly] });
+  try { if (map.getLayer(PRIMITIVE_HOVER_LAYER_ID)) map.moveLayer(PRIMITIVE_HOVER_LAYER_ID); } catch { /* ignore */ }
+}
+
+export function setPrimitiveSelectFeature(map: maplibregl.Map, feature: any | null): void {
+  const source = map.getSource(PRIMITIVE_SELECT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  if (!feature) {
+    source.setData({ type: "FeatureCollection", features: [] });
+    return;
+  }
+  const poly = renderedFeatureToPolygon(feature);
+  if (!poly) return;
+  source.setData({ type: "FeatureCollection", features: [poly] });
+  try { if (map.getLayer(PRIMITIVE_SELECT_FILL_LAYER_ID)) map.moveLayer(PRIMITIVE_SELECT_FILL_LAYER_ID); } catch { /* ignore */ }
+  try { if (map.getLayer(PRIMITIVE_SELECT_LINE_LAYER_ID)) map.moveLayer(PRIMITIVE_SELECT_LINE_LAYER_ID); } catch { /* ignore */ }
 }
 
 function attachPrimitiveDebugListeners(map: maplibregl.Map, geojsonUrl: string): void {

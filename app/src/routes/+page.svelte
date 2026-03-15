@@ -1,5 +1,6 @@
 <!-- src/routes/+page.svelte -->
 <script lang="ts">
+  import '$lib/theme.css';
   import { onDestroy, onMount } from "svelte";
   import type maplibregl from "maplibre-gl";
 
@@ -17,7 +18,8 @@
     setPrimitiveLayerOpacity,
     getPrimitiveLayerIds,
     setPrimitiveHoverFeature,
-    setIiifHoverMask
+    setPrimitiveSelectFeature,
+    setIiifHoverMasks
   } from "$lib/artemis/map/mapInit";
   import { attachAllmapsDebugEvents } from "$lib/artemis/debug/attachAllmapsDebugEvents";
   import {
@@ -85,15 +87,19 @@
   };
   let subLayerLoading: Record<string, boolean> = {};
 
-  let primitiveHover: { x: number; y: number; parcelLabel: string; leafId: string } | null = null;
+  let primitiveHoveredFeature: any = null;
 
   // IIIF warped map hover/click state
-  let iiifHoveredMap: { mapId: string; warpedMap: any } | null = null;
-  type IiifMapInfo = { title: string; sourceManifestUrl: string; imageServiceUrl?: string; manifestAllmapsUrl?: string };
-  let iiifInfoPanel: IiifMapInfo | null = null;
+  let iiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
+  type IiifMapInfo = { title: string; sourceManifestUrl: string; imageServiceUrl?: string; manifestAllmapsUrl?: string; layerLabel?: string; layerColor?: string };
+  let iiifInfoPanel: IiifMapInfo[] | null = null;
+  type ParcelClickInfo = { parcelLabel: string; leafId: string; properties: Record<string, any> };
+  let parcelClickInfo: ParcelClickInfo | null = null;
   let viewerOpen = false;
+  let viewerItem: IiifMapInfo | null = null;
 
-  let viewerManifest: { url: string; title: string } | null = null;
+  // Maps groupId (uiLayerId) → mainId for color lookups
+  const groupIdToMainId = new Map<string, string>();
 
   function pointInPolygon(point: [number, number], ring: Array<[number, number]>): boolean {
     const [x, y] = point;
@@ -108,15 +114,22 @@
     return inside;
   }
 
-  function hitTestWarpedMaps(lon: number, lat: number): { mapId: string; warpedMap: any } | null {
-    for (const { mapId, warpedMap } of getAllActiveWarpedMaps()) {
+  function hitTestAllWarpedMaps(lon: number, lat: number): Array<{ mapId: string; warpedMap: any; groupId: string }> {
+    const hits: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
+    for (const { mapId, warpedMap, groupId } of getAllActiveWarpedMaps()) {
       const mask: Array<[number, number]> = warpedMap.geoMask ?? [];
       if (mask.length < 3) continue;
       const bbox: [number, number, number, number] | undefined = warpedMap.geoMaskBbox;
       if (bbox && (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3])) continue;
-      if (pointInPolygon([lon, lat], mask)) return { mapId, warpedMap };
+      if (pointInPolygon([lon, lat], mask)) hits.push({ mapId, warpedMap, groupId });
     }
-    return null;
+    return hits;
+  }
+
+  function colorForGroupId(gid: string): string {
+    const mainId = groupIdToMainId.get(gid);
+    if (!mainId) return '#4ade80';
+    return MAIN_LAYER_META[mainId]?.color ?? '#4ade80';
   }
   type ToponymIndexItem = {
     id: string;
@@ -157,6 +170,7 @@
   type ToponymSearchResult = ToponymIndexItem & { score: number };
   type ManifestSearchItem = {
     id: string;
+    label: string;
     text: string;
     textNormalized: string;
     mapName: string;
@@ -176,9 +190,6 @@
   let searchSelectionLocked = false;
   let toponymResults: ToponymSearchResult[] = [];
   let manifestResults: ManifestSearchResult[] = [];
-  let miradorDialog:
-    | { title: string; sourceManifestUrl: string; miradorUrl: string }
-    | null = null;
   let toponymFirstFocusSeen = false;
   let toponymSeedSuggestions: ToponymIndexItem[] = [];
 
@@ -413,6 +424,7 @@
       seen.add(id);
       out.push({
         id,
+        label,
         text,
         textNormalized,
         mapName,
@@ -449,40 +461,48 @@
     else map.once("load", fly);
   }
 
-  function flyToToponym(item: ToponymIndexItem) {
-    flyToCoordinates(item.lon, item.lat, `Toponym "${item.text}"`);
+  async function flyToToponym(item: ToponymIndexItem) {
     toponymQuery = item.text;
     searchSelectionLocked = true;
+    flyToCoordinates(item.lon, item.lat, `Toponym "${item.text}"`);
+    const mainId = findMainIdForMapName(item.mapName);
+    if (mainId) await activateLayer(mainId);
   }
 
-  function buildMiradorUrl(manifestUrl: string): string {
-    return `https://projectmirador.org/embed/?manifest=${encodeURIComponent(manifestUrl)}`;
+  function findMainIdForMapName(mapName: string): string | undefined {
+    const norm = mapName.trim().toLowerCase();
+    for (const [mainId, label] of Object.entries(MAIN_LAYER_LABELS)) {
+      if (label.toLowerCase() === norm) return mainId;
+    }
+    for (const [mainId, label] of Object.entries(MAIN_LAYER_LABELS)) {
+      if (norm.includes(mainId) || label.toLowerCase().includes(norm)) return mainId;
+    }
+    return undefined;
   }
 
-  async function copyMiradorUrl() {
-    if (!miradorDialog) return;
-    try {
-      await navigator.clipboard.writeText(miradorDialog.miradorUrl);
-      log("INFO", "Mirador URL copied to clipboard.");
-    } catch {
-      log("WARN", "Could not copy Mirador URL to clipboard.");
+  async function activateLayer(mainId: string) {
+    if (mainLayerOrder[0] !== mainId) {
+      mainLayerOrder = [mainId as MainLayerId, ...mainLayerOrder.filter(id => id !== mainId)];
+    }
+    if (!mainLayerEnabled[mainId]) {
+      await toggleMainLayer(mainId, true);
+    } else {
+      applyZOrder();
     }
   }
 
-  function openMiradorUrl() {
-    if (!miradorDialog) return;
-    window.open(miradorDialog.miradorUrl, "_blank", "noopener,noreferrer");
-  }
-
-  function onManifestResultClick(result: ManifestSearchItem) {
-    flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
+  async function onManifestResultClick(result: ManifestSearchItem) {
     toponymQuery = result.text;
     searchSelectionLocked = true;
-    miradorDialog = {
-      title: result.text,
+    flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
+    const mainId = findMainIdForMapName(result.mapName);
+    if (mainId) await activateLayer(mainId);
+    iiifInfoPanel = [{
+      title: result.label,
       sourceManifestUrl: result.sourceManifestUrl,
-      miradorUrl: buildMiradorUrl(result.sourceManifestUrl)
-    };
+      layerLabel: mainId ? MAIN_LAYER_LABELS[mainId] : result.mapName,
+      layerColor: mainId ? MAIN_LAYER_META[mainId]?.color : undefined
+    }];
   }
 
   function pickRandomToponymSuggestions(count = 3) {
@@ -616,6 +636,14 @@
     try {
       const index = await loadCompiledIndex(cfg());
       layers = normalizeSourceLayers(index);
+      // Build groupId → mainId mapping for hover color lookups
+      groupIdToMainId.clear();
+      for (const [mainId, subs] of Object.entries(MAIN_LAYER_SUBS)) {
+        for (const subId of subs) {
+          const info = getIiifInfoForSub(subId);
+          if (info) groupIdToMainId.set(info.uiLayerId, mainId);
+        }
+      }
       manifestSearchIndex = buildManifestSearchIndex(index, layers);
       log("INFO", `Manifest search entries loaded: ${manifestSearchIndex.length}`);
       await loadToponymIndex();
@@ -912,7 +940,6 @@
     layers = [];
     manifestSearchIndex = [];
     manifestResults = [];
-    miradorDialog = null;
     mainLayerEnabled = { gereduceerd: false, primitief: false, vandermaelen: false, ferraris: false, handdrawn: false };
     mainLayerLoading = {};
     subLayerEnabled = {
@@ -957,47 +984,80 @@
         if (details) {
           parcelHit = true;
           setPrimitiveHoverFeature(map, feature);
-          primitiveHover = { x: e.point.x, y: e.point.y, parcelLabel: details.parcelLabel, leafId: details.leafId };
+          primitiveHoveredFeature = feature;
         } else {
-          if (primitiveHover) primitiveHover = null;
+          primitiveHoveredFeature = null;
           setPrimitiveHoverFeature(map, null);
         }
       } else {
-        if (primitiveHover) primitiveHover = null;
+        primitiveHoveredFeature = null;
         setPrimitiveHoverFeature(map, null);
       }
 
       // --- IIIF warped map hover ---
       const lngLat = map.unproject(e.point);
-      const hit = hitTestWarpedMaps(lngLat.lng, lngLat.lat);
-      if (hit?.mapId !== iiifHoveredMap?.mapId) {
-        iiifHoveredMap = hit;
-        setIiifHoverMask(map, hit ? hit.warpedMap.geoMask : null);
+      const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat);
+      const prevIds = iiifHoveredMaps.map(h => h.mapId).join(',');
+      const nextIds = hits.map(h => h.mapId).join(',');
+      if (prevIds !== nextIds) {
+        iiifHoveredMaps = hits;
+        if (hits.length === 0) {
+          setIiifHoverMasks(map, null);
+        } else {
+          setIiifHoverMasks(map, hits.map(h => {
+            const color = colorForGroupId(h.groupId);
+            return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
+          }));
+        }
       }
 
-      map.getCanvas().style.cursor = (parcelHit || hit) ? "pointer" : "";
+      map.getCanvas().style.cursor = (parcelHit || hits.length > 0) ? "pointer" : "";
     };
 
     const onMapMouseOut = () => {
-      primitiveHover = null;
+      primitiveHoveredFeature = null;
       setPrimitiveHoverFeature(map, null);
-      iiifHoveredMap = null;
-      setIiifHoverMask(map, null);
+      iiifHoveredMaps = [];
+      setIiifHoverMasks(map, null);
       map.getCanvas().style.cursor = "";
     };
 
     const onMapClick = (e: any) => {
-      if (!iiifHoveredMap) return;
-      const info = getManifestInfoForMapId(iiifHoveredMap.mapId);
-      if (!info) return;
-      const imageServiceUrl: string | undefined =
-        iiifHoveredMap.warpedMap?.georeferencedMap?.resource?.id ?? undefined;
-      iiifInfoPanel = {
-        title: info.label,
-        sourceManifestUrl: info.sourceManifestUrl,
-        imageServiceUrl,
-        manifestAllmapsUrl: info.manifestAllmapsUrl
-      };
+      // Parcel click
+      if (primitiveHoveredFeature) {
+        const details = parcelHoverDetailsFromFeature(primitiveHoveredFeature);
+        if (details) {
+          const props = primitiveHoveredFeature.properties ?? {};
+          parcelClickInfo = { parcelLabel: details.parcelLabel, leafId: details.leafId, properties: props };
+          setPrimitiveSelectFeature(map, primitiveHoveredFeature);
+        }
+      } else {
+        parcelClickInfo = null;
+        setPrimitiveSelectFeature(map, null);
+      }
+
+      // IIIF click
+      if (iiifHoveredMaps.length === 0) {
+        iiifInfoPanel = null;
+      } else {
+        const items: IiifMapInfo[] = [];
+        for (const hit of iiifHoveredMaps) {
+          const info = getManifestInfoForMapId(hit.mapId);
+          if (!info) continue;
+          const imageServiceUrl: string | undefined =
+            hit.warpedMap?.georeferencedMap?.resource?.id ?? undefined;
+          const mainId = groupIdToMainId.get(hit.groupId) ?? '';
+          items.push({
+            title: info.label,
+            sourceManifestUrl: info.sourceManifestUrl,
+            imageServiceUrl,
+            manifestAllmapsUrl: info.manifestAllmapsUrl,
+            layerLabel: MAIN_LAYER_LABELS[mainId] ?? '',
+            layerColor: colorForGroupId(hit.groupId)
+          });
+        }
+        iiifInfoPanel = items.length > 0 ? items : null;
+      }
     };
 
     map.on("mousemove", onMapMouseMove);
@@ -1013,7 +1073,6 @@
   });
 
   onDestroy(() => {
-    primitiveHover = null;
     destroyMapContext();
   });
 
@@ -1026,6 +1085,31 @@
   }
 
   $: activeLayerCount = Object.values(subLayerEnabled).filter(Boolean).length;
+
+  type IiifPanelGroup = { layerLabel: string; layerColor: string; items: IiifMapInfo[] };
+
+  function groupIiifPanel(items: IiifMapInfo[] | null): IiifPanelGroup[] {
+    if (!items) return [];
+    const groups = new Map<string, IiifPanelGroup>();
+    for (const item of items) {
+      const key = item.layerLabel ?? '';
+      if (!groups.has(key)) {
+        groups.set(key, { layerLabel: item.layerLabel ?? '', layerColor: item.layerColor ?? '#4ade80', items: [] });
+      }
+      groups.get(key)!.items.push(item);
+    }
+    return Array.from(groups.values());
+  }
+
+  $: iiifPanelGroups = groupIiifPanel(iiifInfoPanel);
+  $: panelOpen = iiifInfoPanel !== null || parcelClickInfo !== null;
+  $: panelTitle = iiifInfoPanel && parcelClickInfo
+    ? 'Location details'
+    : iiifInfoPanel
+      ? (iiifInfoPanel.length === 1 ? iiifInfoPanel[0].title : `${iiifInfoPanel.length} maps at this location`)
+      : parcelClickInfo
+        ? `Parcel ${parcelClickInfo.parcelLabel}`
+        : '';
 </script>
 
 <div class="wrap">
@@ -1055,7 +1139,10 @@
           <div class="toponym-suggestions-title">Try one of these</div>
           <div class="toponym-suggestion-list">
             {#each toponymSeedSuggestions as s (s.id)}
+              {@const sMainId = findMainIdForMapName(s.mapName)}
+              {@const sColor = sMainId ? MAIN_LAYER_META[sMainId]?.color : undefined}
               <button type="button" class="toponym-suggestion" on:click={() => (toponymQuery = s.text)}>
+                {#if sColor}<span class="result-color-dot" style="background:{sColor}"></span>{/if}
                 <span class="toponym-text">{s.text}</span>
                 <span class="toponym-meta">{s.mapName}</span>
               </button>
@@ -1068,24 +1155,30 @@
           {#if manifestResults.length > 0}
             <div class="result-group-title">IIIF manifests</div>
             {#each manifestResults as result (result.id)}
+              {@const mMainId = findMainIdForMapName(result.mapName)}
+              {@const mColor = mMainId ? MAIN_LAYER_META[mMainId]?.color : undefined}
               <button
                 type="button"
                 class="toponym-result"
                 on:click={() => onManifestResultClick(result)}
               >
+                {#if mColor}<span class="result-color-dot" style="background:{mColor}"></span>{/if}
                 <span class="toponym-text">{result.text}</span>
-                <span class="toponym-meta">IIIF - {result.mapName}</span>
+                <span class="toponym-meta">IIIF · {result.mapName}</span>
               </button>
             {/each}
           {/if}
           {#if toponymResults.length > 0}
             <div class="result-group-title">Toponyms</div>
             {#each toponymResults as result (result.id)}
+              {@const tMainId = findMainIdForMapName(result.mapName)}
+              {@const tColor = tMainId ? MAIN_LAYER_META[tMainId]?.color : undefined}
               <button
                 type="button"
                 class="toponym-result"
                 on:click={() => flyToToponym(result)}
               >
+                {#if tColor}<span class="result-color-dot" style="background:{tColor}"></span>{/if}
                 <span class="toponym-text">{result.text}</span>
                 <span class="toponym-meta">{result.mapName}</span>
               </button>
@@ -1097,85 +1190,82 @@
       {/if}
     </section>
 
-    {#if miradorDialog}
-      <div class="mirador-modal-backdrop">
-        <div class="mirador-modal" role="dialog" aria-label="Mirador URL" tabindex="-1">
-          <div class="mirador-title">{miradorDialog.title}</div>
-          <div class="mirador-row">
-            <div class="mirador-label">Source manifest</div>
-            <input readonly value={miradorDialog.sourceManifestUrl} />
-          </div>
-          <div class="mirador-row">
-            <div class="mirador-label">Mirador URL</div>
-            <input readonly value={miradorDialog.miradorUrl} />
-          </div>
-          <div class="mirador-actions">
-            <button type="button" on:click={copyMiradorUrl}>Copy URL</button>
-            <button type="button" on:click={openMiradorUrl}>Open Mirador</button>
-            <button type="button" on:click={() => (miradorDialog = null)}>Close</button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    <!-- IIIF map info panel — sweeps in from the right on click -->
-    <aside class="iiif-map-panel" class:open={iiifInfoPanel !== null}>
-      {#if iiifInfoPanel}
+    <!-- Info panel — sweeps in from the right on click (IIIF and/or parcel) -->
+    <aside class="iiif-map-panel" class:open={panelOpen}>
+      {#if panelOpen}
         <div class="iiif-panel-header">
-          <span class="iiif-panel-title">{iiifInfoPanel.title}</span>
-          <button class="iiif-panel-close" type="button" on:click={() => (iiifInfoPanel = null)} aria-label="Close">
+          <span class="iiif-panel-title">{panelTitle}</span>
+          <button class="iiif-panel-close" type="button" on:click={() => { iiifInfoPanel = null; parcelClickInfo = null; setPrimitiveSelectFeature(map, null); }} aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
           </button>
         </div>
         <div class="iiif-panel-body">
-          <!-- Preview + View Document -->
-          <div class="iiif-view-doc-row">
-            {#if iiifInfoPanel.imageServiceUrl}
-              <img
-                class="iiif-thumb"
-                src="{iiifInfoPanel.imageServiceUrl}/full/!120,120/0/default.jpg"
-                alt={iiifInfoPanel.title}
-                loading="lazy"
-              />
-            {/if}
-            <button
-              type="button"
-              class="iiif-view-doc-btn"
-              on:click={() => { viewerOpen = true; }}
-            >
-              View Document
-            </button>
-          </div>
-
-          <div class="iiif-panel-section">
-            <div class="iiif-panel-label">Source manifest</div>
-            <div class="iiif-panel-url">{iiifInfoPanel.sourceManifestUrl}</div>
-            <div class="iiif-panel-actions">
-              <button type="button" on:click={async () => { try { await navigator.clipboard.writeText(iiifInfoPanel!.sourceManifestUrl); } catch { /* ignore */ } }}>
-                Copy URL
-              </button>
+          {#if parcelClickInfo}
+            <div class="iiif-layer-group" style="--group-color:{MAIN_LAYER_META['primitief'].color};">
+              <div class="iiif-layer-group-header">
+                <span class="iiif-panel-item-swatch" style="background:{MAIN_LAYER_META['primitief'].color};"></span>
+                <span class="iiif-layer-group-label">Primitief — Parcel</span>
+              </div>
+              <div class="parcel-detail-block">
+                <div class="parcel-detail-row">
+                  <span class="parcel-detail-key">Parcel</span>
+                  <span class="parcel-detail-val">{parcelClickInfo.parcelLabel}</span>
+                </div>
+                <div class="parcel-detail-row">
+                  <span class="parcel-detail-key">Leaf</span>
+                  <span class="parcel-detail-val mono">{parcelClickInfo.leafId}</span>
+                </div>
+                {#each Object.entries(parcelClickInfo.properties).filter(([k, v]) => !k.startsWith('_') && String(v ?? '').trim() && k !== 'parcel_number' && k !== 'parcel_index') as [k, v]}
+                  <div class="parcel-detail-row">
+                    <span class="parcel-detail-key">{k.replace(/_/g, ' ')}</span>
+                    <span class="parcel-detail-val">{v}</span>
+                  </div>
+                {/each}
+              </div>
             </div>
-          </div>
-          {#if iiifInfoPanel.manifestAllmapsUrl}
-            <div class="iiif-panel-section">
-              <div class="iiif-panel-label">Allmaps</div>
-              <button type="button" class="iiif-panel-link-btn" on:click={() => window.open(iiifInfoPanel!.manifestAllmapsUrl, "_blank", "noopener,noreferrer")}>
-                View annotation
-              </button>
-            </div>
+          {/if}
+          {#if iiifInfoPanel}
+            {#if parcelClickInfo}<hr class="iiif-panel-divider" />{/if}
+            {#each iiifPanelGroups as group, gi (group.layerLabel)}
+              {#if gi > 0}<hr class="iiif-panel-divider" />{/if}
+              <div class="iiif-layer-group" style="--group-color:{group.layerColor};">
+                <div class="iiif-layer-group-header">
+                  <span class="iiif-panel-item-swatch" style="background:{group.layerColor};"></span>
+                  <span class="iiif-layer-group-label">{group.layerLabel}</span>
+                  {#if group.items.length > 1}
+                    <span class="iiif-layer-group-count">{group.items.length}</span>
+                  {/if}
+                </div>
+                {#each group.items as item (item.sourceManifestUrl)}
+                  <button
+                    type="button"
+                    class="iiif-map-row"
+                    on:click={() => { viewerItem = item; viewerOpen = true; }}
+                  >
+                    {#if item.imageServiceUrl}
+                      <img
+                        class="iiif-thumb-sm"
+                        src="{item.imageServiceUrl}/full/!56,56/0/default.jpg"
+                        alt=""
+                        loading="lazy"
+                      />
+                    {:else}
+                      <div class="iiif-thumb-placeholder"></div>
+                    {/if}
+                    <span class="iiif-map-row-title">{item.title}</span>
+                    <svg class="iiif-map-row-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                {/each}
+              </div>
+            {/each}
           {/if}
         </div>
       {/if}
     </aside>
-
-    {#if primitiveHover}
-      <div class="parcel-hover-tooltip" style={`left:${primitiveHover.x + 14}px; top:${primitiveHover.y + 14}px;`}>
-        <div>Parcel {primitiveHover.parcelLabel}</div>
-        <div class="parcel-hover-leaf mono">Leaf {primitiveHover.leafId}</div>
-      </div>
-    {/if}
 
     <section class="map-layers-panel">
       <div class="panel-header">
@@ -1195,7 +1285,7 @@
           {@const iiifSubId = subs.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif')}
           {@const iiifInfo = iiifSubId ? getIiifInfoForSub(iiifSubId) : null}
           {@const progress = iiifInfo ? (layerProgress[iiifInfo.uiLayerId] ?? null) : null}
-          <div class="era-card">
+          <div class="era-card" style="--layer-color:{meta.color}; --toggle-on:{meta.color};">
             <div class="era-header">
               <div class="order-arrows">
                 <button class="arrow-btn" type="button" disabled={isFirst}
@@ -1281,14 +1371,14 @@
             {/if}
             {#if expanded}
               <div class="sublayer-panel">
-                {#each subs as subId (subId)}
+                {#each subs.filter(s => SUB_LAYER_DEFS[s]?.kind !== 'iiif') as subId (subId)}
                   {@const subEnabled = subLayerEnabled[subId] ?? false}
                   {@const subLoading = subLayerLoading[subId] ?? false}
                   {@const subDef = SUB_LAYER_DEFS[subId]}
                   {@const subIiifInfo = subDef?.kind === 'iiif' ? getIiifInfoForSub(subId) : null}
                   {@const subProgress = subIiifInfo ? (layerProgress[subIiifInfo.uiLayerId] ?? null) : null}
                   <div class="sublayer-item">
-                    <span class="sublayer-dot" style="background:{meta.color};"></span>
+                    <span class="sublayer-dot"></span>
                     <span class="sublayer-name">{subDef?.label ?? subId}</span>
                     <span class="sublayer-badge kind-{subDef?.kind ?? 'geojson'}">{subDef?.kind === 'searchable' ? 'Searchable' : subDef?.kind?.toUpperCase() ?? ''}</span>
                     {#if subDef?.kind !== 'searchable'}
@@ -1432,6 +1522,22 @@
           </div>
         {/if}
 
+        {#if Object.keys(layerRenderStats).length > 0}
+          {@const totalVisible = Object.values(layerRenderStats).reduce((s, r) => s + r.visibleMaps, 0)}
+          {@const totalRegistered = Object.values(layerRenderStats).reduce((s, r) => s + r.registeredMaps, 0)}
+          {@const totalPending = Object.values(layerProgress).reduce((s, p) => s + Math.max(0, p.total - p.done), 0)}
+          <div class="metrics">
+            <div class="metrics-title">Map render state</div>
+            <table class="mtable">
+              <tbody>
+                <tr><th>In viewport</th><td class="ok">{totalVisible}</td></tr>
+                <tr><th>Registered</th><td>{totalRegistered}</td></tr>
+                <tr><th>Pending</th><td class={totalPending > 0 ? "muted" : "ok"}>{totalPending}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        {/if}
+
         <details class="log-details debug-details">
           <summary>Tile cache</summary>
           <div class="cache-stats">
@@ -1456,10 +1562,12 @@
   </main>
 </div>
 
-{#if viewerOpen && iiifInfoPanel}
+{#if viewerOpen && viewerItem}
   <IiifViewer
-    imageServiceUrl={iiifInfoPanel.imageServiceUrl ?? ""}
-    title={iiifInfoPanel.title}
+    imageServiceUrl={viewerItem.imageServiceUrl ?? ""}
+    title={viewerItem.title}
+    sourceManifestUrl={viewerItem.sourceManifestUrl}
+    manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ""}
     on:close={() => (viewerOpen = false)}
   />
 {/if}
@@ -1470,6 +1578,7 @@
     padding: 0;
     overflow: hidden;
     height: 100%;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
   .wrap {
@@ -1508,6 +1617,7 @@
     border: 0.5px solid var(--panel-border);
     border-radius: 8px;
     background: var(--panel-bg);
+    box-shadow: var(--shadow-md);
   }
 
   .toponym-search-input {
@@ -1538,6 +1648,7 @@
     border: 0.5px solid var(--panel-border);
     border-radius: 8px;
     background: var(--panel-bg);
+    box-shadow: var(--shadow-md);
   }
 
   .result-group-title {
@@ -1555,6 +1666,7 @@
     border: 0.5px solid var(--panel-border);
     border-radius: 8px;
     background: var(--panel-bg);
+    box-shadow: var(--shadow-md);
   }
 
   .toponym-suggestions-title {
@@ -1613,6 +1725,13 @@
     white-space: nowrap;
   }
 
+  .result-color-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
   .toponym-search-error,
   .toponym-search-empty {
     padding: 6px 8px;
@@ -1621,85 +1740,41 @@
     border: 0.5px solid var(--panel-border);
     font-size: 11px;
     color: var(--text-muted);
+    box-shadow: var(--shadow-md);
   }
 
   .toponym-search-error {
-    color: #f87171;
+    color: var(--text-error);
   }
 
-  .mirador-modal-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    background: rgba(0, 0, 0, 0.22);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-  }
-
-  .mirador-modal {
-    width: min(680px, 100%);
-    background: #fff;
-    border-radius: 10px;
-    border: 1px solid #d8d8d8;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
-    padding: 12px;
+  .parcel-detail-block {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 2px;
+    padding: 2px 0 6px;
   }
 
-  .mirador-title {
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .mirador-row {
+  .parcel-detail-row {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .mirador-label {
-    font-size: 11px;
-    opacity: 0.7;
-  }
-
-  .mirador-row input {
-    font-size: 12px;
-    padding: 6px 8px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .mirador-actions {
-    display: flex;
-    justify-content: flex-end;
     gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .parcel-hover-tooltip {
-    position: absolute;
-    z-index: 4;
-    pointer-events: none;
-    padding: 4px 7px;
+    padding: 4px 8px;
     border-radius: 4px;
-    border: 1px solid #111;
-    background: rgba(255, 255, 255, 0.97);
-    color: #111;
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.2;
-    white-space: nowrap;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    background: color-mix(in srgb, var(--group-color, #aaa) 7%, var(--card-bg));
+    font-size: 12px;
+    line-height: 1.4;
   }
 
-  .parcel-hover-leaf {
-    margin-top: 2px;
-    font-size: 10px;
-    color: #555;
+  .parcel-detail-key {
+    flex-shrink: 0;
+    width: 90px;
+    color: var(--text-muted);
+    text-transform: capitalize;
+  }
+
+  .parcel-detail-val {
+    flex: 1;
+    color: var(--text-primary);
+    word-break: break-all;
   }
 
   /* IIIF map info panel */
@@ -1711,7 +1786,7 @@
     width: min(380px, 92vw);
     background: var(--panel-bg);
     border-left: 0.5px solid var(--panel-border);
-    box-shadow: -6px 0 24px rgba(0, 0, 0, 0.32);
+    box-shadow: var(--shadow-panel-right);
     z-index: 10;
     display: flex;
     flex-direction: column;
@@ -1756,102 +1831,120 @@
 
   .iiif-panel-close:hover {
     color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.06);
   }
 
   .iiif-panel-body {
     flex: 1;
     overflow-y: auto;
-    padding: 14px;
+    padding: 10px 14px 14px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 0;
   }
 
-  .iiif-panel-section {
+  .iiif-panel-divider {
+    border: none;
+    border-top: 0.5px solid var(--panel-border);
+    margin: 8px 0;
+  }
+
+  .iiif-layer-group {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    border-left: 3px solid var(--group-color, #aaa);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 2px;
   }
 
-  .iiif-panel-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .iiif-panel-url {
-    font-size: 11px;
-    color: var(--text-primary);
-    word-break: break-all;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 5px;
-    padding: 7px 9px;
-    line-height: 1.5;
-    font-family: monospace;
-  }
-
-  .iiif-panel-url.small {
-    font-size: 10px;
-    color: var(--text-muted);
-  }
-
-  .iiif-panel-actions {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .iiif-view-doc-row {
+  .iiif-layer-group-header {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 7px;
+    padding: 6px 8px;
+    background: color-mix(in srgb, var(--group-color, #aaa) 10%, var(--card-bg));
   }
 
-  .iiif-thumb {
+  .iiif-panel-item-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
     flex-shrink: 0;
-    width: 72px;
-    height: 72px;
-    object-fit: cover;
-    border-radius: 5px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.3);
   }
 
-  .iiif-view-doc-btn {
+  .iiif-layer-group-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--group-color, #555);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     flex: 1;
-    padding: 10px 14px;
-    font-size: 13px;
+  }
+
+  .iiif-layer-group-count {
+    font-size: 10px;
     font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--group-color, #aaa) 15%, var(--card-bg));
+    color: var(--group-color, #555);
+  }
+
+  .iiif-map-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
     border-radius: 6px;
     border: none;
-    background: #22c55e;
-    color: #fff;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .iiif-view-doc-btn:hover {
-    background: #16a34a;
-  }
-
-  .iiif-panel-actions button,
-  .iiif-panel-link-btn {
-    padding: 7px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 5px;
-    border: 0.5px solid var(--panel-border);
-    background: rgba(255, 255, 255, 0.08);
+    background: none;
     color: var(--text-primary);
     cursor: pointer;
+    text-align: left;
+    transition: background 0.12s;
+    width: 100%;
   }
 
-  .iiif-panel-actions button:hover,
-  .iiif-panel-link-btn:hover {
-    background: rgba(255, 255, 255, 0.14);
+  .iiif-map-row:hover {
+    background: color-mix(in srgb, var(--group-color, #aaa) 10%, var(--card-bg));
+  }
+
+  .iiif-thumb-sm {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .iiif-thumb-placeholder {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
+  .iiif-map-row-title {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .iiif-map-row-arrow {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    opacity: 0.5;
   }
 
   .map-layers-panel {
@@ -1866,6 +1959,8 @@
     flex-direction: column;
     background: var(--panel-bg);
     border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--shadow-md);
   }
 
   .debug-toggle {
@@ -1873,14 +1968,14 @@
     top: 14px;
     right: 14px;
     z-index: 3;
-    border: 1px solid #d1d1d1;
+    border: 1px solid var(--border-ui);
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--overlay-bg);
     padding: 8px 10px;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-debug);
   }
 
   .debug-menu {
@@ -1896,10 +1991,10 @@
     gap: 10px;
     padding: 12px;
     border-radius: 8px;
-    border: 1px solid #d8d8d8;
-    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-ui);
+    background: var(--overlay-bg);
     backdrop-filter: blur(4px);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-lg);
   }
 
   .debug-menu-head {
@@ -1910,9 +2005,9 @@
   }
 
   .debug-close {
-    border: 1px solid #d1d1d1;
+    border: 1px solid var(--border-ui);
     border-radius: 6px;
-    background: #fff;
+    background: var(--card-bg);
     padding: 5px 8px;
     font-size: 11px;
     cursor: pointer;
@@ -1925,10 +2020,10 @@
   }
 
   .problem-item {
-    border: 1px solid #e8d6d6;
+    border: 1px solid var(--problem-border);
     border-radius: 6px;
     padding: 6px 8px;
-    background: #fff7f7;
+    background: var(--problem-bg);
     display: grid;
     gap: 2px;
   }
@@ -1940,7 +2035,7 @@
   }
 
   .problem-error {
-    color: #8b1f1f;
+    color: var(--problem-error-color);
     font-size: 12px;
   }
 
@@ -1982,24 +2077,8 @@
 
   .error-msg {
     font-size: 11px;
-    color: #c0392b;
+    color: var(--text-error);
     word-break: break-all;
-  }
-
-  /* Layer panel */
-  :global(:root) {
-    --panel-border: rgba(255, 255, 255, 0.1);
-    --panel-bg: #2c2c30;
-    --card-bg: #353538;
-    --card-border: rgba(255, 255, 255, 0.09);
-    --sublayer-bg: rgba(0, 0, 0, 0.2);
-    --text-primary: #f2f2f2;
-    --text-muted: rgba(255, 255, 255, 0.55);
-    --input-bg: #404045;
-    --result-bg: #3e3e42;
-    --result-hover: #48484d;
-    --toggle-off: rgba(255, 255, 255, 0.2);
-    --toggle-on: #22c55e;
   }
 
   .panel-header {
@@ -2034,7 +2113,8 @@
   .era-card {
     display: flex;
     flex-direction: column;
-    border: 0.5px solid var(--card-border);
+    border: 1px solid color-mix(in srgb, var(--layer-color) 28%, transparent);
+    border-left: 3px solid var(--layer-color);
     border-radius: 8px;
     background: var(--card-bg);
     overflow: hidden;
@@ -2045,6 +2125,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
+    background: color-mix(in srgb, var(--layer-color) 9%, var(--card-bg));
   }
 
   .order-arrows {
@@ -2068,7 +2149,7 @@
   }
 
   .arrow-btn:hover:not(:disabled) {
-    color: var(--text-primary);
+    color: var(--layer-color);
   }
 
   .arrow-btn:disabled {
@@ -2111,8 +2192,8 @@
 
   .era-name {
     font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
+    font-weight: 600;
+    color: var(--layer-color);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2152,9 +2233,9 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--toggle-thumb);
     transition: transform 0.18s;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    box-shadow: var(--shadow-sm);
   }
 
   .toggle-pill.on {
@@ -2204,13 +2285,13 @@
   }
 
   .chevron-btn:hover {
-    color: var(--text-primary);
+    color: var(--layer-color);
   }
 
   /* Sublayer panel */
   .sublayer-panel {
-    border-top: 0.5px solid var(--panel-border);
-    background: var(--sublayer-bg);
+    border-top: 1px solid color-mix(in srgb, var(--layer-color) 20%, transparent);
+    background: color-mix(in srgb, var(--layer-color) 5%, var(--card-bg));
     padding: 6px 0 4px;
     display: flex;
     flex-direction: column;
@@ -2222,6 +2303,12 @@
     align-items: center;
     gap: 7px;
     padding: 5px 10px 5px 14px;
+    border-radius: 5px;
+    transition: background 0.1s;
+  }
+
+  .sublayer-item:hover {
+    background: color-mix(in srgb, var(--layer-color) 12%, var(--card-bg));
   }
 
   .sublayer-dot {
@@ -2229,6 +2316,7 @@
     height: 6px;
     border-radius: 50%;
     flex-shrink: 0;
+    background: var(--layer-color);
   }
 
   .sublayer-name {
@@ -2247,28 +2335,28 @@
   }
 
   .sublayer-badge.kind-iiif {
-    background: #e8f0fe;
-    color: #1a73e8;
+    background: var(--badge-iiif-bg);
+    color: var(--badge-iiif-color);
   }
 
   .sublayer-badge.kind-geojson {
-    background: #e6f4ea;
-    color: #137333;
+    background: var(--badge-geo-bg);
+    color: var(--badge-geo-color);
   }
 
   .sublayer-badge.kind-wmts {
-    background: #e6f4ea;
-    color: #137333;
+    background: var(--badge-geo-bg);
+    color: var(--badge-geo-color);
   }
 
   .sublayer-badge.kind-wms {
-    background: #e6f4ea;
-    color: #137333;
+    background: var(--badge-geo-bg);
+    color: var(--badge-geo-color);
   }
 
   .sublayer-badge.kind-searchable {
-    background: #fef7e0;
-    color: #b45309;
+    background: var(--badge-search-bg);
+    color: var(--badge-search-color);
   }
 
   /* Opacity row (inside sublayer panel) */
@@ -2281,6 +2369,7 @@
 
   .opacity-slider {
     flex: 1;
+    accent-color: var(--layer-color);
   }
 
   .opacity-value {
@@ -2295,7 +2384,7 @@
   .era-progress {
     position: relative;
     height: 12px;
-    background: #eee;
+    background: var(--progress-bg);
     margin: 0 10px 6px;
     border-radius: 3px;
     overflow: hidden;
@@ -2304,7 +2393,7 @@
   .era-progress-bar {
     position: absolute;
     inset: 0 auto 0 0;
-    background: #4a90d9;
+    background: var(--layer-color);
     transition: width 0.15s;
   }
 
@@ -2317,13 +2406,13 @@
 
   .era-progress-spinner {
     font-size: 10px;
-    color: #4a90d9;
+    color: var(--spinner-color);
     padding: 2px 10px 6px;
   }
 
   /* Metrics */
   .metrics {
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--border-light);
     border-radius: 4px;
     padding: 10px;
     font-size: 12px;
@@ -2356,7 +2445,7 @@
 
   .mtable th, .mtable td {
     padding: 3px 4px;
-    border-top: 1px solid #eee;
+    border-top: 1px solid var(--border-light);
     text-align: left;
     overflow: hidden;
     word-break: break-all;
@@ -2367,10 +2456,10 @@
     font-weight: 600;
   }
 
-  .mtable td.ok   { color: #2a7a2a; }
-  .mtable td.fail { color: #c0392b; }
-  .mtable td.muted { color: #999; }
-  .mono { font-family: ui-monospace, "Courier New", monospace; }
+  .mtable td.ok   { color: var(--text-ok); }
+  .mtable td.fail { color: var(--text-error); }
+  .mtable td.muted { color: var(--text-muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace; }
 
   .cache-stats {
     padding: 6px 8px;
@@ -2380,11 +2469,11 @@
     gap: 2px;
   }
 
-  .ok { color: #2a7a2a; }
+  .ok { color: var(--text-ok); }
 
   /* Logs */
   .log-details {
-    border: 1px solid #eee;
+    border: 1px solid var(--border-light);
     border-radius: 3px;
   }
 
@@ -2393,17 +2482,17 @@
     font-size: 11px;
     cursor: pointer;
     user-select: none;
-    color: #666;
+    color: var(--text-muted-log);
   }
 
   .log-details[open] summary {
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--border-light);
   }
 
   .logs {
     max-height: 260px;
     overflow: auto;
-    font-family: ui-monospace, "Courier New", monospace;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 11px;
     padding: 6px;
   }
@@ -2412,11 +2501,11 @@
     display: flex;
     gap: 6px;
     padding: 1px 0;
-    border-bottom: 1px solid #f5f5f5;
+    border-bottom: 1px solid var(--border-subtle);
   }
 
-  .log-line.ERROR .msg { color: #c0392b; }
-  .log-line.WARN  .msg { color: #b7800a; }
+  .log-line.ERROR .msg { color: var(--text-error); }
+  .log-line.WARN  .msg { color: var(--text-warn); }
 
   .ts {
     opacity: 0.5;

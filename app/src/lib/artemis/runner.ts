@@ -142,13 +142,13 @@ export function getManifestInfoForMapId(mapId: string) {
   return mapIdToManifestInfo.get(mapId) ?? null;
 }
 
-export function getAllActiveWarpedMaps(): { mapId: string; warpedMap: any }[] {
-  const result: { mapId: string; warpedMap: any }[] = [];
-  for (const layers of activeWarpedLayersByGroup.values()) {
+export function getAllActiveWarpedMaps(): { mapId: string; warpedMap: any; groupId: string }[] {
+  const result: { mapId: string; warpedMap: any; groupId: string }[] = [];
+  for (const [groupId, layers] of activeWarpedLayersByGroup.entries()) {
     for (const layer of layers) {
       for (const wm of layer.getWarpedMaps()) {
         const mapId = (wm as any).mapId;
-        if (mapId) result.push({ mapId, warpedMap: wm });
+        if (mapId) result.push({ mapId, warpedMap: wm, groupId });
       }
     }
   }
@@ -947,36 +947,6 @@ export async function runLayerGroup(opts: {
     }
   } catch (e: any) {
     log?.("WARN", `[${label}] image info pre-warm failed: ${e?.message ?? e}`);
-  }
-
-  // Fit to the union of all sub-layers' bounds. When entries are split by index order
-  // and the collection is sorted geographically, each chunk covers a different region —
-  // fitting to only layers[0] would leave layers[1]'s maps permanently off-screen.
-  const MIN_ZOOM = 12;
-  try {
-    type BB = [[number, number], [number, number]];
-    let merged: BB | null = null;
-    for (const l of layers) {
-      const b = l.getBounds() as BB | undefined;
-      if (!b) continue;
-      merged = merged
-        ? [[Math.min(merged[0][0], b[0][0]), Math.min(merged[0][1], b[0][1])],
-           [Math.max(merged[1][0], b[1][0]), Math.max(merged[1][1], b[1][1])]]
-        : b;
-    }
-    if (merged) {
-      map.fitBounds(merged as any, { padding: 40, animate: false });
-      const zoom = map.getZoom();
-      log?.("INFO", `[${label}] fitBounds zoom=${zoom.toFixed(1)} bounds=${JSON.stringify(merged)}`);
-      if (zoom < MIN_ZOOM) {
-        map.setZoom(MIN_ZOOM);
-        log?.("WARN", `[${label}] zoom ${zoom.toFixed(1)} < ${MIN_ZOOM} — clamped to ${MIN_ZOOM} so sections are tile-renderable`);
-      }
-    } else {
-      log?.("WARN", `[${label}] fitBounds skipped — all sub-layers returned undefined bounds`);
-    }
-  } catch (e: any) {
-    log?.("WARN", `[${label}] fitBounds error: ${e?.message ?? e}`);
   }
 
   // Keep the render loop alive so loadMissingImagesInViewport() keeps running.

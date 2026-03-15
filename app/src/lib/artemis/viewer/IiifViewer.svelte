@@ -5,6 +5,8 @@
 
   export let imageServiceUrl: string;
   export let title: string = "";
+  export let sourceManifestUrl: string = "";
+  export let manifestAllmapsUrl: string = "";
 
   const dispatch = createEventDispatcher<{ close: void }>();
 
@@ -53,6 +55,25 @@
       </button>
     </div>
     <div class="viewer-body" bind:this={container}></div>
+    {#if sourceManifestUrl || manifestAllmapsUrl}
+      <div class="viewer-infobar">
+        {#if sourceManifestUrl}
+          <span class="viewer-infobar-url" title={sourceManifestUrl}>{sourceManifestUrl}</span>
+          <button
+            type="button"
+            class="viewer-infobar-btn"
+            on:click={async () => { try { await navigator.clipboard.writeText(sourceManifestUrl); } catch { /* ignore */ } }}
+          >Copy URL</button>
+        {/if}
+        {#if manifestAllmapsUrl}
+          <button
+            type="button"
+            class="viewer-infobar-btn"
+            on:click={() => window.open(manifestAllmapsUrl, "_blank", "noopener,noreferrer")}
+          >Allmaps</button>
+        {/if}
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -61,7 +82,7 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--viewer-backdrop);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -74,12 +95,13 @@
     height: 100%;
     max-width: 100%;
     max-height: 100%;
-    background: #1a1a1d;
+    background: var(--viewer-bg);
     border-radius: 10px;
+    border: 1px solid var(--panel-border);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+    box-shadow: var(--shadow-viewer);
   }
 
   .viewer-topbar {
@@ -90,14 +112,14 @@
     padding: 0 14px;
     height: 44px;
     flex-shrink: 0;
-    background: #232326;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background: var(--viewer-topbar-bg);
+    border-bottom: 0.5px solid var(--panel-border);
   }
 
   .viewer-title {
     font-size: 13px;
     font-weight: 600;
-    color: #e8e8e8;
+    color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -109,7 +131,7 @@
     border: none;
     padding: 6px;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--text-muted);
     border-radius: 5px;
     display: flex;
     align-items: center;
@@ -118,18 +140,58 @@
   }
 
   .viewer-close:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #e8e8e8;
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
   }
 
   .viewer-body {
     flex: 1;
     overflow: hidden;
+    min-height: 0;
+  }
+
+  .viewer-infobar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    height: 36px;
+    flex-shrink: 0;
+    background: var(--viewer-bg);
+    border-top: 0.5px solid var(--panel-border);
+    overflow: hidden;
+  }
+
+  .viewer-infobar-url {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .viewer-infobar-btn {
+    flex-shrink: 0;
+    padding: 4px 9px;
+    font-size: 11px;
+    border-radius: 4px;
+    border: 0.5px solid var(--border-ui);
+    background: var(--result-bg);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .viewer-infobar-btn:hover {
+    background: var(--result-hover);
+    color: var(--text-primary);
   }
 
   /* Override OSD's default canvas background */
   :global(.viewer-body .openseadragon-container),
   :global(.viewer-body .openseadragon-canvas) {
-    background: #1a1a1d !important;
+    background: var(--viewer-canvas-bg) !important;
   }
 </style>
