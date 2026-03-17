@@ -1,5 +1,6 @@
 <!-- src/routes/+page.svelte -->
 <script lang="ts">
+  import 'maplibre-gl/dist/maplibre-gl.css';
   import '$lib/theme.css';
   import { onDestroy, onMount } from "svelte";
   import type maplibregl from "maplibre-gl";
