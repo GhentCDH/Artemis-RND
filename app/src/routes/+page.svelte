@@ -1105,6 +1105,12 @@
   }
 
   $: iiifPanelGroups = groupIiifPanel(iiifInfoPanel);
+
+  function closeIiifGroup(layerLabel: string) {
+    if (!iiifInfoPanel) return;
+    const remaining = iiifInfoPanel.filter(item => (item.layerLabel ?? '') !== layerLabel);
+    iiifInfoPanel = remaining.length > 0 ? remaining : null;
+  }
   $: panelOpen = iiifInfoPanel !== null || parcelClickInfo !== null;
   $: panelTitle = iiifInfoPanel && parcelClickInfo
     ? 'Location details'
@@ -1193,82 +1199,61 @@
       {/if}
     </section>
 
-    <!-- Info panel — sweeps in from the right on click (IIIF and/or parcel) -->
-    <aside class="iiif-map-panel" class:open={panelOpen}>
-      {#if panelOpen}
-        <div class="iiif-panel-header">
-          <span class="iiif-panel-title">{panelTitle}</span>
-          <button class="iiif-panel-close" type="button" on:click={() => { iiifInfoPanel = null; parcelClickInfo = null; setPrimitiveSelectFeature(map, null); }} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-            </svg>
-          </button>
-        </div>
-        <div class="iiif-panel-body">
-          {#if parcelClickInfo}
-            <div class="iiif-layer-group" style="--group-color:{MAIN_LAYER_META['primitief'].color};">
-              <div class="iiif-layer-group-header">
-                <span class="iiif-panel-item-swatch" style="background:{MAIN_LAYER_META['primitief'].color};"></span>
-                <span class="iiif-layer-group-label">Primitief — Parcel</span>
-              </div>
-              <div class="parcel-detail-block">
-                <div class="parcel-detail-row">
-                  <span class="parcel-detail-key">Parcel</span>
-                  <span class="parcel-detail-val">{parcelClickInfo.parcelLabel}</span>
-                </div>
-                <div class="parcel-detail-row">
-                  <span class="parcel-detail-key">Leaf</span>
-                  <span class="parcel-detail-val mono">{parcelClickInfo.leafId}</span>
-                </div>
-                {#each Object.entries(parcelClickInfo.properties).filter(([k, v]) => !k.startsWith('_') && String(v ?? '').trim() && k !== 'parcel_number' && k !== 'parcel_index') as [k, v]}
-                  <div class="parcel-detail-row">
-                    <span class="parcel-detail-key">{k.replace(/_/g, ' ')}</span>
-                    <span class="parcel-detail-val">{v}</span>
-                  </div>
-                {/each}
-              </div>
+    <!-- Info cards — appear on the right when clicking IIIF maps or parcels -->
+    {#if panelOpen}
+      <div class="info-cards">
+        {#if parcelClickInfo}
+          <div class="info-card" style="--group-color:{MAIN_LAYER_META['primitief'].color};">
+            <div class="info-card-header">
+              <span class="iiif-panel-item-swatch" style="background:{MAIN_LAYER_META['primitief'].color};"></span>
+              <span class="info-card-title">Parcel {parcelClickInfo.parcelLabel}</span>
+              <button class="info-card-close" type="button" on:click={() => { parcelClickInfo = null; setPrimitiveSelectFeature(map, null); }} aria-label="Close">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
             </div>
-          {/if}
-          {#if iiifInfoPanel}
-            {#if parcelClickInfo}<hr class="iiif-panel-divider" />{/if}
-            {#each iiifPanelGroups as group, gi (group.layerLabel)}
-              {#if gi > 0}<hr class="iiif-panel-divider" />{/if}
-              <div class="iiif-layer-group" style="--group-color:{group.layerColor};">
-                <div class="iiif-layer-group-header">
-                  <span class="iiif-panel-item-swatch" style="background:{group.layerColor};"></span>
-                  <span class="iiif-layer-group-label">{group.layerLabel}</span>
-                  {#if group.items.length > 1}
-                    <span class="iiif-layer-group-count">{group.items.length}</span>
-                  {/if}
-                </div>
-                {#each group.items as item (item.sourceManifestUrl)}
-                  <button
-                    type="button"
-                    class="iiif-map-row"
-                    on:click={() => { viewerItem = item; viewerOpen = true; }}
-                  >
-                    {#if item.imageServiceUrl}
-                      <img
-                        class="iiif-thumb-sm"
-                        src="{item.imageServiceUrl}/full/!56,56/0/default.jpg"
-                        alt=""
-                        loading="lazy"
-                      />
-                    {:else}
-                      <div class="iiif-thumb-placeholder"></div>
-                    {/if}
-                    <span class="iiif-map-row-title">{item.title}</span>
-                    <svg class="iiif-map-row-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </button>
-                {/each}
+            <div class="parcel-detail-block">
+              <div class="parcel-detail-row">
+                <span class="parcel-detail-key">Leaf</span>
+                <span class="parcel-detail-val mono">{parcelClickInfo.leafId}</span>
               </div>
+              {#each Object.entries(parcelClickInfo.properties).filter(([k, v]) => !k.startsWith('_') && String(v ?? '').trim() && k !== 'parcel_number' && k !== 'parcel_index') as [k, v]}
+                <div class="parcel-detail-row">
+                  <span class="parcel-detail-key">{k.replace(/_/g, ' ')}</span>
+                  <span class="parcel-detail-val">{v}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+        {#each iiifPanelGroups as group (group.layerLabel)}
+          <div class="info-card" style="--group-color:{group.layerColor};">
+            <div class="info-card-header">
+              <span class="iiif-panel-item-swatch" style="background:{group.layerColor};"></span>
+              <span class="info-card-title">{group.layerLabel}</span>
+              {#if group.items.length > 1}
+                <span class="iiif-layer-group-count">{group.items.length}</span>
+              {/if}
+              <button class="info-card-close" type="button" on:click={() => closeIiifGroup(group.layerLabel)} aria-label="Close">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            {#each group.items as item (item.sourceManifestUrl)}
+              <button type="button" class="iiif-map-row" on:click={() => { viewerItem = item; viewerOpen = true; }}>
+                {#if item.imageServiceUrl}
+                  <img class="iiif-thumb-sm" src="{item.imageServiceUrl}/full/!56,56/0/default.jpg" alt="" loading="lazy" />
+                {:else}
+                  <div class="iiif-thumb-placeholder"></div>
+                {/if}
+                <span class="iiif-map-row-title">{item.title}</span>
+                <svg class="iiif-map-row-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
             {/each}
-          {/if}
-        </div>
-      {/if}
-    </aside>
+          </div>
+        {/each}
+      </div>
+    {/if}
 
     <div class="layers-panel-wrapper" class:collapsed={layersPanelCollapsed}>
       <section class="map-layers-panel">
@@ -1766,7 +1751,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 2px 0 6px;
+    padding: 6px 8px;
   }
 
   .parcel-detail-row {
@@ -1793,46 +1778,54 @@
     word-break: break-all;
   }
 
-  /* IIIF map info panel */
-  .iiif-map-panel {
+  /* Info cards — right-side floating cards */
+  .info-cards {
     position: absolute;
-    top: 0;
+    top: 14px;
     right: 0;
-    height: 100%;
-    width: min(380px, 92vw);
-    background: var(--panel-bg);
-    border-left: 0.5px solid var(--panel-border);
-    box-shadow: var(--shadow-panel-right);
     z-index: 10;
     display: flex;
     flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    gap: 8px;
+    max-height: calc(100dvh - 28px);
+    overflow-y: auto;
+    pointer-events: none;
+  }
+
+  .info-card {
+    pointer-events: all;
+    width: min(300px, 92vw);
+    background: var(--panel-bg);
+    border-radius: 8px 0 0 8px;
+    border: 1px solid var(--panel-border);
+    border-right: none;
+    box-shadow: var(--shadow-md);
     overflow: hidden;
-  }
-
-  .iiif-map-panel.open {
-    transform: translateX(0);
-  }
-
-  .iiif-panel-header {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 14px 14px 12px;
+    flex-direction: column;
+  }
+
+  .info-card-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 10px;
+    background: var(--card-bg);
+    background: color-mix(in srgb, var(--group-color, #aaa) 10%, var(--card-bg));
     border-bottom: 0.5px solid var(--panel-border);
     flex-shrink: 0;
   }
 
-  .iiif-panel-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    line-height: 1.35;
+  .info-card-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--group-color, #555);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex: 1;
   }
 
-  .iiif-panel-close {
+  .info-card-close {
     flex-shrink: 0;
     background: none;
     border: none;
@@ -1845,42 +1838,9 @@
     justify-content: center;
   }
 
-  .iiif-panel-close:hover {
+  .info-card-close:hover {
     color: var(--text-primary);
     background: rgba(0, 0, 0, 0.06);
-  }
-
-  .iiif-panel-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 14px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .iiif-panel-divider {
-    border: none;
-    border-top: 0.5px solid var(--panel-border);
-    margin: 8px 0;
-  }
-
-  .iiif-layer-group {
-    display: flex;
-    flex-direction: column;
-    border-left: 3px solid var(--group-color, #aaa);
-    border-radius: 6px;
-    overflow: hidden;
-    margin-bottom: 2px;
-  }
-
-  .iiif-layer-group-header {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 8px;
-    background: var(--card-bg);
-    background: color-mix(in srgb, var(--group-color, #aaa) 10%, var(--card-bg));
   }
 
   .iiif-panel-item-swatch {
@@ -1888,15 +1848,6 @@
     height: 9px;
     border-radius: 2px;
     flex-shrink: 0;
-  }
-
-  .iiif-layer-group-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--group-color, #555);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    flex: 1;
   }
 
   .iiif-layer-group-count {
