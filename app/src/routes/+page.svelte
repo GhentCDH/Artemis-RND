@@ -68,6 +68,7 @@
   let indexError: string | null = null;
   let indexLoading = false;
   let debugMenuOpen = false;
+  let layersPanelCollapsed = false;
   type HistCartLayerKey = "ferraris" | "vandermaelen";
 
   // --- Layer tree state ---
@@ -490,6 +491,7 @@
     } else {
       applyZOrder();
     }
+    layersPanelCollapsed = false;
   }
 
   async function onManifestResultClick(result: ManifestSearchItem) {
@@ -1268,7 +1270,17 @@
       {/if}
     </aside>
 
-    <section class="map-layers-panel">
+    <section class="map-layers-panel" class:collapsed={layersPanelCollapsed}>
+      <button
+        class="layers-panel-tab"
+        type="button"
+        on:click={() => (layersPanelCollapsed = !layersPanelCollapsed)}
+        aria-label={layersPanelCollapsed ? 'Expand layers' : 'Collapse layers'}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class:flipped={layersPanelCollapsed}>
+          <path d="M7.5 2l-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
       <div class="panel-header">
         <span class="panel-title">Historical layers</span>
         <span class="panel-count">{activeLayerCount} active</span>
@@ -1955,17 +1967,56 @@
   .map-layers-panel {
     position: absolute;
     top: 14px;
-    left: 14px;
+    left: 0;
     z-index: 2;
-    width: min(320px, calc(100vw - 28px));
+    width: min(320px, calc(100vw - 14px));
     max-height: calc(100dvh - 28px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     background: var(--panel-bg);
-    border-radius: 8px;
+    border-radius: 0 8px 8px 0;
     border: 1px solid var(--panel-border);
+    border-left: none;
     box-shadow: var(--shadow-md);
+    transform: translateX(0);
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .map-layers-panel.collapsed {
+    transform: translateX(calc(-100% + 32px));
+  }
+
+  .layers-panel-tab {
+    position: absolute;
+    top: 50%;
+    right: -1px;
+    transform: translateY(-50%);
+    z-index: 1;
+    width: 32px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    color: var(--text-muted);
+    box-shadow: 3px 0 8px rgba(0,0,0,0.08);
+  }
+
+  .layers-panel-tab:hover {
+    color: var(--text-primary);
+  }
+
+  .layers-panel-tab svg {
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .layers-panel-tab svg.flipped {
+    transform: rotate(180deg);
   }
 
   .debug-toggle {
@@ -2535,8 +2586,8 @@
 
     .map-layers-panel {
       top: 62px;
-      left: 10px;
-      width: calc(100vw - 20px);
+      left: 0;
+      width: calc(100vw - 14px);
       max-height: 42vh;
       overflow: hidden;
     }
