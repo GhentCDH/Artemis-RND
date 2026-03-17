@@ -1270,17 +1270,8 @@
       {/if}
     </aside>
 
-    <section class="map-layers-panel" class:collapsed={layersPanelCollapsed}>
-      <button
-        class="layers-panel-tab"
-        type="button"
-        on:click={() => (layersPanelCollapsed = !layersPanelCollapsed)}
-        aria-label={layersPanelCollapsed ? 'Expand layers' : 'Collapse layers'}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class:flipped={layersPanelCollapsed}>
-          <path d="M7.5 2l-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
+    <div class="layers-panel-wrapper" class:collapsed={layersPanelCollapsed}>
+      <section class="map-layers-panel">
       <div class="panel-header">
         <span class="panel-title">Historical layers</span>
         <span class="panel-count">{activeLayerCount} active</span>
@@ -1426,6 +1417,17 @@
         {/each}
       </div>
     </section>
+    <button
+      class="layers-panel-tab"
+      type="button"
+      on:click={() => (layersPanelCollapsed = !layersPanelCollapsed)}
+      aria-label={layersPanelCollapsed ? 'Expand layers' : 'Collapse layers'}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class:flipped={layersPanelCollapsed}>
+        <path d="M7.5 2l-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    </div>
 
     <button class="debug-toggle" type="button" on:click={() => (debugMenuOpen = !debugMenuOpen)}>
       {debugMenuOpen ? "Hide Debug Menu" : "Show Debug Menu"}
@@ -1964,11 +1966,22 @@
     opacity: 0.5;
   }
 
-  .map-layers-panel {
+  .layers-panel-wrapper {
     position: absolute;
     top: 14px;
     left: 0;
     z-index: 2;
+    display: flex;
+    align-items: flex-start;
+    transform: translateX(0);
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .layers-panel-wrapper.collapsed {
+    transform: translateX(calc(-100% + 32px));
+  }
+
+  .map-layers-panel {
     width: min(320px, calc(100vw - 14px));
     max-height: calc(100dvh - 28px);
     overflow: hidden;
@@ -1979,20 +1992,11 @@
     border: 1px solid var(--panel-border);
     border-left: none;
     box-shadow: var(--shadow-md);
-    transform: translateX(0);
-    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .map-layers-panel.collapsed {
-    transform: translateX(calc(-100% + 32px));
   }
 
   .layers-panel-tab {
-    position: absolute;
-    top: 50%;
-    right: -1px;
-    transform: translateY(-50%);
-    z-index: 1;
+    flex-shrink: 0;
+    margin-top: 24px;
     width: 32px;
     height: 48px;
     display: flex;
@@ -2584,12 +2588,13 @@
       width: calc(100vw - 20px);
     }
 
-    .map-layers-panel {
+    .layers-panel-wrapper {
       top: 62px;
-      left: 0;
+    }
+
+    .map-layers-panel {
       width: calc(100vw - 14px);
       max-height: 42vh;
-      overflow: hidden;
     }
 
     .debug-toggle {
