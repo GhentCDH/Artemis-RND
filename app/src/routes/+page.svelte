@@ -93,10 +93,12 @@
 
   // IIIF warped map hover/click state
   let iiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
-  type IiifMapInfo = { title: string; sourceManifestUrl: string; imageServiceUrl?: string; manifestAllmapsUrl?: string; layerLabel?: string; layerColor?: string };
+  type IiifMapInfo = { title: string; sourceManifestUrl: string; imageServiceUrl?: string; manifestAllmapsUrl?: string; layerLabel?: string; layerColor?: string; centerLon?: number; centerLat?: number; mainId?: string };
   let iiifInfoPanel: IiifMapInfo[] | null = null;
-  type ParcelClickInfo = { parcelLabel: string; leafId: string; properties: Record<string, any> };
+  type ParcelClickInfo = { parcelLabel: string; leafId: string; properties: Record<string, any>; lon: number; lat: number };
   let parcelClickInfo: ParcelClickInfo | null = null;
+  type PinnedCard = { type: 'iiif'; group: IiifPanelGroup } | { type: 'parcel'; info: ParcelClickInfo };
+  let pinnedCards: PinnedCard[] = [];
   let viewerOpen = false;
   let viewerItem: IiifMapInfo | null = null;
 
@@ -1031,7 +1033,7 @@
         const details = parcelHoverDetailsFromFeature(primitiveHoveredFeature);
         if (details) {
           const props = primitiveHoveredFeature.properties ?? {};
-          parcelClickInfo = { parcelLabel: details.parcelLabel, leafId: details.leafId, properties: props };
+          parcelClickInfo = { parcelLabel: details.parcelLabel, leafId: details.leafId, properties: props, lon: e.lngLat.lng, lat: e.lngLat.lat };
           setPrimitiveSelectFeature(map, primitiveHoveredFeature);
         }
       } else {
@@ -1050,13 +1052,17 @@
           const imageServiceUrl: string | undefined =
             hit.warpedMap?.georeferencedMap?.resource?.id ?? undefined;
           const mainId = groupIdToMainId.get(hit.groupId) ?? '';
+          const bbox: [number,number,number,number] | undefined = hit.warpedMap?.geoMaskBbox;
           items.push({
             title: info.label,
             sourceManifestUrl: info.sourceManifestUrl,
             imageServiceUrl,
             manifestAllmapsUrl: info.manifestAllmapsUrl,
             layerLabel: MAIN_LAYER_LABELS[mainId] ?? '',
-            layerColor: colorForGroupId(hit.groupId)
+            layerColor: colorForGroupId(hit.groupId),
+            mainId,
+            centerLon: bbox ? (bbox[0] + bbox[2]) / 2 : undefined,
+            centerLat: bbox ? (bbox[1] + bbox[3]) / 2 : undefined,
           });
         }
         iiifInfoPanel = items.length > 0 ? items : null;
@@ -1111,14 +1117,36 @@
     const remaining = iiifInfoPanel.filter(item => (item.layerLabel ?? '') !== layerLabel);
     iiifInfoPanel = remaining.length > 0 ? remaining : null;
   }
-  $: panelOpen = iiifInfoPanel !== null || parcelClickInfo !== null;
-  $: panelTitle = iiifInfoPanel && parcelClickInfo
-    ? 'Location details'
-    : iiifInfoPanel
-      ? (iiifInfoPanel.length === 1 ? iiifInfoPanel[0].title : `${iiifInfoPanel.length} maps at this location`)
-      : parcelClickInfo
-        ? `Parcel ${parcelClickInfo.parcelLabel}`
-        : '';
+
+  function pinIiifGroup(group: IiifPanelGroup) {
+    pinnedCards = [...pinnedCards, { type: 'iiif', group }];
+    closeIiifGroup(group.layerLabel);
+  }
+
+  function pinParcel() {
+    if (!parcelClickInfo) return;
+    pinnedCards = [...pinnedCards, { type: 'parcel', info: parcelClickInfo }];
+    parcelClickInfo = null;
+    setPrimitiveSelectFeature(map, null);
+  }
+
+  function unpinCard(index: number) {
+    pinnedCards = pinnedCards.filter((_, i) => i !== index);
+  }
+
+  function focusIiifGroup(group: IiifPanelGroup) {
+    const first = group.items[0];
+    if (!first) return;
+    if (first.centerLon != null && first.centerLat != null)
+      flyToCoordinates(first.centerLon, first.centerLat, first.title);
+    if (first.mainId) activateLayer(first.mainId);
+  }
+
+  function focusParcel(info: ParcelClickInfo) {
+    flyToCoordinates(info.lon, info.lat, `Parcel ${info.parcelLabel}`);
+  }
+
+  $: panelOpen = iiifInfoPanel !== null || parcelClickInfo !== null || pinnedCards.length > 0;
 </script>
 
 <div class="wrap">
@@ -1202,14 +1230,93 @@
     <!-- Info cards — appear on the right when clicking IIIF maps or parcels -->
     {#if panelOpen}
       <div class="info-cards">
+
+        <!-- Pinned cards -->
+        {#each pinnedCards as pinned, pi (pi)}
+          {#if pinned.type === 'parcel'}
+            <div class="info-card pinned" style="--group-color:{MAIN_LAYER_META['primitief'].color};">
+              <div class="info-card-header">
+                <span class="iiif-panel-item-swatch" style="background:{MAIN_LAYER_META['primitief'].color};"></span>
+                <span class="info-card-title">Parcel {pinned.info.parcelLabel}</span>
+                <div class="info-card-actions">
+                  <button class="info-card-btn active" type="button" on:click={() => unpinCard(pi)} aria-label="Unpin">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M9 2l-1 4H4l3 3-1 5 4-3 4 3-1-5 3-3H10L9 2z" fill="currentColor"/></svg>
+                  </button>
+                  <button class="info-card-btn" type="button" on:click={() => focusParcel(pinned.info)} aria-label="Focus">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </button>
+                  <button class="info-card-close" type="button" on:click={() => unpinCard(pi)} aria-label="Close">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="parcel-detail-block">
+                <div class="parcel-detail-row">
+                  <span class="parcel-detail-key">Leaf</span>
+                  <span class="parcel-detail-val mono">{pinned.info.leafId}</span>
+                </div>
+                {#each Object.entries(pinned.info.properties).filter(([k, v]) => !k.startsWith('_') && String(v ?? '').trim() && k !== 'parcel_number' && k !== 'parcel_index') as [k, v]}
+                  <div class="parcel-detail-row">
+                    <span class="parcel-detail-key">{k.replace(/_/g, ' ')}</span>
+                    <span class="parcel-detail-val">{v}</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {:else}
+            <div class="info-card pinned" style="--group-color:{pinned.group.layerColor};">
+              <div class="info-card-header">
+                <span class="iiif-panel-item-swatch" style="background:{pinned.group.layerColor};"></span>
+                <span class="info-card-title">{pinned.group.layerLabel}</span>
+                {#if pinned.group.items.length > 1}
+                  <span class="iiif-layer-group-count">{pinned.group.items.length}</span>
+                {/if}
+                <div class="info-card-actions">
+                  <button class="info-card-btn active" type="button" on:click={() => unpinCard(pi)} aria-label="Unpin">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M9 2l-1 4H4l3 3-1 5 4-3 4 3-1-5 3-3H10L9 2z" fill="currentColor"/></svg>
+                  </button>
+                  <button class="info-card-btn" type="button" on:click={() => focusIiifGroup(pinned.group)} aria-label="Focus">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </button>
+                  <button class="info-card-close" type="button" on:click={() => unpinCard(pi)} aria-label="Close">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+              </div>
+              {#each pinned.group.items as item (item.sourceManifestUrl)}
+                <button type="button" class="iiif-map-row" on:click={() => { viewerItem = item; viewerOpen = true; }}>
+                  {#if item.imageServiceUrl}
+                    <img class="iiif-thumb-sm" src="{item.imageServiceUrl}/full/!56,56/0/default.jpg" alt="" loading="lazy" />
+                  {:else}
+                    <div class="iiif-thumb-placeholder"></div>
+                  {/if}
+                  <span class="iiif-map-row-title">{item.title}</span>
+                  <svg class="iiif-map-row-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        {/each}
+
+        <!-- Current (unpinned) cards -->
         {#if parcelClickInfo}
           <div class="info-card" style="--group-color:{MAIN_LAYER_META['primitief'].color};">
             <div class="info-card-header">
               <span class="iiif-panel-item-swatch" style="background:{MAIN_LAYER_META['primitief'].color};"></span>
               <span class="info-card-title">Parcel {parcelClickInfo.parcelLabel}</span>
-              <button class="info-card-close" type="button" on:click={() => { parcelClickInfo = null; setPrimitiveSelectFeature(map, null); }} aria-label="Close">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </button>
+              <div class="info-card-actions">
+                <button class="info-card-btn" type="button" on:click={pinParcel} aria-label="Pin">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M9 2l-1 4H4l3 3-1 5 4-3 4 3-1-5 3-3H10L9 2z" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+                </button>
+                <button class="info-card-btn" type="button" on:click={() => focusParcel(parcelClickInfo!)} aria-label="Focus">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+                <button class="info-card-close" type="button" on:click={() => { parcelClickInfo = null; setPrimitiveSelectFeature(map, null); }} aria-label="Close">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
+              </div>
             </div>
             <div class="parcel-detail-block">
               <div class="parcel-detail-row">
@@ -1233,9 +1340,17 @@
               {#if group.items.length > 1}
                 <span class="iiif-layer-group-count">{group.items.length}</span>
               {/if}
-              <button class="info-card-close" type="button" on:click={() => closeIiifGroup(group.layerLabel)} aria-label="Close">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </button>
+              <div class="info-card-actions">
+                <button class="info-card-btn" type="button" on:click={() => pinIiifGroup(group)} aria-label="Pin">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M9 2l-1 4H4l3 3-1 5 4-3 4 3-1-5 3-3H10L9 2z" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+                </button>
+                <button class="info-card-btn" type="button" on:click={() => focusIiifGroup(group)} aria-label="Focus">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+                <button class="info-card-close" type="button" on:click={() => closeIiifGroup(group.layerLabel)} aria-label="Close">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
+              </div>
             </div>
             {#each group.items as item (item.sourceManifestUrl)}
               <button type="button" class="iiif-map-row" on:click={() => { viewerItem = item; viewerOpen = true; }}>
@@ -1252,6 +1367,7 @@
             {/each}
           </div>
         {/each}
+
       </div>
     {/if}
 
@@ -1825,11 +1941,19 @@
     flex: 1;
   }
 
+  .info-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .info-card-btn,
   .info-card-close {
     flex-shrink: 0;
     background: none;
     border: none;
-    padding: 2px;
+    padding: 3px;
     cursor: pointer;
     color: var(--text-muted);
     border-radius: 4px;
@@ -1838,9 +1962,18 @@
     justify-content: center;
   }
 
+  .info-card-btn:hover,
   .info-card-close:hover {
     color: var(--text-primary);
     background: rgba(0, 0, 0, 0.06);
+  }
+
+  .info-card-btn.active {
+    color: var(--group-color, #555);
+  }
+
+  .info-card.pinned {
+    border-color: var(--group-color, var(--panel-border));
   }
 
   .iiif-panel-item-swatch {
