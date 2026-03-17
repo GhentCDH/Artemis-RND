@@ -1583,14 +1583,14 @@
   }
 
   .wrap {
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
   .map-shell {
     position: relative;
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
   }
 
   .map-canvas {
@@ -1760,6 +1760,7 @@
     gap: 8px;
     padding: 4px 8px;
     border-radius: 4px;
+    background: var(--card-bg);
     background: color-mix(in srgb, var(--group-color, #aaa) 7%, var(--card-bg));
     font-size: 12px;
     line-height: 1.4;
@@ -1864,6 +1865,7 @@
     align-items: center;
     gap: 7px;
     padding: 6px 8px;
+    background: var(--card-bg);
     background: color-mix(in srgb, var(--group-color, #aaa) 10%, var(--card-bg));
   }
 
@@ -1888,6 +1890,7 @@
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 10px;
+    background: var(--card-bg);
     background: color-mix(in srgb, var(--group-color, #aaa) 15%, var(--card-bg));
     color: var(--group-color, #555);
   }
@@ -1908,6 +1911,7 @@
   }
 
   .iiif-map-row:hover {
+    background: var(--card-bg);
     background: color-mix(in srgb, var(--group-color, #aaa) 10%, var(--card-bg));
   }
 
@@ -1954,7 +1958,7 @@
     left: 14px;
     z-index: 2;
     width: min(320px, calc(100vw - 28px));
-    max-height: calc(100vh - 28px);
+    max-height: calc(100dvh - 28px);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -1985,7 +1989,7 @@
     right: 14px;
     z-index: 2;
     width: min(360px, calc(100vw - 28px));
-    max-height: calc(100vh - 66px);
+    max-height: calc(100dvh - 66px);
     overflow: auto;
     display: flex;
     flex-direction: column;
@@ -2114,6 +2118,7 @@
   .era-card {
     display: flex;
     flex-direction: column;
+    border: 1px solid var(--card-border);
     border: 1px solid color-mix(in srgb, var(--layer-color) 28%, transparent);
     border-left: 3px solid var(--layer-color);
     border-radius: 8px;
@@ -2126,6 +2131,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
+    background: var(--card-bg);
     background: color-mix(in srgb, var(--layer-color) 9%, var(--card-bg));
   }
 
@@ -2291,7 +2297,9 @@
 
   /* Sublayer panel */
   .sublayer-panel {
+    border-top: 1px solid var(--border-light);
     border-top: 1px solid color-mix(in srgb, var(--layer-color) 20%, transparent);
+    background: var(--sublayer-bg);
     background: color-mix(in srgb, var(--layer-color) 5%, var(--card-bg));
     padding: 6px 0 4px;
     display: flex;
@@ -2309,6 +2317,7 @@
   }
 
   .sublayer-item:hover {
+    background: var(--sublayer-bg);
     background: color-mix(in srgb, var(--layer-color) 12%, var(--card-bg));
   }
 
