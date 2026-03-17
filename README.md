@@ -62,6 +62,24 @@ pnpm run build
 pnpm run preview
 ```
 
+## Deployment
+
+The app is deployed to GitHub Pages via GitHub Actions.
+
+**Branch workflow:**
+- `dev` — active development
+- `main` — stable source code; pushing here triggers a deploy
+- `gh-pages` — compiled static output, managed by CI (never commit here manually)
+
+**Live site:** `https://ghentcdh.github.io/Artemis-RND`
+
+Deployment is handled by `.github/workflows/deploy.yml`, which:
+1. Installs dependencies with pnpm
+2. Builds the app with `BASE_PATH=/Artemis-RND`
+3. Pushes the output of `app/build` to the `gh-pages` branch
+
+The app uses `@sveltejs/adapter-static` with SPA fallback (`index.html`), so no server is required at runtime.
+
 ## Related Repo
 
-- Data pipeline: `../Artemis-RnD-Data`
+- Data pipeline: [GhentCDH/Artemis-RnD-Data](https://github.com/GhentCDH/Artemis-RnD-Data) — preprocessing pipeline + GitHub Pages publisher
