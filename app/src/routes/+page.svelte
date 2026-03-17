@@ -729,17 +729,21 @@
       setHistCartLayerOpacity(map, wmtsKey, opacity);
     }
     for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
-      if (!subLayerEnabled[subId]) continue;
       const subDef = SUB_LAYER_DEFS[subId];
-      if (subDef?.kind === 'wmts') {
-        setHistCartLayerOpacity(map, mainId as HistCartLayerKey, opacity);
-      } else if (subDef?.kind === 'wms') {
-        setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
-      } else if (subDef?.kind === 'iiif') {
+      if (subDef?.kind === 'iiif') {
+        // IIIF layer is controlled by the main toggle, not subLayerEnabled
+        if (!mainLayerEnabled[mainId]) continue;
         const info = getIiifInfoForSub(subId);
         if (info) setLayerGroupOpacity(map, info.uiLayerId, opacity);
-      } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
-        setPrimitiveLayerOpacity(map, opacity);
+      } else {
+        if (!subLayerEnabled[subId]) continue;
+        if (subDef?.kind === 'wmts') {
+          setHistCartLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+        } else if (subDef?.kind === 'wms') {
+          setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+        } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
+          setPrimitiveLayerOpacity(map, opacity);
+        }
       }
     }
   }
