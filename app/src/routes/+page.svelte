@@ -39,9 +39,9 @@
 
   import ToponymSearch from '$lib/artemis/ui/ToponymSearch.svelte';
   import InfoCards from '$lib/artemis/ui/InfoCards.svelte';
-  import LayersPanel from '$lib/artemis/ui/LayersPanel.svelte';
   import DebugMenu from '$lib/artemis/ui/DebugMenu.svelte';
   import IiifViewer from '$lib/artemis/viewer/IiifViewer.svelte';
+  import Timeslider from '$lib/components/Timeslider.svelte';
 
   // ─── Map ───────────────────────────────────────────────────────────────────
 
@@ -92,7 +92,6 @@
   let layerRenderStats: Record<string, LayerRenderStats> = {};
   let indexError: string | null = null;
   let indexLoading = false;
-  let layersPanelCollapsed = false;
 
   let mainLayerOrder: MainLayerId[] = [...MAIN_LAYER_ORDER];
   let mainLayerEnabled  = makeInitialMainLayerEnabled();
@@ -334,29 +333,6 @@
     }
   }
 
-  function setMainOpacity(mainId: string, rawValue: string) {
-    mainLayerOpacity = { ...mainLayerOpacity, [mainId]: Math.max(0, Math.min(1, Number(rawValue))) };
-    applyMainLayerOpacity(mainId);
-  }
-
-  function moveLayerUp(mainId: string) {
-    const idx = mainLayerOrder.indexOf(mainId as MainLayerId);
-    if (idx <= 0) return;
-    const next = [...mainLayerOrder];
-    [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-    mainLayerOrder = next;
-    applyZOrder();
-  }
-
-  function moveLayerDown(mainId: string) {
-    const idx = mainLayerOrder.indexOf(mainId as MainLayerId);
-    if (idx < 0 || idx >= mainLayerOrder.length - 1) return;
-    const next = [...mainLayerOrder];
-    [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-    mainLayerOrder = next;
-    applyZOrder();
-  }
-
   // ─── Index + toponym loading ───────────────────────────────────────────────
 
   type ToponymIndexPayload = {
@@ -560,7 +536,6 @@
     } else {
       applyZOrder();
     }
-    layersPanelCollapsed = false;
   }
 
   // ─── ToponymSearch event handlers ─────────────────────────────────────────
@@ -633,16 +608,16 @@
 
   $: iiifPanelGroups = groupIiifPanel(iiifInfoPanel);
   $: panelOpen = iiifInfoPanel !== null || parcelClickInfo !== null || pinnedCards.length > 0;
-  $: activeLayerCount = Object.values(subLayerEnabled).filter(Boolean).length;
 
-  // Maps mainId → uiLayerId of its IIIF sublayer (used by LayersPanel for progress display)
-  $: iiifGroupIds = Object.fromEntries(
-    Object.entries(MAIN_LAYER_SUBS).map(([mainId, subs]) => {
-      const iiifSubId = subs.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
-      const info = iiifSubId ? getIiifInfoForSub(iiifSubId) : null;
-      return [mainId, info?.uiLayerId ?? ''];
-    })
-  );
+  // ─── Timeslider wiring ─────────────────────────────────────────────────────
+
+  async function onTimesliderMainToggle(e: CustomEvent<{ mainId: string; enabled: boolean }>) {
+    await toggleMainLayer(e.detail.mainId, e.detail.enabled);
+  }
+
+  async function onTimesliderSublayerChange(e: CustomEvent<{ subId: string; enabled: boolean }>) {
+    await toggleSubLayer(e.detail.subId, e.detail.enabled);
+  }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -745,7 +720,9 @@
     };
   });
 
-  onDestroy(() => destroyMapContext());
+  onDestroy(() => {
+    destroyMapContext();
+  });
 </script>
 
 <div class="wrap">
@@ -777,24 +754,6 @@
       />
     {/if}
 
-    <LayersPanel
-      {mainLayerOrder}
-      {mainLayerEnabled}
-      {mainLayerLoading}
-      {mainLayerOpacity}
-      {subLayerEnabled}
-      {subLayerLoading}
-      {iiifGroupIds}
-      {layerProgress}
-      collapsed={layersPanelCollapsed}
-      {activeLayerCount}
-      on:toggle-main={(e) => toggleMainLayer(e.detail.mainId, e.detail.enabled)}
-      on:toggle-sub={(e) => toggleSubLayer(e.detail.subId, e.detail.enabled)}
-      on:move-up={(e) => moveLayerUp(e.detail.mainId)}
-      on:move-down={(e) => moveLayerDown(e.detail.mainId)}
-      on:set-opacity={(e) => setMainOpacity(e.detail.mainId, e.detail.value)}
-      on:toggle-collapsed={() => (layersPanelCollapsed = !layersPanelCollapsed)}
-    />
 
     <DebugMenu
       bind:datasetBaseUrl
@@ -805,6 +764,13 @@
       {layerProgress}
       on:reload={() => reloadIndex()}
     />
+
+    <div class="timeslider-wrap">
+      <Timeslider
+        on:mainToggle={onTimesliderMainToggle}
+        on:sublayerChange={onTimesliderSublayerChange}
+      />
+    </div>
   </main>
 </div>
 
@@ -842,4 +808,14 @@
     width: 100%;
     height: 100%;
   }
+
+  .timeslider-wrap {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    z-index: 4;
+    pointer-events: all;
+  }
+
 </style>

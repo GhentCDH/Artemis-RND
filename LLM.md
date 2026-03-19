@@ -106,6 +106,40 @@ Groups are parked (hidden, opacity=0, data preserved) on toggle-off for instant 
   - `build/Toponyms/index.json` — toponym index
   - `build/iiif/info/index.json` — image info cache (keyed by image service URL)
   - `build/Parcels/Primitive/index.geojson` — primitive parcel GeoJSON
+  - `build/Massart/index.json` — Jean Massart photograph metadata index (see below)
+
+---
+
+## `build/Massart/index.json` — Jean Massart photograph index
+
+A new build artifact generated on every `bun run crawl` in Artemis-RnD-Data. Sourced from the UGent Primo catalog API (not from Allmaps). The photographs are **not yet georeferenced** — this index provides location metadata for displaying pins on the map.
+
+**Fetch**: `GET {baseUrl}/Massart/index.json`
+
+**Shape**:
+```ts
+{
+  generatedAt: string;
+  totalItems: number;
+  coordsAvailable: number;
+  items: Array<{
+    title: string;       // full Primo title, includes DMS coords
+    year?: string;       // e.g. "1911"
+    location?: string;  // municipality name, e.g. "Sint-Niklaas"
+    lat?: number;        // decimal degrees (North)
+    lon?: number;        // decimal degrees (East)
+    manifestUrl: string; // IIIF v2 manifest URL → open in viewer
+    mmsId: string;       // Alma bibliographic ID
+    repId: string;       // Alma digital representation ID
+  }>;
+}
+```
+
+**Viewer integration notes**:
+- `lat`/`lon` are present on most but not all items (`coordsAvailable` tells you how many have coords)
+- `manifestUrl` is a IIIF v2 manifest — can be loaded with `addGeoreferenceAnnotation` once georeferenced, or opened in a IIIF viewer directly
+- This index is independent of `index.json` — it is not part of `renderLayers` or `index[]`; load it separately
+- Currently Massart manifests have no Allmaps annotations → they appear in `index[]` with `compiledManifestPath: ""` and no render layer; do not use `index[]` to drive the pin display, use `Massart/index.json` directly
 
 ---
 

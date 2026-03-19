@@ -12,14 +12,59 @@
 
   let container: HTMLElement;
   let viewer: OpenSeadragonType.Viewer | undefined;
+  let loadError = '';
+  let loadingService = false;
+
+  async function extractImageServiceFromManifest(manifestUrl: string): Promise<string> {
+    const res = await fetch(manifestUrl);
+    if (!res.ok) throw new Error(`Manifest fetch failed (HTTP ${res.status})`);
+    const m = await res.json();
+    // IIIF v2
+    const img0 = m?.sequences?.[0]?.canvases?.[0]?.images?.[0];
+    if (img0) {
+      const svc = img0?.resource?.service;
+      if (svc) return svc['@id'] ?? svc.id ?? '';
+      if (img0?.resource?.['@id']) return img0.resource['@id'];
+    }
+    // IIIF v3
+    const body = m?.items?.[0]?.items?.[0]?.items?.[0]?.body;
+    if (body) {
+      const svcEntry = body?.service;
+      if (svcEntry) {
+        const svc = Array.isArray(svcEntry) ? svcEntry[0] : svcEntry;
+        if (svc?.id || svc?.['@id']) return svc.id ?? svc['@id'];
+      }
+      if (body.id || body['@id']) return body.id ?? body['@id'];
+    }
+    throw new Error('Could not locate image service in manifest');
+  }
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
 
+    let serviceUrl = imageServiceUrl;
+
+    if (!serviceUrl && sourceManifestUrl) {
+      loadingService = true;
+      try {
+        serviceUrl = await extractImageServiceFromManifest(sourceManifestUrl);
+      } catch (e: any) {
+        loadError = e?.message ?? 'Failed to resolve image service';
+        loadingService = false;
+        return;
+      }
+      loadingService = false;
+    }
+
+    if (!serviceUrl) {
+      loadError = 'No image available for this item';
+      return;
+    }
+
     const OpenSeadragon = (await import("openseadragon")).default;
     viewer = OpenSeadragon({
       element: container,
-      tileSources: `${imageServiceUrl}/info.json`,
+      tileSources: `${serviceUrl}/info.json`,
       showNavigationControl: false,
       showZoomControl: false,
       showHomeControl: false,
@@ -54,7 +99,13 @@
         </svg>
       </button>
     </div>
-    <div class="viewer-body" bind:this={container}></div>
+    <div class="viewer-body" bind:this={container}>
+      {#if loadingService}
+        <div class="viewer-status">Loading image…</div>
+      {:else if loadError}
+        <div class="viewer-status viewer-error">{loadError}</div>
+      {/if}
+    </div>
     {#if sourceManifestUrl || manifestAllmapsUrl}
       <div class="viewer-infobar">
         {#if sourceManifestUrl}
@@ -148,6 +199,21 @@
     flex: 1;
     overflow: hidden;
     min-height: 0;
+    position: relative;
+  }
+
+  .viewer-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .viewer-error {
+    color: var(--text-error);
   }
 
   .viewer-infobar {

@@ -100,3 +100,14 @@ export type IiifPanelGroup = {
 export type PinnedCard =
   | { type: 'iiif'; group: IiifPanelGroup }
   | { type: 'parcel'; info: ParcelClickInfo };
+
+export type MassartItem = {
+  title: string;
+  year?: string;
+  location?: string;
+  lat?: number;
+  lon?: number;
+  manifestUrl: string;
+  mmsId: string;
+  repId: string;
+};
