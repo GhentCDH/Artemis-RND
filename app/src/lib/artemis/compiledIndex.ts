@@ -1,7 +1,7 @@
 // Compiled index loading with page-level cache.
 // Fetched once per datasetBaseUrl; reset via resetCompiledIndexCache when the URL changes.
 
-import type { CompiledIndex, CompiledRunnerConfig } from "$lib/artemis/types";
+import type { CompiledIndex, CompiledRunnerConfig } from "$lib/artemis/runner";
 import { joinUrl, fetchJson } from "$lib/artemis/utils";
 
 let cached: CompiledIndex | null = null;

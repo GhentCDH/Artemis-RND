@@ -4,7 +4,7 @@
 
 import type maplibregl from "maplibre-gl";
 import { WarpedMapLayer } from "@allmaps/maplibre";
-import type { LayerInfo } from "$lib/artemis/types";
+import type { LayerInfo } from "$lib/artemis/runner";
 
 // --- Group ID ---
 

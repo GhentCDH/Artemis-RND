@@ -15,25 +15,20 @@ export type CompiledIndexEntry = {
   label: string;
   sourceManifestUrl: string;
   sourceCollectionUrl: string;
+  canvasCount: number;
+  isVerzamelblad?: boolean;
+  compiledManifestPath: string;
+  // Present only for georef manifests:
   centerLon?: number;
   centerLat?: number;
-  compiledManifestPath: string;
-  mirroredAllmapsAnnotationPath?: string;
-  canvasCount: number;
   manifestAllmapsId?: string;
-  manifestAllmapsUrl?: string;
-  manifestAllmapsStatus?: number;
-  georefDetectedBy?: "none" | "manifest" | "canvas";
-  annotSource?: "single" | "multi" | "none";
   canvasAllmapsHits?: Array<{
     canvasId: string;
-    canvasAllmapsId?: string;
-    canvasAllmapsUrl?: string;
-    canvasAllmapsStatus?: number;
-    mirroredAllmapsAnnotationPath?: string;
+    canvasAllmapsId: string;
+    mirroredAllmapsAnnotationPath: string;
   }>;
-  isVerzamelblad?: boolean;
-  canvasIds: string[];
+  georefDetectedBy?: "canvas" | "manifest" | "both";
+  annotSource?: "single" | "multi";
 };
 
 export type LayerInfo = {
@@ -54,7 +49,6 @@ export type CompiledIndex = {
   generatedAt: string;
   totalManifests: number;
   georefManifests: number;
-  mirroredOk: number;
   compiledOk: number;
   layers: LayerInfo[];
   renderLayers?: LayerInfo[];
@@ -248,25 +242,22 @@ type AnnotationRequest = {
 };
 
 function getMirroredAnnotationRequests(entry: CompiledIndexEntry): AnnotationRequest[] {
-  // Collect canvas paths (deduplicated)
+  // All annotations are canvas-level only (build/allmaps/canvases/<id>.json).
+  // Collect unique canvas paths from canvasAllmapsHits.
   const canvasPaths: string[] = [];
   const seenCanvasPaths = new Set<string>();
   for (const hit of entry.canvasAllmapsHits ?? []) {
-    const canvasPath = hit.mirroredAllmapsAnnotationPath?.trim();
+    const canvasPath = hit.mirroredAllmapsAnnotationPath.trim();
     if (!canvasPath || seenCanvasPaths.has(canvasPath)) continue;
     canvasPaths.push(canvasPath);
     seenCanvasPaths.add(canvasPath);
   }
+  return canvasPaths.map((path) => ({ path }));
+}
 
-  const manifestPath = entry.mirroredAllmapsAnnotationPath?.trim();
-
-  // Always prefer the manifest annotation when available — it is the canonical
-  // aggregated source and ensures a single addGeoreferenceAnnotation call regardless
-  // of whether the entry is single- or multi-canvas. Canvas paths are only used as a
-  // fallback when no manifest annotation was mirrored.
-  if (manifestPath) return [{ path: manifestPath }];
-  if (canvasPaths.length > 0) return canvasPaths.map((path) => ({ path }));
-  return [];
+function deriveAllmapsManifestUrl(entry: CompiledIndexEntry): string | undefined {
+  if (!entry.manifestAllmapsId) return undefined;
+  return `https://annotations.allmaps.org/manifests/${entry.manifestAllmapsId}`;
 }
 
 function normalizePath(path: string): string {
@@ -293,7 +284,7 @@ const mapIdToManifestInfo = new Map<string, {
   sourceManifestUrl: string;
   label: string;
   compiledManifestPath: string;
-  manifestAllmapsUrl?: string;
+  manifestAllmapsUrl?: string; // derived from manifestAllmapsId
 }>();
 
 // Maps groupId → cleanup fn (removes map.on handlers + clears keepalive interval)
@@ -474,14 +465,14 @@ export async function runLayerGroup(opts: {
 
   // Log annotation source strategy for debug visibility
   {
-    const georefEntries = entries.filter((e) => e.annotSource !== "none" && e.annotSource);
-    const noneEntries = entries.filter((e) => e.annotSource === "none" || !e.annotSource);
-    const usingManifest = georefEntries.filter((e) => e.mirroredAllmapsAnnotationPath?.trim()).length;
-    const usingCanvas = georefEntries.length - usingManifest;
+    const georefEntries = entries.filter((e) => e.annotSource !== undefined);
+    const nonGeorefEntries = entries.filter((e) => e.annotSource === undefined);
     if (georefEntries.length > 0) {
+      const single = georefEntries.filter((e) => e.annotSource === "single").length;
+      const multi = georefEntries.filter((e) => e.annotSource === "multi").length;
       log?.(
         "INFO",
-        `[${layerLabel}] annotation strategy: georef=${georefEntries.length}(manifest:${usingManifest} canvas-fallback:${usingCanvas}) none=${noneEntries.length}`
+        `[${layerLabel}] annotation strategy: georef=${georefEntries.length}(single:${single} multi:${multi}) none=${nonGeorefEntries.length}`
       );
     }
   }
@@ -773,7 +764,7 @@ export async function runLayerGroup(opts: {
         manifestUrl: compiledManifestUrl,
         manifestLabel: item.entry.label,
         sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: item.entry.manifestAllmapsUrl,
+        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
         startedAtISO,
         totalMs: 0,
         steps: [{ step: "fetch_annotation", ms: 0, ok: item.error === "noAnnotation", detail: item.error }],
@@ -804,7 +795,7 @@ export async function runLayerGroup(opts: {
         manifestUrl: compiledManifestUrl,
         manifestLabel: item.entry.label,
         sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: item.entry.manifestAllmapsUrl,
+        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
         startedAtISO,
         totalMs: nowMs() - t0,
         steps,
@@ -835,19 +826,19 @@ export async function runLayerGroup(opts: {
         annotationErrorCount += failed.length;
       }
       const failedMessages = failed.map((err) => err.message);
-      for (const err of failed) log?.("ERROR", `annotation error [${item.entry.label} | ${item.entry.manifestAllmapsUrl}]: ${err.message}`);
+      for (const err of failed) log?.("ERROR", `annotation error [${item.entry.label} | ${deriveAllmapsManifestUrl(item.entry)}]: ${err.message}`);
       if (!annoResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from annotation.");
       const succeeded = annoResults.filter((r): r is string => typeof r === "string");
       for (const mapId of succeeded) {
         mapMetaByMapId.set(mapId, {
           label: item.entry.label,
-          manifestAllmapsUrl: item.entry.manifestAllmapsUrl
+          manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
         });
         mapIdToManifestInfo.set(mapId, {
           sourceManifestUrl: item.entry.sourceManifestUrl,
           label: item.entry.label,
           compiledManifestPath: item.entry.compiledManifestPath,
-          manifestAllmapsUrl: item.entry.manifestAllmapsUrl
+          manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
         });
       }
       steps.push({
@@ -862,7 +853,7 @@ export async function runLayerGroup(opts: {
         annotationUrl: okAnnotations[0]?.url,
         manifestLabel: item.entry.label,
         sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: item.entry.manifestAllmapsUrl,
+        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
         startedAtISO, totalMs: nowMs() - t0, steps, ok: true,
         annotationErrorCount: failed.length,
         annotationErrors: failedMessages
@@ -874,7 +865,7 @@ export async function runLayerGroup(opts: {
         manifestUrl: compiledManifestUrl,
         manifestLabel: item.entry.label,
         sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: item.entry.manifestAllmapsUrl,
+        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
         startedAtISO,
         totalMs: nowMs() - t0, steps, ok: false,
         error: String(err?.message ?? err)
