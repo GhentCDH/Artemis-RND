@@ -1,15 +1,15 @@
 # Artemis-RnD — LLM State File
 
-_Last updated: 2026-03-19 (data format update)_
+_Last updated: 2026-03-19 (Timeslider UI — slider branch)_
 
 ## What this repo is
 
 R&D viewer/test harness for live georeferencing of historical Belgian maps using Allmaps + MapLibre GL.
 Loads a pre-compiled dataset from GitHub Pages (Artemis-RnD-Data), renders warped IIIF map layers on an interactive basemap, and supports toponym/manifest search.
 
-## Active branch: `main`
+## Active branch: `slider`
 
-Approach: **Fully Remote** — fetches `index.json` from `https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/master/build` (default), then fetches compiled manifests + mirrored Allmaps annotations from GitHub Pages.
+Branched from `main`. Current work: replacing the old `LayersPanel` + `TimelineSlider` UI with a new unified **Timeslider** component (`app/src/lib/components/Timeslider.svelte`).
 
 ---
 
@@ -42,11 +42,59 @@ Approach: **Fully Remote** — fetches `index.json` from `https://raw.githubuser
 | `app/src/lib/artemis/layerGroups.ts` | Layer group helpers |
 | `app/src/lib/artemis/allmaps.ts` | Allmaps ID/URL generation |
 | `app/src/lib/artemis/debug/attachAllmapsDebugEvents.ts` | Allmaps event monitoring (attached on map mount) |
-| `app/src/lib/artemis/ui/LayersPanel.svelte` | Slide-out layers panel (collapse/expand tab, per-layer toggle/opacity/reorder) |
+| `app/src/lib/components/Timeslider.svelte` | **New unified timeline UI** — replaces LayersPanel + TimelineSlider. Scrubber bar with source pills, floating sublayer panel, main/sublayer toggle events. See section below. |
+| `app/src/lib/artemis/ui/LayersPanel.svelte` | **Removed from page** (file exists, no longer mounted). Replaced by Timeslider. |
+| `app/src/lib/artemis/ui/TimelineSlider.svelte` | **Removed from page** (file exists, no longer mounted). Was Massart photo timeline. |
 | `app/src/lib/artemis/ui/InfoCards.svelte` | Right-side info cards for IIIF map hover/click + parcel click; pin/focus/viewer actions |
 | `app/src/lib/artemis/ui/ToponymSearch.svelte` | Search bar (toponym index + manifest search); fires `fly-to-toponym` / `manifest-click` |
 | `app/src/lib/artemis/ui/DebugMenu.svelte` | Dataset URL input, reload, logs panel, render stats |
 | `app/src/lib/artemis/viewer/IiifViewer.svelte` | IIIF image viewer overlay (opens from info card) |
+
+---
+
+## Timeslider component (`app/src/lib/components/Timeslider.svelte`)
+
+### What it does
+A horizontal timeline scrubber spanning 1680–1870. Five historical map sources appear as coloured pills on two rows above/below a central axis line. A draggable circular timeknob sits on the axis.
+
+- **Scrubbing over a pill** → floating top-left panel appears showing that source's sublayer checkboxes
+- **Clicking a pill** → toggles the entire main layer on/off (disabled = greyed out + desaturated)
+- **Enabling a layer** → timeknob jumps to that source's representative year
+- **Disabling a layer** → timeknob stays
+
+### Sources (SOURCES array)
+| key | mainId | Label | Range | repr | Color | Row |
+|-----|--------|-------|-------|------|-------|-----|
+| `hand` | `handdrawn` | Hand drawn | 1700–1715 | 1707 | `#8B7EC8` | 1 |
+| `ferraris` | `ferraris` | Ferraris | 1770–1778 | 1774 | `#2E8B72` | 1 |
+| `primitief` | `primitief` | Primitief Kadaster | 1808–1834 | 1814 | `#C07B28` | 2 |
+| `vander` | `vandermaelen` | Vandermaelen | 1846–1854 | 1850 | `#C04A28` | 1 |
+| `gered` | `gereduceerd` | Gereduceerd Kadaster | 1847–1855 | 1851 | `#2A6FAA` | 2 |
+
+### Default sublayer state
+- IIIF sublayers (`*-iiif`): `defaultOn: true`
+- All other sublayers (parcels, landuse, water): `defaultOn: false`
+- All 5 main layers start enabled
+
+### Events dispatched
+- `mainToggle: { mainId: string; enabled: boolean }` — on pill click or `onMount`
+- `sublayerChange: { subId: string; enabled: boolean }` — on sublayer checkbox or `onMount` (only for `defaultOn` sublayers)
+
+### Wiring in +page.svelte
+```svelte
+<Timeslider on:mainToggle={onTimesliderMainToggle} on:sublayerChange={onTimesliderSublayerChange} />
+```
+Handlers call `toggleMainLayer(mainId, enabled)` and `toggleSubLayer(subId, enabled)`.
+Component is wrapped in `.timeslider-wrap { position: absolute; bottom: 12px; left: 12px; right: 12px; z-index: 4; }`.
+
+### Key layout/z-index notes
+- `.ts-axis-line { z-index: 3; pointer-events: none }` — axis sits above pills visually; transparent to clicks
+- `.ts-scrubber { height: 18px; pointer-events: auto; z-index: 5 }` — 18×18px circular thumb
+- Pills: `bottom: 12px` (row-above) / `top: 12px` (row-below) — outside scrubber's ±9px hit zone
+- Floating panel: `position: fixed; top: 12px; left: 12px; z-index: 50`
+
+### Start position
+Timeknob initialised at **1814** (Primitief Kadaster representative year).
 
 ---
 

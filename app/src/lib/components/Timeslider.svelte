@@ -1,6 +1,7 @@
 <!-- app/src/lib/components/Timeslider.svelte -->
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
 
   const dispatch = createEventDispatcher<{
     mainToggle:     { mainId: string; enabled: boolean };
@@ -16,7 +17,7 @@
   const SOURCES = [
     {
       key: 'hand', mainId: 'handdrawn', label: 'Hand drawn',
-      start: 1700, end: 1715, color: '#8B7EC8', row: 1,
+      start: 1700, end: 1715, repr: 1707, color: '#8B7EC8', row: 1,
       sublayers: [
         { id: 'iiif',    subId: 'handdrawn-iiif',    label: 'IIIF sheets',         defaultOn: true  },
         { id: 'parcels', subId: 'handdrawn-parcels',  label: 'Parcels',              defaultOn: false },
@@ -25,14 +26,14 @@
     },
     {
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
-      start: 1770, end: 1778, color: '#2E8B72', row: 1,
+      start: 1770, end: 1778, repr: 1774, color: '#2E8B72', row: 1,
       sublayers: [
         { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
       key: 'primitief', mainId: 'primitief', label: 'Primitief Kadaster',
-      start: 1808, end: 1834, color: '#C07B28', row: 2,
+      start: 1808, end: 1834, repr: 1814, color: '#C07B28', row: 2,
       sublayers: [
         { id: 'iiif',    subId: 'primitief-iiif',      label: 'IIIF sheets', defaultOn: true  },
         { id: 'parcels', subId: 'primitief-parcels',   label: 'Parcels',     defaultOn: false },
@@ -41,14 +42,14 @@
     },
     {
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
-      start: 1846, end: 1854, color: '#C04A28', row: 1,
+      start: 1846, end: 1854, repr: 1850, color: '#C04A28', row: 1,
       sublayers: [
         { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
-      start: 1847, end: 1855, color: '#2A6FAA', row: 2,
+      start: 1847, end: 1855, repr: 1851, color: '#2A6FAA', row: 2,
       sublayers: [
         { id: 'iiif',    subId: 'gereduceerd-iiif',      label: 'IIIF sheets', defaultOn: true  },
         { id: 'parcels', subId: 'gereduceerd-parcels',   label: 'Parcels',     defaultOn: false },
@@ -74,8 +75,11 @@
 
   // ─── State ─────────────────────────────────────────────────────────────────
 
-  // Current scrubber position in years
-  let sliderYear: number = AXIS_START;
+  // Current scrubber position in years — start at Primitief Kadaster representative year
+  let sliderYear: number = 1814;
+
+  // Bound track pixel width — used to convert knob half-width to year offset
+  let trackWidth = 0;
 
   // Per-source enabled state — all on by default
   let enabledLayers: Record<string, boolean> = Object.fromEntries(
@@ -116,6 +120,11 @@
     enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
     const src = SOURCES.find(s => s.key === key)!;
 
+    // Jump slider to this source's representative year when enabling
+    if (wasEnabled === false) {
+      sliderYear = src.repr;
+    }
+
     dispatch('mainToggle', { mainId: src.mainId, enabled: !wasEnabled });
 
     if (wasEnabled) {
@@ -148,8 +157,13 @@
 
   // ─── Derived ───────────────────────────────────────────────────────────────
 
-  // Sources whose date range the scrubber is currently over
-  $: panelSources = SOURCES.filter(s => sliderYear >= s.start && sliderYear <= s.end);
+  // Half the knob width converted to years — corrects for the physical width of the handle
+  $: halfKnobYears = trackWidth > 0 ? (9 / trackWidth) * AXIS_SPAN : 3;
+
+  // Sources whose date range the scrubber (including knob half-width) is currently over
+  $: panelSources = SOURCES.filter(
+    s => sliderYear >= s.start - halfKnobYears && sliderYear <= s.end + halfKnobYears
+  );
   $: row1 = SOURCES.filter(s => s.row === 1);
   $: row2 = SOURCES.filter(s => s.row === 2);
 
@@ -159,7 +173,7 @@
 
 <!-- ── Floating sublayer panel (top-left, shown when scrubber is over a source) ── -->
 {#if panelSources.length > 0}
-  <div class="ts-overlay-panel">
+  <div class="ts-overlay-panel" transition:fade={{ duration: 140 }}>
     {#each panelSources as src}
       <div class="overlay-source">
         <div class="overlay-header" style="color:{src.color}; border-color:{src.color}20">
@@ -195,7 +209,7 @@
   </div>
 
   <!-- Track -->
-  <div class="ts-track">
+  <div class="ts-track" bind:clientWidth={trackWidth}>
 
     <!-- Row 1: above axis -->
     <div class="ts-row ts-row--above">
@@ -205,7 +219,7 @@
         <div
           class="source-block"
           class:is-disabled={!enabled}
-          style="left:{pct(src.start)};width:{widthPct(src.start,src.end)};min-width:fit-content;--c:{src.color};bottom:2px"
+          style="left:{pct(src.start)};width:{widthPct(src.start,src.end)};min-width:fit-content;--c:{src.color};position:absolute;bottom:12px"
           role="button"
           tabindex="0"
           title="{src.label} ({src.start}–{src.end})"
@@ -260,7 +274,7 @@
         <div
           class="source-block"
           class:is-disabled={!enabled}
-          style="left:{pct(src.start)};width:{widthPct(src.start,src.end)};min-width:fit-content;--c:{src.color};top:2px"
+          style="left:{pct(src.start)};width:{widthPct(src.start,src.end)};min-width:fit-content;--c:{src.color};position:absolute;top:12px"
           role="button"
           tabindex="0"
           title="{src.label} ({src.start}–{src.end})"
@@ -410,8 +424,8 @@
     overflow: visible;
   }
 
-  .ts-row--above { height: 22px; }
-  .ts-row--below { height: 22px; }
+  .ts-row--above { height: 36px; }
+  .ts-row--below { height: 36px; }
 
   /* ── Axis line ───────────────────────────────────────────────────────────── */
 
@@ -419,22 +433,32 @@
     position: relative;
     height: 1.5px;
     background: rgba(0,0,0,0.15);
-    z-index: 1;
+    /* visually above pills so the knob renders on top */
+    z-index: 3;
     overflow: visible;
+    /* don't block clicks on pills — only the input and dots capture events */
+    pointer-events: none;
   }
 
-  /* ── Scrubber label (year under the cursor) ──────────────────────────────── */
+  /* ── Scrubber label (year above the knob) ───────────────────────────────── */
 
   .scrubber-label {
     position: absolute;
-    top: 8px;
+    /* sit above the top row — row height 36px + half axis = ~38px above axis centre */
+    bottom: calc(100% + 38px);
     transform: translateX(-50%);
     font-family: 'DM Mono', 'Courier New', monospace;
-    font-size: 9px;
-    color: rgba(0,0,0,0.5);
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(0,0,0,0.65);
+    background: #ffffff;
+    border: 0.5px solid rgba(0,0,0,0.12);
+    border-radius: 4px;
+    padding: 1px 5px;
     white-space: nowrap;
     pointer-events: none;
     z-index: 6;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
   }
 
   /* ── Range scrubber ──────────────────────────────────────────────────────── */
@@ -443,9 +467,9 @@
     position: absolute;
     left: 0;
     top: 50%;
+    height: 18px;
     transform: translateY(-50%);
     width: 100%;
-    height: 20px;
     margin: 0;
     padding: 0;
     z-index: 5;
@@ -453,26 +477,28 @@
     -webkit-appearance: none;
     appearance: none;
     background: transparent;
+    pointer-events: auto;
   }
 
   .ts-scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 3px;
-    height: 22px;
-    border-radius: 1.5px;
-    background: rgba(0,0,0,0.55);
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid rgba(0,0,0,0.30);
     cursor: ew-resize;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.10);
   }
 
   .ts-scrubber::-moz-range-thumb {
-    width: 3px;
-    height: 22px;
-    border-radius: 1.5px;
-    background: rgba(0,0,0,0.55);
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid rgba(0,0,0,0.30);
     cursor: ew-resize;
-    border: none;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.10);
   }
 
   .ts-scrubber::-webkit-slider-runnable-track { background: transparent; }
@@ -492,6 +518,7 @@
     padding: 0;
     cursor: pointer;
     z-index: 3;
+    pointer-events: auto;
     transition: transform 150ms ease;
   }
 
@@ -513,23 +540,24 @@
   }
 
   .block-pill {
-    height: 20px;
-    border-radius: 10px;
+    height: 30px;
+    border-radius: 15px;
     background: var(--c);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 10px;
+    padding: 0 14px;
     font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 500;
     color: #ffffff;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: transform 120ms ease;
+    letter-spacing: 0.01em;
+    transition: transform 120ms ease, opacity 200ms ease;
   }
 
   .source-block:hover:not(.is-disabled) .block-pill {
-    transform: scaleY(1.08);
+    transform: scaleY(1.06);
   }
 </style>
