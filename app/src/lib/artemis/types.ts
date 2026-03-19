@@ -25,3 +25,78 @@ export type UILog = {
   level: "INFO" | "WARN" | "ERROR";
   msg: string;
 };
+
+// --- Toponym & search types ---
+
+export type ToponymIndexItem = {
+  id: string;
+  text: string;
+  textNormalized?: string;
+  sourceGroup: string;
+  sourceFile: string;
+  mapId: string;
+  mapName: string;
+  featureIndex: number;
+  lon: number;
+  lat: number;
+};
+
+export type RawToponymIndexItem = {
+  id?: string;
+  text?: string;
+  textNormalized?: string;
+  sourceGroup?: string;
+  sourceFile?: string;
+  mapId?: string;
+  mapName?: string;
+  featureIndex?: number;
+  lon?: number;
+  lat?: number;
+  centroid?: [number, number];
+  bounds?: [number, number, number, number];
+  geometry?: unknown;
+};
+
+export type ManifestSearchItem = {
+  id: string;
+  label: string;
+  text: string;
+  textNormalized: string;
+  mapName: string;
+  sourceManifestUrl: string;
+  compiledManifestPath: string;
+  centerLon: number;
+  centerLat: number;
+};
+
+// --- UI panel types ---
+
+export type IiifMapInfo = {
+  title: string;
+  sourceManifestUrl: string;
+  imageServiceUrl?: string;
+  manifestAllmapsUrl?: string;
+  layerLabel?: string;
+  layerColor?: string;
+  centerLon?: number;
+  centerLat?: number;
+  mainId?: string;
+};
+
+export type ParcelClickInfo = {
+  parcelLabel: string;
+  leafId: string;
+  properties: Record<string, any>;
+  lon: number;
+  lat: number;
+};
+
+export type IiifPanelGroup = {
+  layerLabel: string;
+  layerColor: string;
+  items: IiifMapInfo[];
+};
+
+export type PinnedCard =
+  | { type: 'iiif'; group: IiifPanelGroup }
+  | { type: 'parcel'; info: ParcelClickInfo };
