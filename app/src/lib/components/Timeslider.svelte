@@ -21,6 +21,8 @@
   const dispatch = createEventDispatcher<{
     mainToggle:     { mainId: string; enabled: boolean };
     sublayerChange: { subId: string; enabled: boolean };
+    paneMainToggle: { pane: PaneId; mainId: string; enabled: boolean };
+    paneSublayerChange: { pane: PaneId; subId: string; enabled: boolean };
     'open-viewer':  { title: string; sourceManifestUrl: string; imageServiceUrl: string };
     'year-change':  { pane: PaneId; year: number };
   }>();
@@ -74,16 +76,20 @@
   type SourceDef = typeof SOURCES[number];
   type SourceKey = SourceDef['key'];
   type PaneState = { id: PaneId; year: number; label: string; color: string };
+  const TIMELINE_AXIS_START = 1690;
+  const TIMELINE_AXIS_END = 1930;
 
   const defaultYear = Math.round(
     (Math.min(...SOURCES.map(s => s.start)) + Math.max(...SOURCES.map(s => s.end))) / 2
   );
 
+  let sliderYear = defaultYear;
   let trackWidth = 0;
   let localLeftYear = defaultYear;
   let localRightYear = defaultYear;
   let lastLeftYearProp: number | undefined = undefined;
   let lastRightYearProp: number | undefined = undefined;
+  let compareModePrev = compareEnabled;
 
   let enabledLayers: Record<string, boolean> = Object.fromEntries(
     SOURCES.map(s => [s.key, true])
@@ -97,6 +103,7 @@
   );
 
   let prevVisible: Record<string, boolean> = {};
+  let prevPaneVisible: Record<PaneId, Record<string, boolean>> = { left: {}, right: {} };
 
   let popupItems: MassartItem[] = [];
   let popupIdx = 0;
@@ -113,12 +120,12 @@
     return acc;
   }, new Map());
 
-  $: _massartYears = [...massartByYear.keys()];
-  $: _allMax = Math.max(...SOURCES.map(s => s.end), ..._massartYears);
-  $: _allMin = Math.min(...SOURCES.map(s => s.start));
-  $: axisStart = Math.floor((_allMin - 10) / 10) * 10;
-  $: axisEnd = Math.ceil((_allMax + 10) / 10) * 10;
-  $: axisSpan = axisEnd > axisStart ? axisEnd - axisStart : 1;
+  // Hardcoded stable axis bounds:
+  // historical map eras start at 1700; current Massart dataset spans 1904-1912.
+  // We keep the decade-padded range fixed to avoid runtime layout churn.
+  const axisStart = TIMELINE_AXIS_START;
+  const axisEnd = TIMELINE_AXIS_END;
+  const axisSpan = axisEnd - axisStart;
 
   type TickKind = 'century' | 'decade';
 
@@ -156,6 +163,7 @@
   }
 
   function yearForPane(pane: PaneId): number {
+    if (!compareEnabled) return sliderYear;
     return pane === 'left' ? localLeftYear : localRightYear;
   }
 
@@ -165,11 +173,16 @@
 
   function onSliderInput(pane: PaneId, e: Event) {
     const year = parseFloat((e.target as HTMLInputElement).value);
+    if (!compareEnabled) {
+      sliderYear = year;
+      dispatch('year-change', { pane: 'left', year });
+      return;
+    }
     setPaneYear(pane, year);
   }
 
   function isDotNear(yr: number): boolean {
-    if (!compareEnabled) return Math.abs(yr - localLeftYear) <= yearLeeway;
+    if (!compareEnabled) return Math.abs(yr - sliderYear) <= yearLeeway;
     return visiblePanes.some((pane) => Math.abs(yr - pane.year) <= yearLeeway);
   }
 
@@ -200,7 +213,14 @@
     const wasEnabled = enabledLayers[key];
     enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
     const src = SOURCES.find(s => s.key === key)!;
-    if (!wasEnabled) setPaneYear('left', src.repr);
+    if (!wasEnabled) {
+      if (compareEnabled) {
+        setPaneYear('left', src.repr);
+      } else {
+        sliderYear = src.repr;
+        dispatch('year-change', { pane: 'left', year: sliderYear });
+      }
+    }
   }
 
   function toggleSublayer(key: SourceKey, subId: string, localId: string) {
@@ -209,8 +229,13 @@
       ...sublayerState,
       [key]: { ...sublayerState[key], [localId]: !cur },
     };
-    const isVisible = enabledLayers[key] && activeSourceKeys.has(key);
-    if (isVisible) dispatch('sublayerChange', { subId, enabled: !cur });
+    const leftVisible = enabledLayers[key] && leftVisibleSourceKeys.has(key);
+    if (leftVisible) dispatch('sublayerChange', { subId, enabled: !cur });
+    if (leftVisible) dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
+    if (compareEnabled) {
+      const rightVisible = enabledLayers[key] && rightVisibleSourceKeys.has(key);
+      if (rightVisible) dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
+    }
   }
 
   function sourceBlockStyle(src: SourceDef): string {
@@ -227,13 +252,28 @@
 
   onMount(() => {
     for (const src of SOURCES) {
-      const visible = enabledLayers[src.key] && activeSourceKeys.has(src.key);
+      const visible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
       prevVisible[src.key] = visible;
       dispatch('mainToggle', { mainId: src.mainId, enabled: visible });
+      prevPaneVisible.left[src.key] = visible;
+      dispatch('paneMainToggle', { pane: 'left', mainId: src.mainId, enabled: visible });
       if (visible) {
         for (const sub of src.sublayers) {
           if (sublayerState[src.key]?.[sub.id]) {
             dispatch('sublayerChange', { subId: sub.subId, enabled: true });
+            dispatch('paneSublayerChange', { pane: 'left', subId: sub.subId, enabled: true });
+          }
+        }
+      }
+      if (compareEnabled) {
+        const rightVisible = enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
+        prevPaneVisible.right[src.key] = rightVisible;
+        dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightVisible });
+        if (rightVisible) {
+          for (const sub of src.sublayers) {
+            if (sublayerState[src.key]?.[sub.id]) {
+              dispatch('paneSublayerChange', { pane: 'right', subId: sub.subId, enabled: true });
+            }
           }
         }
       }
@@ -245,11 +285,22 @@
   $: if (leftYear != null && leftYear !== lastLeftYearProp) {
     lastLeftYearProp = leftYear;
     localLeftYear = leftYear;
+    if (!compareEnabled) sliderYear = leftYear;
   }
 
   $: if (rightYear != null && rightYear !== lastRightYearProp) {
     lastRightYearProp = rightYear;
     localRightYear = rightYear;
+  }
+
+  $: if (compareEnabled !== compareModePrev) {
+    if (compareEnabled) {
+      localLeftYear = sliderYear;
+      if (rightYear != null) localRightYear = rightYear;
+    } else {
+      sliderYear = localLeftYear;
+    }
+    compareModePrev = compareEnabled;
   }
 
   $: visiblePanes = (compareEnabled
@@ -261,19 +312,21 @@
 
   $: leftPanelSources = paneSourcesForYear(localLeftYear);
   $: rightPanelSources = compareEnabled ? paneSourcesForYear(localRightYear) : [];
+  $: leftVisibleSourceKeys = new Set<SourceKey>((compareEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).map((s) => s.key));
+  $: rightVisibleSourceKeys = new Set<SourceKey>(rightPanelSources.map((s) => s.key));
   $: activeSourceKeys = compareEnabled
     ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
-    : new Set<SourceKey>(leftPanelSources.map((s) => s.key));
+    : new Set<SourceKey>(paneSourcesForYear(sliderYear).map((s) => s.key));
 
   $: panelSources = compareEnabled
     ? SOURCES.filter((s) => activeSourceKeys.has(s.key))
-    : leftPanelSources;
+    : paneSourcesForYear(sliderYear);
   $: row1 = SOURCES.filter(s => s.row === 1);
   $: row2 = SOURCES.filter(s => s.row === 2);
 
   $: activePanesBySource = SOURCES.reduce<Record<SourceKey, PaneState[]>>((acc, src) => {
     const panes: PaneState[] = [];
-    if (leftPanelSources.some((s) => s.key === src.key)) {
+    if ((compareEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).some((s) => s.key === src.key)) {
       panes.push({ id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color });
     }
     if (compareEnabled && rightPanelSources.some((s) => s.key === src.key)) {
@@ -292,9 +345,8 @@
   }, {} as Record<SourceKey, string>);
 
   $: {
-    const activeSet = activeSourceKeys;
     for (const src of SOURCES) {
-      const nowVisible = enabledLayers[src.key] && activeSet.has(src.key);
+      const nowVisible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
       if (prevVisible[src.key] !== undefined && prevVisible[src.key] !== nowVisible) {
         dispatch('mainToggle', { mainId: src.mainId, enabled: nowVisible });
         if (!nowVisible) {
@@ -310,6 +362,47 @@
           }
         }
         prevVisible[src.key] = nowVisible;
+      }
+
+      const leftPaneVisible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
+      if (prevPaneVisible.left[src.key] !== undefined && prevPaneVisible.left[src.key] !== leftPaneVisible) {
+        dispatch('paneMainToggle', { pane: 'left', mainId: src.mainId, enabled: leftPaneVisible });
+        if (!leftPaneVisible) {
+          for (const sub of src.sublayers) {
+            dispatch('paneSublayerChange', { pane: 'left', subId: sub.subId, enabled: false });
+          }
+        } else {
+          for (const sub of src.sublayers) {
+            dispatch('paneSublayerChange', {
+              pane: 'left',
+              subId: sub.subId,
+              enabled: sublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
+            });
+          }
+        }
+        prevPaneVisible.left[src.key] = leftPaneVisible;
+      }
+
+      const rightPaneVisible = compareEnabled && enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
+      if (compareEnabled && prevPaneVisible.right[src.key] !== undefined && prevPaneVisible.right[src.key] !== rightPaneVisible) {
+        dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightPaneVisible });
+        if (!rightPaneVisible) {
+          for (const sub of src.sublayers) {
+            dispatch('paneSublayerChange', { pane: 'right', subId: sub.subId, enabled: false });
+          }
+        } else {
+          for (const sub of src.sublayers) {
+            dispatch('paneSublayerChange', {
+              pane: 'right',
+              subId: sub.subId,
+              enabled: sublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
+            });
+          }
+        }
+        prevPaneVisible.right[src.key] = rightPaneVisible;
+      }
+      if (!compareEnabled) {
+        prevPaneVisible.right[src.key] = false;
       }
     }
   }
@@ -399,9 +492,9 @@
       {:else}
         <span
           class="scrubber-label"
-          style="left:{scrubberPctForPane('left')}%;--pane-color:{PANE_META.left.color}"
+          style="left:{((sliderYear - axisStart) / axisSpan) * 100}%;--pane-color:{PANE_META.left.color}"
           aria-hidden="true"
-        >{Math.round(localLeftYear)}</span>
+        >{Math.round(sliderYear)}</span>
       {/if}
 
       {#each ticks as tick}
@@ -445,7 +538,7 @@
           min={axisStart}
           max={axisEnd}
           step="1"
-          value={localLeftYear}
+          value={sliderYear}
           on:input={(e) => onSliderInput('left', e)}
           aria-label="Timeline year"
         />
@@ -581,6 +674,7 @@
     user-select: none;
     font-family: var(--font-ui);
     box-shadow: var(--shadow-md);
+    pointer-events: auto;
   }
 
   .ts-track {

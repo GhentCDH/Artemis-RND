@@ -2,11 +2,11 @@
 <script lang="ts">
   import 'maplibre-gl/dist/maplibre-gl.css';
   import '$lib/theme.css';
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import type maplibregl from 'maplibre-gl';
 
   import {
-    ensureMapContext, destroyMapContext,
+    ensureMapContext, destroyMapContext, createMapContext, destroyMapContextInstance,
     setHistCartLayerVisible, setHistCartLayerOpacity,
     setLandUsageLayerVisible, setLandUsageLayerOpacity, getLandUsageLayerId,
     setPrimitiveLayerVisible, isPrimitiveLayerVisible,
@@ -47,8 +47,14 @@
 
   // ─── Map ───────────────────────────────────────────────────────────────────
 
+  type PaneId = 'left' | 'right';
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
+  let rightMapDiv: HTMLElement;
+  let rightMap: maplibregl.Map | null = null;
+  let rightMapReady = false;
+  let rightMapInitInFlight = false;
+  let suppressSyncPane: PaneId | null = null;
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -80,9 +86,11 @@
   // ─── Massart ───────────────────────────────────────────────────────────────
 
   const MASSART_LEEWAY = 3; // years each side of the scrubber that count as "active"
+  const MASSART_YEAR_MIN = 1904;
+  const MASSART_YEAR_MAX = 1912;
   let massartItems: MassartItem[] = [];
   let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
-  let rightTimelineYear = Math.min(1855, massartYear + 12);
+  let rightTimelineYear = MASSART_YEAR_MAX;
 
   async function loadMassartData() {
     try {
@@ -98,6 +106,7 @@
     const pane = e.detail.pane ?? 'left';
     if (pane === 'right') {
       rightTimelineYear = e.detail.year;
+      if (rightMap?.isStyleLoaded()) updateMassartActiveYear(rightMap, rightTimelineYear, MASSART_LEEWAY);
       return;
     }
     massartYear = e.detail.year;
@@ -106,9 +115,13 @@
 
   function toggleCompareMode() {
     if (!compareEnabled) {
-      rightTimelineYear = Math.min(1855, massartYear + 12);
+      rightTimelineYear = MASSART_YEAR_MAX;
     }
     compareEnabled = !compareEnabled;
+    void tick().then(() => {
+      try { map?.resize(); } catch { /* ignore */ }
+      try { rightMap?.resize(); } catch { /* ignore */ }
+    });
   }
 
   // ─── Logging ───────────────────────────────────────────────────────────────
@@ -136,6 +149,13 @@
   let subLayerEnabled   = makeInitialSubLayerEnabled();
   let subLayerLoading: Record<string, boolean>  = {};
   const iiifSyncByMain = new Map<string, Promise<void>>();
+  let rightMainLayerVisible = makeInitialMainLayerEnabled();
+  let rightMainLayerLoading: Record<string, boolean> = {};
+  let rightSubLayerVisible = makeInitialSubLayerEnabled();
+  const rightIiifSyncByMain = new Map<string, Promise<void>>();
+  $: combinedMainLayerLoading = Object.fromEntries(
+    mainLayerOrder.map((mainId) => [mainId, Boolean(mainLayerLoading[mainId] || rightMainLayerLoading[mainId])])
+  );
 
   // Groups that should be parked as soon as their in-flight load completes.
   // Prevents the race where parkLayerGroup is called before runLayerGroup finishes.
@@ -277,6 +297,36 @@
         } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
           for (const id of getPrimitiveLayerIds()) {
             try { if (map.getLayer(id)) map.moveLayer(id); } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+  }
+
+  function applyZOrderForPane(targetMap: maplibregl.Map, paneId: PaneId | 'main') {
+    if (!targetMap || !targetMap.isStyleLoaded()) return;
+    for (let i = mainLayerOrder.length - 1; i >= 0; i--) {
+      const mainId = mainLayerOrder[i];
+      const wmtsKey = getMainWmtsKey(mainId);
+      if (wmtsKey) {
+        const lid = `histcart-${wmtsKey}-layer`;
+        try { if (targetMap.getLayer(lid)) targetMap.moveLayer(lid); } catch { /* ignore */ }
+      }
+      for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
+        const subDef = SUB_LAYER_DEFS[subId];
+        if (subDef?.kind === 'wms') {
+          const lid = getLandUsageLayerId(mainId as HistCartLayerKey);
+          try { if (targetMap.getLayer(lid)) targetMap.moveLayer(lid); } catch { /* ignore */ }
+        } else if (subDef?.kind === 'iiif') {
+          const info = getIiifInfoForSub(subId);
+          if (info) {
+            for (const id of getLayerGroupLayerIds(info.uiLayerId, paneId)) {
+              try { if (targetMap.getLayer(id)) targetMap.moveLayer(id); } catch { /* ignore */ }
+            }
+          }
+        } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
+          for (const id of getPrimitiveLayerIds()) {
+            try { if (targetMap.getLayer(id)) targetMap.moveLayer(id); } catch { /* ignore */ }
           }
         }
       }
@@ -427,6 +477,75 @@
       .catch(() => {})
       .then(() => syncIiifMainLayer(mainId));
     iiifSyncByMain.set(mainId, next);
+    return next;
+  }
+
+  async function loadIiifLayerForRight(layerInfo: UILayerInfo) {
+    if (!rightMap) return;
+    const gid = layerInfo.uiLayerId;
+    log('INFO', `[loadIiif:right] start gid=${gid} path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? 'all'}`);
+    try {
+      await runLayerGroup({
+        map: rightMap,
+        paneId: 'right',
+        cfg: cfg(),
+        layerInfo,
+        log,
+      });
+    } finally {
+      log('INFO', `[loadIiif:right] done gid=${gid}`);
+    }
+  }
+
+  function shouldShowRightIiifGroup(mainId: string, iiifSubId: string): boolean {
+    return Boolean(rightMainLayerVisible[mainId] && rightSubLayerVisible[iiifSubId]);
+  }
+
+  async function syncRightIiifMainLayer(mainId: string) {
+    if (!rightMap) return;
+    const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
+    if (!iiifSubId) return;
+    const info = getIiifInfoForSub(iiifSubId);
+    if (!info) return;
+
+    const gid = info.uiLayerId;
+    const shouldShow = shouldShowRightIiifGroup(mainId, iiifSubId);
+    const parked = isLayerGroupParked(gid, 'right');
+    const hasLoadedGroup = getLayerGroupLayerIds(gid, 'right').length > 0;
+
+    if (!shouldShow) {
+      if (!parked && hasLoadedGroup) {
+        await parkLayerGroup(rightMap, gid, 'right');
+      }
+      applyZOrderForPane(rightMap, 'right');
+      return;
+    }
+
+    if (hasLoadedGroup && !parked) {
+      setLayerGroupOpacity(rightMap, gid, mainLayerOpacity[mainId] ?? 1, 'right');
+      applyZOrderForPane(rightMap, 'right');
+      return;
+    }
+
+    rightMainLayerLoading = { ...rightMainLayerLoading, [mainId]: true };
+    try {
+      await loadIiifLayerForRight(info);
+      if (!shouldShowRightIiifGroup(mainId, iiifSubId)) {
+        await parkLayerGroup(rightMap, gid, 'right');
+        applyZOrderForPane(rightMap, 'right');
+        return;
+      }
+      setLayerGroupOpacity(rightMap, gid, mainLayerOpacity[mainId] ?? 1, 'right');
+      applyZOrderForPane(rightMap, 'right');
+    } finally {
+      rightMainLayerLoading = { ...rightMainLayerLoading, [mainId]: false };
+    }
+  }
+
+  function scheduleRightIiifMainLayerSync(mainId: string) {
+    const prev = rightIiifSyncByMain.get(mainId) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(() => syncRightIiifMainLayer(mainId));
+    rightIiifSyncByMain.set(mainId, next);
     return next;
   }
 
@@ -600,6 +719,10 @@
         log('INFO', `[Init] Triggering deferred load for ${mainId}`);
         mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
         await toggleMainLayer(mainId, true);
+      }
+
+      if (compareEnabled && rightMap) {
+        await syncRightPaneState();
       }
 
       await loadToponymIndex();
@@ -797,6 +920,151 @@
     await toggleSubLayer(e.detail.subId, e.detail.enabled);
   }
 
+  async function onTimesliderPaneMainToggle(e: CustomEvent<{ pane: PaneId; mainId: string; enabled: boolean }>) {
+    if (e.detail.pane !== 'right') return;
+    rightMainLayerVisible = { ...rightMainLayerVisible, [e.detail.mainId]: e.detail.enabled };
+    if (!rightMap) return;
+
+    const wmtsKey = getMainWmtsKey(e.detail.mainId);
+    if (wmtsKey) {
+      applyZOrderForPane(rightMap, 'right');
+      return;
+    }
+
+    const iiifSubId = MAIN_LAYER_SUBS[e.detail.mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
+    if (!iiifSubId) return;
+    await scheduleRightIiifMainLayerSync(e.detail.mainId);
+  }
+
+  async function onTimesliderPaneSublayerChange(e: CustomEvent<{ pane: PaneId; subId: string; enabled: boolean }>) {
+    if (e.detail.pane !== 'right') return;
+    rightSubLayerVisible = { ...rightSubLayerVisible, [e.detail.subId]: e.detail.enabled };
+    if (!rightMap) return;
+
+    const subDef = SUB_LAYER_DEFS[e.detail.subId];
+    if (!subDef || subDef.kind === 'searchable') return;
+    const mainId = Object.keys(MAIN_LAYER_SUBS).find(k => MAIN_LAYER_SUBS[k].includes(e.detail.subId)) ?? '';
+    const opacity = mainLayerOpacity[mainId] ?? 1;
+
+    if (subDef.kind === 'wmts') {
+      setHistCartLayerVisible(rightMap, mainId as HistCartLayerKey, e.detail.enabled);
+      if (e.detail.enabled) setHistCartLayerOpacity(rightMap, mainId as HistCartLayerKey, opacity);
+      applyZOrderForPane(rightMap, 'right');
+      return;
+    }
+    if (subDef.kind === 'wms') {
+      setLandUsageLayerVisible(rightMap, mainId as HistCartLayerKey, e.detail.enabled);
+      if (e.detail.enabled) setLandUsageLayerOpacity(rightMap, mainId as HistCartLayerKey, opacity);
+      applyZOrderForPane(rightMap, 'right');
+      return;
+    }
+    if (subDef.kind === 'geojson') {
+      if (e.detail.subId === 'primitief-parcels') {
+        setPrimitiveLayerVisible(rightMap, e.detail.enabled, primitiveGeojsonUrl());
+        if (e.detail.enabled) setPrimitiveLayerOpacity(rightMap, opacity);
+        applyZOrderForPane(rightMap, 'right');
+      }
+      return;
+    }
+
+    await scheduleRightIiifMainLayerSync(mainId);
+  }
+
+  function syncCamera(from: PaneId) {
+    if (!compareEnabled || !map || !rightMap) return;
+    const source = from === 'left' ? map : rightMap;
+    const target = from === 'left' ? rightMap : map;
+    const targetPane: PaneId = from === 'left' ? 'right' : 'left';
+    if (!source || !target || suppressSyncPane === from) return;
+    suppressSyncPane = targetPane;
+    target.jumpTo({
+      center: source.getCenter(),
+      zoom: source.getZoom(),
+      bearing: source.getBearing(),
+      pitch: source.getPitch(),
+    });
+    suppressSyncPane = null;
+  }
+
+  function attachRightMassartHandlers(targetMap: maplibregl.Map) {
+    for (const layerId of getMassartClickLayerIds()) {
+      targetMap.on('click', layerId, (e) => {
+        const feat = e.features?.[0];
+        if (!feat?.properties) return;
+        const { manifestUrl } = feat.properties as { manifestUrl: string };
+        const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
+        if (!item) return;
+        openImageCollectionBubble(item);
+      });
+      targetMap.on('mouseenter', layerId, () => { targetMap.getCanvas().style.cursor = 'pointer'; });
+      targetMap.on('mouseleave', layerId, () => { targetMap.getCanvas().style.cursor = ''; });
+    }
+  }
+
+  async function syncRightPaneState() {
+    if (!rightMap) return;
+    if (massartItems.length > 0) {
+      setMassartPins(rightMap, massartItems, rightTimelineYear, MASSART_LEEWAY);
+    }
+    for (const subId of Object.keys(rightSubLayerVisible)) {
+      await onTimesliderPaneSublayerChange(new CustomEvent('paneSublayerChange', {
+        detail: { pane: 'right', subId, enabled: rightSubLayerVisible[subId] },
+      }) as CustomEvent<{ pane: PaneId; subId: string; enabled: boolean }>);
+    }
+    for (const mainId of Object.keys(rightMainLayerVisible)) {
+      if ((MAIN_LAYER_SUBS[mainId] ?? []).some((subId) => SUB_LAYER_DEFS[subId]?.kind === 'iiif')) {
+        await onTimesliderPaneMainToggle(new CustomEvent('paneMainToggle', {
+          detail: { pane: 'right', mainId, enabled: rightMainLayerVisible[mainId] },
+        }) as CustomEvent<{ pane: PaneId; mainId: string; enabled: boolean }>);
+      }
+    }
+    applyZOrderForPane(rightMap, 'right');
+  }
+
+  async function ensureRightMap() {
+    if (!compareEnabled || !rightMapDiv || rightMap || rightMapInitInFlight) return;
+    rightMapInitInFlight = true;
+    await tick();
+    rightMap = createMapContext(rightMapDiv);
+    attachAllmapsDebugEvents(rightMap, log);
+    rightMap.on('load', async () => {
+      rightMapReady = true;
+      rightMap?.jumpTo({
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      });
+      attachRightMassartHandlers(rightMap!);
+      await syncRightPaneState();
+    });
+    rightMap.on('move', () => syncCamera('right'));
+    rightMapInitInFlight = false;
+  }
+
+  function teardownRightMap() {
+    if (!rightMap) return;
+    destroyMapContextInstance(rightMap);
+    rightMap = null;
+    rightMapReady = false;
+    rightMapInitInFlight = false;
+    rightMainLayerVisible = makeInitialMainLayerEnabled();
+    rightSubLayerVisible = makeInitialSubLayerEnabled();
+    rightMainLayerLoading = {};
+  }
+
+  $: if (compareEnabled && rightMapDiv && !rightMap) {
+    void ensureRightMap();
+  }
+
+  $: if (!compareEnabled && rightMap) {
+    teardownRightMap();
+  }
+
+  $: if (rightMapReady && rightMap && massartItems.length > 0) {
+    setMassartPins(rightMap, massartItems, rightTimelineYear, MASSART_LEEWAY);
+  }
+
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   onMount(() => {
@@ -911,6 +1179,7 @@
 
     const onMapMove = () => {
       syncImageCollectionBubblePosition();
+      syncCamera('left');
     };
 
     map.on('mousemove', onMouseMove);
@@ -928,13 +1197,23 @@
   });
 
   onDestroy(() => {
+    teardownRightMap();
     destroyMapContext();
   });
 </script>
 
 <div class="wrap">
   <main class="map-shell">
-    <div class="map-canvas" bind:this={mapDiv}></div>
+    <div class="map-stage" class:is-compare={compareEnabled}>
+      <div class="map-pane map-pane--left">
+        <div class="map-canvas" bind:this={mapDiv}></div>
+      </div>
+      {#if compareEnabled}
+        <div class="map-pane map-pane--right">
+          <div class="map-canvas" bind:this={rightMapDiv}></div>
+        </div>
+      {/if}
+    </div>
 
     {#if initialWarmupPending || initialWarmupRunning}
       <div class="startup-overlay" role="status" aria-live="polite">
@@ -1001,9 +1280,11 @@
         leftYear={massartYear}
         rightYear={rightTimelineYear}
         yearLeeway={MASSART_LEEWAY}
-        loadingLayers={mainLayerLoading}
+        loadingLayers={combinedMainLayerLoading}
         on:mainToggle={onTimesliderMainToggle}
         on:sublayerChange={onTimesliderSublayerChange}
+        on:paneMainToggle={onTimesliderPaneMainToggle}
+        on:paneSublayerChange={onTimesliderPaneSublayerChange}
         on:year-change={onMassartYearChange}
         on:open-viewer={(e) => { viewerItem = { title: e.detail.title, sourceManifestUrl: e.detail.sourceManifestUrl, imageServiceUrl: e.detail.imageServiceUrl }; viewerOpen = true; }}
       />
@@ -1065,6 +1346,56 @@
     position: relative;
     width: 100vw;
     height: 100dvh;
+  }
+
+  .map-stage {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .map-stage.is-compare {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .map-pane {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .map-pane--left {
+    box-shadow:
+      inset 0 0 0 4px rgba(31, 111, 235, 0.78),
+      inset -2px 0 0 rgba(0, 0, 0, 0.28);
+  }
+
+  .map-pane--right {
+    box-shadow:
+      inset 0 0 0 4px rgba(217, 119, 6, 0.78),
+      inset 2px 0 0 rgba(0, 0, 0, 0.28);
+  }
+
+  .map-stage.is-compare::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 4px;
+    transform: translateX(-50%);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35)),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.18));
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.42),
+      0 0 14px rgba(0, 0, 0, 0.12);
+    pointer-events: none;
+    z-index: 2;
   }
 
   .map-canvas {
@@ -1142,13 +1473,14 @@
     left: 12px;
     right: 12px;
     z-index: 4;
-    pointer-events: all;
+    pointer-events: none;
   }
 
   .timeslider-toolbar {
     display: flex;
     justify-content: flex-end;
     margin-bottom: 8px;
+    pointer-events: none;
   }
 
   .compare-toggle {
@@ -1163,6 +1495,7 @@
     box-shadow: var(--shadow-sm);
     cursor: pointer;
     transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+    pointer-events: auto;
   }
 
   .compare-toggle:hover {
