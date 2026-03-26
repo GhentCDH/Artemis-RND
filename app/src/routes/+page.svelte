@@ -122,6 +122,10 @@
   let subLayerEnabled   = makeInitialSubLayerEnabled();
   let subLayerLoading: Record<string, boolean>  = {};
 
+  // Groups that should be parked as soon as their in-flight load completes.
+  // Prevents the race where parkLayerGroup is called before runLayerGroup finishes.
+  const pendingPark = new Set<string>();
+
   // Maps groupId → mainId for hover colour lookups
   const groupIdToMainId = new Map<string, string>();
 
@@ -268,8 +272,8 @@
 
     const wmtsKey = getMainWmtsKey(mainId);
     if (wmtsKey) {
-      setHistCartLayerVisible(map, wmtsKey, enabled);
-      if (enabled) setHistCartLayerOpacity(map, wmtsKey, mainLayerOpacity[mainId] ?? 1);
+      // WMTS tile visibility is owned by the wmts sublayer (ferraris-wmts / vandermaelen-wmts).
+      // The sublayerChange events that fire alongside this mainToggle will show/hide the tiles.
       applyZOrder();
       return;
     }
@@ -281,13 +285,22 @@
     const gid = info.uiLayerId;
 
     if (enabled) {
+      pendingPark.delete(gid);
       const restoring = isLayerGroupParked(gid);
       if (!restoring) mainLayerLoading = { ...mainLayerLoading, [mainId]: true };
       try {
         await loadIiifLayer(info);
+        // A disable arrived while we were loading — park immediately instead of showing.
+        if (pendingPark.has(gid)) {
+          pendingPark.delete(gid);
+          await parkLayerGroup(map, gid);
+          applyZOrder();
+          return;
+        }
         setLayerGroupOpacity(map, gid, mainLayerOpacity[mainId] ?? 1);
         applyZOrder();
       } catch (e: any) {
+        pendingPark.delete(gid);
         log('ERROR', `Layer load failed: ${e?.message ?? String(e)}`);
         mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
         const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
@@ -295,8 +308,14 @@
         mainLayerLoading = { ...mainLayerLoading, [mainId]: false };
       }
     } else {
-      await parkLayerGroup(map, gid);
-      applyZOrder();
+      if (mainLayerLoading[mainId]) {
+        // Load in flight — defer park until it completes.
+        pendingPark.add(gid);
+      } else {
+        pendingPark.delete(gid);
+        await parkLayerGroup(map, gid);
+        applyZOrder();
+      }
     }
   }
 
@@ -336,13 +355,25 @@
     if (!info) return;
     const gid = info.uiLayerId;
     if (enabled) {
+      // toggleMainLayer is already loading this IIIF group (e.g. triggered by the Timeslider
+      // mainToggle event that fired just before this sublayerChange event in the same tick).
+      // Starting a second concurrent runLayerGroup on the same gid would race and corrupt state.
+      if (mainLayerLoading[mainId]) return;
+      pendingPark.delete(gid);
       const restoring = isLayerGroupParked(gid);
       if (!restoring) subLayerLoading = { ...subLayerLoading, [subId]: true };
       try {
         await loadIiifLayer(info);
+        if (pendingPark.has(gid)) {
+          pendingPark.delete(gid);
+          await parkLayerGroup(map, gid);
+          applyZOrder();
+          return;
+        }
         setLayerGroupOpacity(map, gid, opacity);
         applyZOrder();
       } catch (e: any) {
+        pendingPark.delete(gid);
         log('ERROR', `Sublayer load failed: ${e?.message ?? String(e)}`);
         subLayerEnabled = { ...subLayerEnabled, [subId]: false };
         const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
@@ -350,8 +381,13 @@
         subLayerLoading = { ...subLayerLoading, [subId]: false };
       }
     } else {
-      await parkLayerGroup(map, gid);
-      applyZOrder();
+      if (subLayerLoading[subId]) {
+        pendingPark.add(gid);
+      } else {
+        pendingPark.delete(gid);
+        await parkLayerGroup(map, gid);
+        applyZOrder();
+      }
     }
   }
 

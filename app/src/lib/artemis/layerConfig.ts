@@ -26,8 +26,10 @@ export const MAIN_LAYER_META: Record<string, { date: string; color: string }> = 
 };
 
 export const SUB_LAYER_DEFS: Record<string, { label: string; kind: SubLayerKind }> = {
+  'ferraris-wmts':          { label: 'WMTS',            kind: 'wmts'       },
   'ferraris-landusage':     { label: 'Land usage',           kind: 'wms'        },
   'ferraris-toponyms':      { label: 'Toponyms',             kind: 'searchable' },
+  'vandermaelen-wmts':      { label: 'WMTS',            kind: 'wmts'       },
   'vandermaelen-landusage': { label: 'Land usage',           kind: 'wms'        },
   'vandermaelen-toponyms':  { label: 'Toponyms',             kind: 'searchable' },
   'primitief-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
@@ -42,8 +44,8 @@ export const SUB_LAYER_DEFS: Record<string, { label: string; kind: SubLayerKind 
 };
 
 export const MAIN_LAYER_SUBS: Record<string, string[]> = {
-  ferraris:     ['ferraris-landusage', 'ferraris-toponyms'],
-  vandermaelen: ['vandermaelen-landusage', 'vandermaelen-toponyms'],
+  ferraris:     ['ferraris-wmts', 'ferraris-landusage', 'ferraris-toponyms'],
+  vandermaelen: ['vandermaelen-wmts', 'vandermaelen-landusage', 'vandermaelen-toponyms'],
   primitief:    ['primitief-iiif', 'primitief-parcels', 'primitief-landusage'],
   gereduceerd:  ['gereduceerd-iiif', 'gereduceerd-parcels', 'gereduceerd-landusage'],
   handdrawn:    ['handdrawn-iiif', 'handdrawn-parcels', 'handdrawn-water'],
@@ -55,8 +57,8 @@ export function makeInitialMainLayerEnabled(): Record<string, boolean> {
 
 export function makeInitialSubLayerEnabled(): Record<string, boolean> {
   return {
-    'ferraris-landusage': false,    'ferraris-toponyms': false,
-    'vandermaelen-landusage': false, 'vandermaelen-toponyms': false,
+    'ferraris-wmts': false,         'ferraris-landusage': false,    'ferraris-toponyms': false,
+    'vandermaelen-wmts': false,     'vandermaelen-landusage': false, 'vandermaelen-toponyms': false,
     'primitief-iiif': false,   'primitief-parcels': false,   'primitief-landusage': false,
     'gereduceerd-iiif': false, 'gereduceerd-parcels': false, 'gereduceerd-landusage': false,
     'handdrawn-iiif': false,   'handdrawn-parcels': false,   'handdrawn-water': false,

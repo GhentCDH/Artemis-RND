@@ -28,7 +28,8 @@
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
       start: 1770, end: 1778, repr: 1774, color: '#2E8B72', row: 1,
       sublayers: [
-        { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
+        { id: 'wmts',    subId: 'ferraris-wmts',      label: 'Map tiles', defaultOn: true  },
+        { id: 'landuse', subId: 'ferraris-landusage',  label: 'Land use',  defaultOn: false },
       ],
     },
     {
@@ -44,7 +45,8 @@
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
       start: 1846, end: 1854, repr: 1850, color: '#C04A28', row: 1,
       sublayers: [
-        { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
+        { id: 'wmts',    subId: 'vandermaelen-wmts',      label: 'Map tiles', defaultOn: true  },
+        { id: 'landuse', subId: 'vandermaelen-landusage',  label: 'Land use',  defaultOn: false },
       ],
     },
     {
@@ -100,12 +102,12 @@
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
-  function pct(year: number): string {
-    return `${((year - axisStart) / axisSpan) * 100}%`;
+  function pct(year: number, aStart: number, aSpan: number): string {
+    return `${((year - aStart) / aSpan) * 100}%`;
   }
 
-  function widthPct(start: number, end: number): string {
-    return `${((end - start) / axisSpan) * 100}%`;
+  function widthPct(start: number, end: number, aSpan: number): string {
+    return `${((end - start) / aSpan) * 100}%`;
   }
 
   // ─── State ─────────────────────────────────────────────────────────────────
@@ -243,29 +245,21 @@
   $: scrubberPct = ((sliderYear - axisStart) / axisSpan) * 100;
 </script>
 
-<!-- ── Floating sublayer panel (top-left, shown when scrubber is over a source) ── -->
+<!-- ── Floating sublayer pills (top-left, shown when scrubber is over a source) ── -->
 {#if panelSources.length > 0}
-  <div class="ts-overlay-panel" transition:fade={{ duration: 140 }}>
+  <div class="ts-sub-panel" transition:fade={{ duration: 140 }}>
     {#each panelSources as src}
-      <div class="overlay-source">
-        <div class="overlay-header" style="color:{src.color}; border-color:{src.color}20">
-          <span class="overlay-swatch" style="background:{src.color}"></span>
-          <span class="overlay-name">{src.label}</span>
-          <span class="overlay-date">{src.start}–{src.end}</span>
-        </div>
-        <div class="overlay-sublayers">
-          {#each src.sublayers as sub}
-            <label class="overlay-chip" style="--c:{src.color}">
-              <input
-                type="checkbox"
-                checked={sublayerState[src.key]?.[sub.id] ?? false}
-                on:change={() => toggleSublayer(src.key, sub.subId, sub.id)}
-              />
-              <span>{sub.label}</span>
-            </label>
-          {/each}
-        </div>
-      </div>
+      {#each src.sublayers as sub}
+        <!-- svelte-ignore a11y-interactive-supports-focus -->
+        <button
+          class="sub-pill"
+          class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+          style="--c:{src.color}"
+          type="button"
+          title="{src.label} — {sub.label}"
+          on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+        >{sub.label}</button>
+      {/each}
     {/each}
   </div>
 {/if}
@@ -305,7 +299,7 @@
           class="source-block"
           class:is-disabled={!enabled}
           class:is-active={panelSources.some(p => p.key === src.key)}
-          style="left:{pct(src.start)};width:{widthPct(src.start,src.end)};--c:{src.color}"
+          style="left:{pct(src.start,axisStart,axisSpan)};width:{widthPct(src.start,src.end,axisSpan)};--c:{src.color}"
           role="button"
           tabindex="0"
           title="{src.label} ({src.start}–{src.end})"
@@ -331,7 +325,7 @@
 
       <!-- Tick marks (decades, centuries) -->
       {#each ticks as tick}
-        <span class="ts-tick ts-tick--{tick.kind}" style="left:{pct(tick.year)}">
+        <span class="ts-tick ts-tick--{tick.kind}" style="left:{pct(tick.year,axisStart,axisSpan)}">
           <span class="ts-tick-label">{tick.year}</span>
         </span>
       {/each}
@@ -342,7 +336,7 @@
           class="img-dot"
           class:img-dot--multi={items.length > 1}
           class:img-dot--near={isDotNear(yr)}
-          style="left:{pct(yr)}"
+          style="left:{pct(yr,axisStart,axisSpan)}"
           title="{yr} · {items.length} photo{items.length > 1 ? 's' : ''}"
           aria-label="Massart photos {yr}"
           on:click={(e) => openDotPopup(e, items)}
@@ -371,7 +365,7 @@
           class="source-block"
           class:is-disabled={!enabled}
           class:is-active={panelSources.some(p => p.key === src.key)}
-          style="left:{pct(src.start)};width:{widthPct(src.start,src.end)};--c:{src.color}"
+          style="left:{pct(src.start,axisStart,axisSpan)};width:{widthPct(src.start,src.end,axisSpan)};--c:{src.color}"
           role="button"
           tabindex="0"
           title="{src.label} ({src.start}–{src.end})"
@@ -389,91 +383,43 @@
 </div>
 
 <style>
-  /* ── Overlay panel (fixed top-left) ─────────────────────────────────────── */
+  /* ── Sublayer pills (fixed top-left) ────────────────────────────────────── */
 
-  .ts-overlay-panel {
+  .ts-sub-panel {
     position: fixed;
     top: 12px;
     left: 12px;
     z-index: 50;
-    background: #ffffff;
-    border: 0.5px solid rgba(0,0,0,0.1);
-    border-radius: 10px;
-    padding: 10px 14px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    min-width: 190px;
-    pointer-events: all;
-    animation: panel-in 150ms ease both;
-  }
-
-  @keyframes panel-in {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .overlay-source {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    pointer-events: all;
   }
 
-  .overlay-header {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid;
-  }
-
-  .overlay-swatch {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .overlay-name {
+  .sub-pill {
+    padding: 9px 18px;
+    background: var(--c);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
     font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 12px;
-    font-weight: 500;
-    flex: 1;
-  }
-
-  .overlay-date {
-    font-family: 'DM Mono', 'Courier New', monospace;
-    font-size: 10px;
-    opacity: 0.6;
-    flex-shrink: 0;
-  }
-
-  .overlay-sublayers {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .overlay-chip {
-    display: flex;
-    align-items: center;
-    gap: 7px;
+    font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    font-size: 11px;
-    color: #1a1a1a;
     white-space: nowrap;
-    padding: 2px 0;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.14);
+    transition: opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
   }
 
-  .overlay-chip input[type="checkbox"] {
-    cursor: pointer;
-    accent-color: var(--c);
-    width: 13px;
-    height: 13px;
-    flex-shrink: 0;
-    margin: 0;
+  .sub-pill.is-disabled {
+    opacity: 0.45;
+    filter: saturate(0.35);
+    box-shadow: none;
+  }
+
+  .sub-pill:hover:not(.is-disabled) {
+    filter: brightness(1.09);
   }
 
   /* ── Timeslider shell ────────────────────────────────────────────────────── */
