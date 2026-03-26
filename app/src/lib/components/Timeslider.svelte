@@ -4,15 +4,25 @@
   import { fade } from 'svelte/transition';
   import type { MassartItem } from '$lib/artemis/types';
 
+  type PaneId = 'left' | 'right';
+
   export let massartItems: MassartItem[] = [];
   export let yearLeeway: number = 3;
   export let loadingLayers: Record<string, boolean> = {};
+  export let compareEnabled = false;
+  export let leftYear: number | undefined = undefined;
+  export let rightYear: number | undefined = undefined;
+
+  const PANE_META: Record<PaneId, { label: string; color: string }> = {
+    left: { label: 'Left', color: '#1F6FEB' },
+    right: { label: 'Right', color: '#D97706' },
+  };
 
   const dispatch = createEventDispatcher<{
     mainToggle:     { mainId: string; enabled: boolean };
     sublayerChange: { subId: string; enabled: boolean };
     'open-viewer':  { title: string; sourceManifestUrl: string; imageServiceUrl: string };
-    'year-change':  { year: number };
+    'year-change':  { pane: PaneId; year: number };
   }>();
 
   const SOURCES = [
@@ -20,52 +30,79 @@
       key: 'hand', mainId: 'handdrawn', label: 'Hand drawn',
       start: 1700, end: 1715, repr: 1707, color: '#8B7EC8', row: 1,
       sublayers: [
-        { id: 'iiif',    subId: 'handdrawn-iiif',    label: 'IIIF sheets',         defaultOn: true  },
-        { id: 'parcels', subId: 'handdrawn-parcels',  label: 'Parcels',              defaultOn: false },
-        { id: 'water',   subId: 'handdrawn-water',    label: 'Water infrastructure', defaultOn: false },
+        { id: 'iiif', subId: 'handdrawn-iiif', label: 'IIIF sheets', defaultOn: true },
+        { id: 'parcels', subId: 'handdrawn-parcels', label: 'Parcels', defaultOn: false },
+        { id: 'water', subId: 'handdrawn-water', label: 'Water infrastructure', defaultOn: false },
       ],
     },
     {
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
       start: 1770, end: 1778, repr: 1774, color: '#B8860B', row: 1,
       sublayers: [
-        { id: 'wmts',    subId: 'ferraris-wmts',      label: 'Map tiles', defaultOn: true  },
-        { id: 'landuse', subId: 'ferraris-landusage',  label: 'Land use',  defaultOn: false },
+        { id: 'wmts', subId: 'ferraris-wmts', label: 'Map tiles', defaultOn: true },
+        { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
       key: 'primitief', mainId: 'primitief', label: 'Primitief Kadaster',
       start: 1808, end: 1834, repr: 1814, color: '#C07B28', row: 2,
       sublayers: [
-        { id: 'iiif',    subId: 'primitief-iiif',      label: 'IIIF sheets', defaultOn: true  },
-        { id: 'parcels', subId: 'primitief-parcels',   label: 'Parcels',     defaultOn: false },
-        { id: 'landuse', subId: 'primitief-landusage', label: 'Land use',    defaultOn: false },
+        { id: 'iiif', subId: 'primitief-iiif', label: 'IIIF sheets', defaultOn: true },
+        { id: 'parcels', subId: 'primitief-parcels', label: 'Parcels', defaultOn: false },
+        { id: 'landuse', subId: 'primitief-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
       start: 1846, end: 1854, repr: 1850, color: '#C04A28', row: 1,
       sublayers: [
-        { id: 'wmts',    subId: 'vandermaelen-wmts',      label: 'Map tiles', defaultOn: true  },
-        { id: 'landuse', subId: 'vandermaelen-landusage',  label: 'Land use',  defaultOn: false },
+        { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map tiles', defaultOn: true },
+        { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
       start: 1847, end: 1855, repr: 1851, color: '#9440A0', row: 2,
       sublayers: [
-        { id: 'iiif',    subId: 'gereduceerd-iiif',      label: 'IIIF sheets', defaultOn: true  },
-        { id: 'parcels', subId: 'gereduceerd-parcels',   label: 'Parcels',     defaultOn: false },
-        { id: 'landuse', subId: 'gereduceerd-landusage', label: 'Land use',    defaultOn: false },
+        { id: 'iiif', subId: 'gereduceerd-iiif', label: 'IIIF sheets', defaultOn: true },
+        { id: 'parcels', subId: 'gereduceerd-parcels', label: 'Parcels', defaultOn: false },
+        { id: 'landuse', subId: 'gereduceerd-landusage', label: 'Land use', defaultOn: false },
       ],
     },
   ] as const;
 
-  type SourceKey = typeof SOURCES[number]['key'];
+  type SourceDef = typeof SOURCES[number];
+  type SourceKey = SourceDef['key'];
+  type PaneState = { id: PaneId; year: number; label: string; color: string };
 
-  // ─── Massart data ──────────────────────────────────────────────────────────
+  const defaultYear = Math.round(
+    (Math.min(...SOURCES.map(s => s.start)) + Math.max(...SOURCES.map(s => s.end))) / 2
+  );
 
-  // Group Massart items by integer year for dot rendering.
+  let trackWidth = 0;
+  let localLeftYear = defaultYear;
+  let localRightYear = defaultYear;
+  let lastLeftYearProp: number | undefined = undefined;
+  let lastRightYearProp: number | undefined = undefined;
+
+  let enabledLayers: Record<string, boolean> = Object.fromEntries(
+    SOURCES.map(s => [s.key, true])
+  );
+
+  let sublayerState: Record<string, Record<string, boolean>> = Object.fromEntries(
+    SOURCES.map(s => [
+      s.key,
+      Object.fromEntries(s.sublayers.map(sub => [sub.id, sub.defaultOn])),
+    ])
+  );
+
+  let prevVisible: Record<string, boolean> = {};
+
+  let popupItems: MassartItem[] = [];
+  let popupIdx = 0;
+  let popupX = 0;
+  let popupY = 0;
+
   $: massartByYear = massartItems.reduce<Map<number, MassartItem[]>>((acc, item) => {
     const y = parseInt(item.year ?? '0', 10);
     if (y > 1000) {
@@ -76,18 +113,12 @@
     return acc;
   }, new Map());
 
-  // ─── Dynamic axis ──────────────────────────────────────────────────────────
-  // Derived from SOURCES config + any loaded external data (Massart years).
-  // Rounded outward to the nearest decade with a small margin.
-
   $: _massartYears = [...massartByYear.keys()];
   $: _allMax = Math.max(...SOURCES.map(s => s.end), ..._massartYears);
   $: _allMin = Math.min(...SOURCES.map(s => s.start));
   $: axisStart = Math.floor((_allMin - 10) / 10) * 10;
-  $: axisEnd   = Math.ceil((_allMax  + 10) / 10) * 10;
-  $: axisSpan  = axisEnd > axisStart ? axisEnd - axisStart : 1;
-
-  // ─── Tick marks ────────────────────────────────────────────────────────────
+  $: axisEnd = Math.ceil((_allMax + 10) / 10) * 10;
+  $: axisSpan = axisEnd > axisStart ? axisEnd - axisStart : 1;
 
   type TickKind = 'century' | 'decade';
 
@@ -101,8 +132,6 @@
 
   $: ticks = buildTicks(axisStart, axisEnd);
 
-  // ─── Helpers ───────────────────────────────────────────────────────────────
-
   function pct(year: number, aStart: number, aSpan: number): string {
     return `${((year - aStart) / aSpan) * 100}%`;
   }
@@ -111,51 +140,38 @@
     return `${((end - start) / aSpan) * 100}%`;
   }
 
-  // ─── State ─────────────────────────────────────────────────────────────────
+  function paneSourcesForYear(year: number): SourceDef[] {
+    return SOURCES.filter(
+      s => year >= s.start - halfKnobYears && year <= s.end + halfKnobYears
+    );
+  }
 
-  // Initial position: midpoint of the SOURCES range.
-  let sliderYear: number = Math.round(
-    (Math.min(...SOURCES.map(s => s.start)) + Math.max(...SOURCES.map(s => s.end))) / 2
-  );
-  let trackWidth = 0;
-
-  let enabledLayers: Record<string, boolean> = Object.fromEntries(
-    SOURCES.map(s => [s.key, true])
-  );
-
-  let sublayerState: Record<string, Record<string, boolean>> = Object.fromEntries(
-    SOURCES.map(s => [
-      s.key,
-      Object.fromEntries(s.sublayers.map(sub => [sub.id, sub.defaultOn])),
-    ])
-  );
-
-  // ─── Visibility tracking ───────────────────────────────────────────────────
-
-  let prevVisible: Record<string, boolean> = {};
-  onMount(async () => {
-    // Dispatch initial layer visibility state.
-    for (const src of SOURCES) {
-      const isOver = panelSources.some(p => p.key === src.key);
-      const visible = enabledLayers[src.key] && isOver;
-      prevVisible[src.key] = visible;
-      dispatch('mainToggle', { mainId: src.mainId, enabled: visible });
-      if (visible) {
-        for (const sub of src.sublayers) {
-          if (sublayerState[src.key]?.[sub.id]) {
-            dispatch('sublayerChange', { subId: sub.subId, enabled: true });
-          }
-        }
-      }
+  function setPaneYear(pane: PaneId, year: number, emit = true) {
+    if (pane === 'left') {
+      localLeftYear = year;
+    } else {
+      localRightYear = year;
     }
-  });
+    if (emit) dispatch('year-change', { pane, year });
+  }
 
-  // ─── Dot popup ─────────────────────────────────────────────────────────────
+  function yearForPane(pane: PaneId): number {
+    return pane === 'left' ? localLeftYear : localRightYear;
+  }
 
-  let popupItems: MassartItem[] = [];
-  let popupIdx = 0;
-  let popupX = 0;
-  let popupY = 0;
+  function scrubberPctForPane(pane: PaneId): number {
+    return ((yearForPane(pane) - axisStart) / axisSpan) * 100;
+  }
+
+  function onSliderInput(pane: PaneId, e: Event) {
+    const year = parseFloat((e.target as HTMLInputElement).value);
+    setPaneYear(pane, year);
+  }
+
+  function isDotNear(yr: number): boolean {
+    if (!compareEnabled) return Math.abs(yr - localLeftYear) <= yearLeeway;
+    return visiblePanes.some((pane) => Math.abs(yr - pane.year) <= yearLeeway);
+  }
 
   function openDotPopup(e: MouseEvent, items: MassartItem[]) {
     popupItems = items;
@@ -165,7 +181,9 @@
     e.stopPropagation();
   }
 
-  function closePopup() { popupItems = []; }
+  function closePopup() {
+    popupItems = [];
+  }
 
   function openInViewer() {
     const item = popupItems[popupIdx];
@@ -178,23 +196,11 @@
     closePopup();
   }
 
-  // ─── Interactions ──────────────────────────────────────────────────────────
-
-  function onSliderInput(e: Event) {
-    sliderYear = parseFloat((e.target as HTMLInputElement).value);
-    dispatch('year-change', { year: sliderYear });
-  }
-
-  // Dot is "near" the scrubber if its year is within yearLeeway of sliderYear.
-  function isDotNear(yr: number): boolean {
-    return Math.abs(yr - sliderYear) <= yearLeeway;
-  }
-
   function handleBlockClick(key: SourceKey) {
     const wasEnabled = enabledLayers[key];
     enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
     const src = SOURCES.find(s => s.key === key)!;
-    if (!wasEnabled) sliderYear = src.repr;
+    if (!wasEnabled) setPaneYear('left', src.repr);
   }
 
   function toggleSublayer(key: SourceKey, subId: string, localId: string) {
@@ -203,24 +209,90 @@
       ...sublayerState,
       [key]: { ...sublayerState[key], [localId]: !cur },
     };
-    const isVisible = enabledLayers[key] && panelSources.some(p => p.key === key);
+    const isVisible = enabledLayers[key] && activeSourceKeys.has(key);
     if (isVisible) dispatch('sublayerChange', { subId, enabled: !cur });
   }
 
-  // ─── Derived ───────────────────────────────────────────────────────────────
+  function sourceBlockStyle(src: SourceDef): string {
+    return `left:${pct(src.start, axisStart, axisSpan)};width:${widthPct(src.start, src.end, axisSpan)};--c:${src.color};--accent:${sourceAccent[src.key]}`;
+  }
+
+  function sourceIsCurrentForKey(key: SourceKey): boolean {
+    return enabledLayers[key] && activeSourceKeys.has(key);
+  }
+
+  function sourceHasOverlap(key: SourceKey): boolean {
+    return activePanesBySource[key].length > 1;
+  }
+
+  onMount(() => {
+    for (const src of SOURCES) {
+      const visible = enabledLayers[src.key] && activeSourceKeys.has(src.key);
+      prevVisible[src.key] = visible;
+      dispatch('mainToggle', { mainId: src.mainId, enabled: visible });
+      if (visible) {
+        for (const sub of src.sublayers) {
+          if (sublayerState[src.key]?.[sub.id]) {
+            dispatch('sublayerChange', { subId: sub.subId, enabled: true });
+          }
+        }
+      }
+    }
+  });
 
   $: halfKnobYears = trackWidth > 0 ? (9 / trackWidth) * axisSpan : 3;
 
-  $: panelSources = SOURCES.filter(
-    s => sliderYear >= s.start - halfKnobYears && sliderYear <= s.end + halfKnobYears
-  );
+  $: if (leftYear != null && leftYear !== lastLeftYearProp) {
+    lastLeftYearProp = leftYear;
+    localLeftYear = leftYear;
+  }
+
+  $: if (rightYear != null && rightYear !== lastRightYearProp) {
+    lastRightYearProp = rightYear;
+    localRightYear = rightYear;
+  }
+
+  $: visiblePanes = (compareEnabled
+    ? [
+        { id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color },
+        { id: 'right', year: localRightYear, label: PANE_META.right.label, color: PANE_META.right.color },
+      ]
+    : []) as PaneState[];
+
+  $: leftPanelSources = paneSourcesForYear(localLeftYear);
+  $: rightPanelSources = compareEnabled ? paneSourcesForYear(localRightYear) : [];
+  $: activeSourceKeys = compareEnabled
+    ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
+    : new Set<SourceKey>(leftPanelSources.map((s) => s.key));
+
+  $: panelSources = compareEnabled
+    ? SOURCES.filter((s) => activeSourceKeys.has(s.key))
+    : leftPanelSources;
   $: row1 = SOURCES.filter(s => s.row === 1);
   $: row2 = SOURCES.filter(s => s.row === 2);
 
-  // ─── Sync map visibility ───────────────────────────────────────────────────
+  $: activePanesBySource = SOURCES.reduce<Record<SourceKey, PaneState[]>>((acc, src) => {
+    const panes: PaneState[] = [];
+    if (leftPanelSources.some((s) => s.key === src.key)) {
+      panes.push({ id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color });
+    }
+    if (compareEnabled && rightPanelSources.some((s) => s.key === src.key)) {
+      panes.push({ id: 'right', year: localRightYear, label: PANE_META.right.label, color: PANE_META.right.color });
+    }
+    acc[src.key] = panes;
+    return acc;
+  }, {} as Record<SourceKey, PaneState[]>);
+
+  $: sourceAccent = SOURCES.reduce<Record<SourceKey, string>>((acc, src) => {
+    const panes = activePanesBySource[src.key];
+    acc[src.key] = panes.length > 1
+      ? `linear-gradient(90deg, ${panes[0].color} 0%, ${panes[0].color} 48%, ${panes[1].color} 52%, ${panes[1].color} 100%)`
+      : panes[0]?.color ?? src.color;
+    return acc;
+  }, {} as Record<SourceKey, string>);
 
   $: {
-    const activeSet = new Set(panelSources.map(s => s.key));
+    const activeSet = activeSourceKeys;
     for (const src of SOURCES) {
       const nowVisible = enabledLayers[src.key] && activeSet.has(src.key);
       if (prevVisible[src.key] !== undefined && prevVisible[src.key] !== nowVisible) {
@@ -241,11 +313,8 @@
       }
     }
   }
-
-  $: scrubberPct = ((sliderYear - axisStart) / axisSpan) * 100;
 </script>
 
-<!-- ── Floating sublayer pills (top-left, shown when scrubber is over a source) ── -->
 {#if panelSources.length > 0}
   <div class="ts-sub-panel" transition:fade={{ duration: 140 }}>
     {#each panelSources as src}
@@ -256,7 +325,6 @@
         </div>
         <div class="sub-menu-pills">
           {#each src.sublayers as sub}
-            <!-- svelte-ignore a11y-interactive-supports-focus -->
             <button
               class="sub-pill"
               class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
@@ -273,10 +341,8 @@
   </div>
 {/if}
 
-<!-- ── Massart dot popup ── -->
 {#if popupItems.length > 0}
   {@const item = popupItems[popupIdx]}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
   <div class="dot-popup" style="left:{popupX}px;top:{popupY}px" transition:fade={{ duration: 120 }}>
     <div class="dot-popup-header">
       <span class="dot-popup-year">{item.year}</span>
@@ -295,21 +361,18 @@
   </div>
 {/if}
 
-<!-- ── Timeslider component ── -->
 <div class="timeslider">
   <div class="ts-track" bind:clientWidth={trackWidth}>
-
-    <!-- Row 1: above axis — blocks anchor to bottom (touching the axis) and fill upward -->
     <div class="ts-row ts-row--above">
       {#each row1 as src}
         {@const enabled = enabledLayers[src.key]}
-        <!-- svelte-ignore a11y-interactive-supports-focus -->
         <div
           class="source-block"
           class:is-disabled={!enabled}
-          class:is-current={enabled && panelSources.some(p => p.key === src.key)}
+          class:is-current={sourceIsCurrentForKey(src.key)}
+          class:is-compare-overlap={sourceHasOverlap(src.key)}
           class:is-loading={loadingLayers[src.mainId]}
-          style="left:{pct(src.start,axisStart,axisSpan)};width:{widthPct(src.start,src.end,axisSpan)};--c:{src.color}"
+          style={sourceBlockStyle(src)}
           role="button"
           tabindex="0"
           title="{src.label} ({src.start}–{src.end})"
@@ -323,24 +386,30 @@
       {/each}
     </div>
 
-    <!-- Axis line with scrubber, image dots, and collapsed hatched segments -->
     <div class="ts-axis-line">
+      {#if compareEnabled}
+        {#each visiblePanes as pane}
+          <span
+            class="scrubber-label"
+            class:scrubber-label--right={pane.id === 'right'}
+            style="left:{scrubberPctForPane(pane.id)}%;--pane-color:{pane.color}"
+            aria-hidden="true"
+          >{pane.label} {Math.round(pane.year)}</span>
+        {/each}
+      {:else}
+        <span
+          class="scrubber-label"
+          style="left:{scrubberPctForPane('left')}%;--pane-color:{PANE_META.left.color}"
+          aria-hidden="true"
+        >{Math.round(localLeftYear)}</span>
+      {/if}
 
-      <!-- Scrubber year label -->
-      <span
-        class="scrubber-label"
-        style="left:{scrubberPct}%"
-        aria-hidden="true"
-      >{Math.round(sliderYear)}</span>
-
-      <!-- Tick marks (decades, centuries) -->
       {#each ticks as tick}
         <span class="ts-tick ts-tick--{tick.kind}" style="left:{pct(tick.year,axisStart,axisSpan)}">
           <span class="ts-tick-label">{tick.year}</span>
         </span>
       {/each}
 
-      <!-- Massart photo dots (one per year, click opens popup) -->
       {#each [...massartByYear.entries()] as [yr, items]}
         <button
           class="img-dot"
@@ -353,30 +422,46 @@
         ></button>
       {/each}
 
-      <!-- Range input scrubber (sits on axis line, z-index above everything) -->
-      <input
-        class="ts-scrubber"
-        type="range"
-        min={axisStart}
-        max={axisEnd}
-        step="1"
-        value={sliderYear}
-        on:input={onSliderInput}
-        aria-label="Timeline year"
-      />
+      {#if compareEnabled}
+        {#each visiblePanes as pane}
+          <input
+            class="ts-scrubber"
+            class:ts-scrubber--right={pane.id === 'right'}
+            style="--pane-color:{pane.color}"
+            type="range"
+            min={axisStart}
+            max={axisEnd}
+            step="1"
+            value={yearForPane(pane.id)}
+            on:input={(e) => onSliderInput(pane.id, e)}
+            aria-label="{pane.label} timeline year"
+          />
+        {/each}
+      {:else}
+        <input
+          class="ts-scrubber"
+          style="--pane-color:{PANE_META.left.color}"
+          type="range"
+          min={axisStart}
+          max={axisEnd}
+          step="1"
+          value={localLeftYear}
+          on:input={(e) => onSliderInput('left', e)}
+          aria-label="Timeline year"
+        />
+      {/if}
     </div>
 
-    <!-- Row 2: below axis — blocks anchor to top (touching the axis) and fill downward -->
     <div class="ts-row ts-row--below">
       {#each row2 as src}
         {@const enabled = enabledLayers[src.key]}
-        <!-- svelte-ignore a11y-interactive-supports-focus -->
         <div
           class="source-block"
           class:is-disabled={!enabled}
-          class:is-current={enabled && panelSources.some(p => p.key === src.key)}
+          class:is-current={sourceIsCurrentForKey(src.key)}
+          class:is-compare-overlap={sourceHasOverlap(src.key)}
           class:is-loading={loadingLayers[src.mainId]}
-          style="left:{pct(src.start,axisStart,axisSpan)};width:{widthPct(src.start,src.end,axisSpan)};--c:{src.color}"
+          style={sourceBlockStyle(src)}
           role="button"
           tabindex="0"
           title="{src.label} ({src.start}–{src.end})"
@@ -389,13 +474,10 @@
         </div>
       {/each}
     </div>
-
-  </div><!-- /ts-track -->
+  </div>
 </div>
 
 <style>
-  /* ── Sublayer pills (fixed top-left) ────────────────────────────────────── */
-
   .ts-sub-panel {
     position: fixed;
     top: 12px;
@@ -491,8 +573,6 @@
     filter: brightness(1.09);
   }
 
-  /* ── Timeslider shell ────────────────────────────────────────────────────── */
-
   .timeslider {
     background: #ffffff;
     border: 0.5px solid rgba(0,0,0,0.1);
@@ -503,14 +583,10 @@
     box-shadow: var(--shadow-md);
   }
 
-  /* ── Track ───────────────────────────────────────────────────────────────── */
-
   .ts-track {
     display: flex;
     flex-direction: column;
   }
-
-  /* ── Rows ────────────────────────────────────────────────────────────────── */
 
   .ts-row {
     position: relative;
@@ -519,8 +595,6 @@
 
   .ts-row--above { height: 39px; }
   .ts-row--below { height: 39px; }
-
-  /* ── Source blocks — fill full row height, rectangular landing zones ─────── */
 
   .source-block {
     position: absolute;
@@ -556,7 +630,7 @@
   }
 
   @keyframes pill-shimmer {
-    0%   { transform: translateX(-100%); }
+    0% { transform: translateX(-100%); }
     100% { transform: translateX(100%); }
   }
 
@@ -564,9 +638,12 @@
     filter: brightness(1.09);
   }
 
-  /* Active (scrubber overlapping): scale away from axis, rows grow outward */
   .source-block.is-current {
     z-index: 3;
+  }
+
+  .source-block.is-compare-overlap {
+    background: var(--accent);
   }
 
   .ts-row--above .source-block.is-current {
@@ -605,8 +682,6 @@
     line-height: 1.2;
   }
 
-  /* ── Axis line ───────────────────────────────────────────────────────────── */
-
   .ts-axis-line {
     position: relative;
     height: 6px;
@@ -617,19 +692,16 @@
     pointer-events: none;
   }
 
-  /* ── Scrubber year label (floats above the top row) ─────────────────────── */
-
   .scrubber-label {
     position: absolute;
-    /* clear the top row (39px) plus a small gap */
     bottom: calc(100% + 43px);
     transform: translateX(-50%);
     font-family: var(--font-mono);
     font-size: 11px;
-    font-weight: 500;
-    color: rgba(0,0,0,0.65);
+    font-weight: 600;
+    color: var(--pane-color);
     background: #ffffff;
-    border: 0.5px solid rgba(0,0,0,0.12);
+    border: 1px solid color-mix(in srgb, var(--pane-color) 38%, white);
     border-radius: var(--radius-xs);
     padding: 3px 8px;
     white-space: nowrap;
@@ -638,7 +710,9 @@
     box-shadow: var(--shadow-md);
   }
 
-  /* ── Range scrubber ──────────────────────────────────────────────────────── */
+  .scrubber-label--right {
+    bottom: calc(100% + 70px);
+  }
 
   .ts-scrubber {
     position: absolute;
@@ -654,7 +728,11 @@
     -webkit-appearance: none;
     appearance: none;
     background: transparent;
-    pointer-events: auto;
+    pointer-events: none;
+  }
+
+  .ts-scrubber--right {
+    z-index: 10;
   }
 
   .ts-scrubber::-webkit-slider-thumb {
@@ -663,9 +741,10 @@
     height: 24px;
     border-radius: 50%;
     background: linear-gradient(180deg, #ffffff, #f4f0e8);
-    border: 2px solid rgba(192,123,40,0.55);
+    border: 2px solid color-mix(in srgb, var(--pane-color) 72%, white);
     cursor: ew-resize;
     box-shadow: var(--shadow-card);
+    pointer-events: auto;
   }
 
   .ts-scrubber::-moz-range-thumb {
@@ -673,9 +752,10 @@
     height: 24px;
     border-radius: 50%;
     background: linear-gradient(180deg, #ffffff, #f4f0e8);
-    border: 2px solid rgba(192,123,40,0.55);
+    border: 2px solid color-mix(in srgb, var(--pane-color) 72%, white);
     cursor: ew-resize;
     box-shadow: var(--shadow-card);
+    pointer-events: auto;
   }
 
   .ts-scrubber::-webkit-slider-runnable-track {
@@ -688,8 +768,6 @@
     background: transparent;
     border: none;
   }
-
-  /* ── Image dots ──────────────────────────────────────────────────────────── */
 
   .img-dot {
     position: absolute;
@@ -709,21 +787,17 @@
 
   .img-dot:hover { transform: translate(-50%, -50%) scale(1.5); }
 
-  /* Multi-photo year: slightly larger dot with a ring */
   .img-dot--multi {
     width: 9px;
     height: 9px;
     box-shadow: 0 0 0 2px rgba(212, 168, 75, 0.4);
   }
 
-  /* Dot within yearLeeway of the scrubber: brighten */
   .img-dot--near {
     background: #f59e0b;
     transform: translate(-50%, -50%) scale(1.4);
     box-shadow: 0 0 0 2.5px rgba(245, 158, 11, 0.35);
   }
-
-  /* ── Dot popup ────────────────────────────────────────────────────────────── */
 
   .dot-popup {
     position: fixed;
@@ -821,8 +895,6 @@
 
   .dot-popup-open:hover { background: #333333; }
 
-  /* ── Tick marks ───────────────────────────────────────────────────────────── */
-
   .ts-tick {
     position: absolute;
     top: 100%;
@@ -840,7 +912,7 @@
     width: 1px;
   }
 
-  .ts-tick--decade::before  { height: 8px;  background: rgba(0,0,0,0.22); }
+  .ts-tick--decade::before { height: 8px; background: rgba(0,0,0,0.22); }
   .ts-tick--century::before { height: 18px; background: rgba(0,0,0,0.55); }
 
   .ts-tick-label {
@@ -851,5 +923,8 @@
     white-space: nowrap;
   }
 
-  .ts-tick--century .ts-tick-label { color: rgba(0,0,0,0.65); font-weight: 600; }
+  .ts-tick--century .ts-tick-label {
+    color: rgba(0,0,0,0.65);
+    font-weight: 600;
+  }
 </style>

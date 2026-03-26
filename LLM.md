@@ -1,6 +1,6 @@
 # Artemis-RnD — LLM Context
 
-_Last updated: 2026-03-26 (slider UI, startup IIIF warmup, ImageCollection bubble flow)_
+_Last updated: 2026-03-26 (slider UI, startup IIIF warmup, ImageCollection bubble flow, compare mode planning)_
 
 ## What this repo is
 
@@ -104,6 +104,44 @@ For IIIF main layers, visible state is still reconciled in `+page.svelte` throug
 - `sublayerChange: { subId, enabled }`
 - `year-change: { year }`
 - `open-viewer: { title, sourceManifestUrl, imageServiceUrl }`
+
+## Compare mode plan
+
+Compare mode is planned but not implemented yet.
+
+Agreed product decisions so far:
+
+- First implementation target is side-by-side compare only; swipe / before-after mode is deferred until after the split view works
+- Long term, both side-by-side and swipe should be supported by the same underlying compare model rather than separate implementations
+- Compare mode should use two pane-specific years on a single shared timeline UI
+- The two scrubbers may cross over freely; there is no `leftYear <= rightYear` constraint
+- The two panes should be visually color-coded, and each scrubber/thumb/year label should match its pane color
+- Search stays centered/global in the app shell rather than belonging to a specific pane
+- Camera state is locked between panes: center, zoom, bearing, and pitch should stay synchronized
+- Layer toggles remain shared in the first compare implementation; the varying state between panes is the selected year, not a separate layer-toggle model per pane
+- When compare mode is closed, keep the left pane as the canonical surviving state and discard the right pane state
+
+Implementation direction currently preferred:
+
+- Build compare as a real two-map architecture, not a single-map masking trick
+- Side-by-side should be the first shipping mode because it forces the needed runtime refactor cleanly
+- Swipe mode should later reuse the same two-pane engine and only change layout/compositing
+
+Planned implementation phases:
+
+1. Refactor `Timeslider.svelte` into a controlled dual-scrubber component with pane-qualified year events and pane-colored UI
+2. Refactor `mapInit.ts` away from a singleton map so the page can create and destroy independent left/right `MapLibre` instances
+3. Refactor `runner.ts` so active/parked IIIF layer-group bookkeeping is pane-scoped rather than globally keyed only by `groupId`
+4. Update `+page.svelte` to support `compareMode`, `leftYear`, `rightYear`, two map containers, and bidirectional camera synchronization with feedback-loop guards
+5. Keep single-map mode as effectively "left pane only" so compare-off remains compatible with the current app behavior
+
+Known architectural constraint before compare work:
+
+- The current app is explicitly single-map in important places:
+  - `mapInit.ts` owns a singleton `map`
+  - `+page.svelte` assumes one map and one visible-state reconciliation path
+  - `runner.ts` stores active and parked IIIF groups in global maps keyed only by layer group ID
+- Because of that, compare mode is not just a UI change; it requires pane-scoped runtime state before two panes can render the same IIIF layer independently
 
 ## Data flow
 

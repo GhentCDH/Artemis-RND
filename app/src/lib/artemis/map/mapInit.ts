@@ -78,10 +78,8 @@ function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
   return layers.find((l) => l.id.startsWith("warped-layer-"))?.id;
 }
 
-export function ensureMapContext(container: HTMLElement): maplibregl.Map {
-  if (map) return map;
-
-  map = new maplibregl.Map({
+export function createMapContext(container: HTMLElement): maplibregl.Map {
+  const nextMap = new maplibregl.Map({
     container,
     style: "https://tiles.openfreemap.org/styles/positron",
     center: [4.23, 51.10], // Bornem, Scheldt valley
@@ -90,20 +88,30 @@ export function ensureMapContext(container: HTMLElement): maplibregl.Map {
   });
 
   // Resize once style is loaded (helps when container size settles after layout mount)
-  map.once("load", () => {
+  nextMap.once("load", () => {
     try {
-      map?.resize();
+      nextMap.resize();
     } catch {
       // ignore
     }
-    ensureIiifHoverLayers(map!);
+    ensureIiifHoverLayers(nextMap);
   });
 
+  return nextMap;
+}
+
+export function destroyMapContextInstance(targetMap: maplibregl.Map | null | undefined) {
+  targetMap?.remove();
+}
+
+export function ensureMapContext(container: HTMLElement): maplibregl.Map {
+  if (map) return map;
+  map = createMapContext(container);
   return map;
 }
 
 export function destroyMapContext() {
-  map?.remove();
+  destroyMapContextInstance(map);
   map = null;
 }
 

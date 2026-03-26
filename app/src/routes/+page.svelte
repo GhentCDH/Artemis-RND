@@ -82,6 +82,7 @@
   const MASSART_LEEWAY = 3; // years each side of the scrubber that count as "active"
   let massartItems: MassartItem[] = [];
   let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
+  let rightTimelineYear = Math.min(1855, massartYear + 12);
 
   async function loadMassartData() {
     try {
@@ -93,9 +94,21 @@
     } catch { /* degrade silently — pins won't appear */ }
   }
 
-  function onMassartYearChange(e: CustomEvent<{ year: number }>) {
+  function onMassartYearChange(e: CustomEvent<{ year: number; pane?: 'left' | 'right' }>) {
+    const pane = e.detail.pane ?? 'left';
+    if (pane === 'right') {
+      rightTimelineYear = e.detail.year;
+      return;
+    }
     massartYear = e.detail.year;
     if (map?.isStyleLoaded()) updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
+  }
+
+  function toggleCompareMode() {
+    if (!compareEnabled) {
+      rightTimelineYear = Math.min(1855, massartYear + 12);
+    }
+    compareEnabled = !compareEnabled;
   }
 
   // ─── Logging ───────────────────────────────────────────────────────────────
@@ -152,6 +165,7 @@
   let imageCollectionBubbleY = 0;
   let imageCollectionBubbleLngLat: { lon: number; lat: number } | null = null;
   let imageCollectionBubblePlaceBelow = false;
+  let compareEnabled = false;
   let initialWarmupPending = true;
   let initialWarmupRunning = false;
   let initialWarmupDone = 0;
@@ -972,8 +986,20 @@
     />
 
     <div class="timeslider-wrap">
+      <div class="timeslider-toolbar">
+        <button
+          class="compare-toggle"
+          class:is-active={compareEnabled}
+          type="button"
+          aria-pressed={compareEnabled}
+          on:click={toggleCompareMode}
+        >{compareEnabled ? 'Exit Compare' : 'Compare Views'}</button>
+      </div>
       <Timeslider
         {massartItems}
+        {compareEnabled}
+        leftYear={massartYear}
+        rightYear={rightTimelineYear}
         yearLeeway={MASSART_LEEWAY}
         loadingLayers={mainLayerLoading}
         on:mainToggle={onTimesliderMainToggle}
@@ -1117,6 +1143,37 @@
     right: 12px;
     z-index: 4;
     pointer-events: all;
+  }
+
+  .timeslider-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+  }
+
+  .compare-toggle {
+    padding: 9px 14px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.94);
+    color: #161616;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+  }
+
+  .compare-toggle:hover {
+    transform: translateY(-1px);
+    background: #ffffff;
+  }
+
+  .compare-toggle.is-active {
+    background: #1f6feb;
+    border-color: #1f6feb;
+    color: #ffffff;
   }
 
 </style>
