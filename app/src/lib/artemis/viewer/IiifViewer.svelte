@@ -2,6 +2,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
   import type OpenSeadragonType from "openseadragon";
+  import { extractImageServiceFromManifest } from '$lib/artemis/viewer/manifestPreview';
 
   export let imageServiceUrl: string;
   export let title: string = "";
@@ -14,30 +15,6 @@
   let viewer: OpenSeadragonType.Viewer | undefined;
   let loadError = '';
   let loadingService = false;
-
-  async function extractImageServiceFromManifest(manifestUrl: string): Promise<string> {
-    const res = await fetch(manifestUrl);
-    if (!res.ok) throw new Error(`Manifest fetch failed (HTTP ${res.status})`);
-    const m = await res.json();
-    // IIIF v2
-    const img0 = m?.sequences?.[0]?.canvases?.[0]?.images?.[0];
-    if (img0) {
-      const svc = img0?.resource?.service;
-      if (svc) return svc['@id'] ?? svc.id ?? '';
-      if (img0?.resource?.['@id']) return img0.resource['@id'];
-    }
-    // IIIF v3
-    const body = m?.items?.[0]?.items?.[0]?.items?.[0]?.body;
-    if (body) {
-      const svcEntry = body?.service;
-      if (svcEntry) {
-        const svc = Array.isArray(svcEntry) ? svcEntry[0] : svcEntry;
-        if (svc?.id || svc?.['@id']) return svc.id ?? svc['@id'];
-      }
-      if (body.id || body['@id']) return body.id ?? body['@id'];
-    }
-    throw new Error('Could not locate image service in manifest');
-  }
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
@@ -147,7 +124,7 @@
     max-width: 100%;
     max-height: 100%;
     background: var(--viewer-bg);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--panel-border);
     overflow: hidden;
     display: flex;
@@ -183,7 +160,7 @@
     padding: 6px;
     cursor: pointer;
     color: var(--text-muted);
-    border-radius: 5px;
+    border-radius: var(--radius-xs);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -232,7 +209,7 @@
     flex: 1;
     font-size: 11px;
     color: var(--text-muted);
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -242,7 +219,7 @@
     flex-shrink: 0;
     padding: 4px 9px;
     font-size: 11px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     border: 0.5px solid var(--border-ui);
     background: var(--result-bg);
     color: var(--text-muted);

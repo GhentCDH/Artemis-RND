@@ -41,6 +41,7 @@
   import ToponymSearch from '$lib/artemis/ui/ToponymSearch.svelte';
   import InfoCards from '$lib/artemis/ui/InfoCards.svelte';
   import DebugMenu from '$lib/artemis/ui/DebugMenu.svelte';
+  import ImageCollectionBubble from '$lib/artemis/ui/ImageCollectionBubble.svelte';
   import IiifViewer from '$lib/artemis/viewer/IiifViewer.svelte';
   import Timeslider from '$lib/components/Timeslider.svelte';
 
@@ -121,6 +122,7 @@
   let mainLayerOpacity: Record<string, number>  = { gereduceerd: 1, primitief: 1, vandermaelen: 1, ferraris: 1, handdrawn: 1 };
   let subLayerEnabled   = makeInitialSubLayerEnabled();
   let subLayerLoading: Record<string, boolean>  = {};
+  const iiifSyncByMain = new Map<string, Promise<void>>();
 
   // Groups that should be parked as soon as their in-flight load completes.
   // Prevents the race where parkLayerGroup is called before runLayerGroup finishes.
@@ -145,6 +147,16 @@
   let pinnedCards: PinnedCard[] = [];
   let viewerOpen = false;
   let viewerItem: IiifMapInfo | null = null;
+  let imageCollectionBubbleItem: MassartItem | null = null;
+  let imageCollectionBubbleX = 0;
+  let imageCollectionBubbleY = 0;
+  let imageCollectionBubbleLngLat: { lon: number; lat: number } | null = null;
+  let imageCollectionBubblePlaceBelow = false;
+  let initialWarmupPending = true;
+  let initialWarmupRunning = false;
+  let initialWarmupDone = 0;
+  let initialWarmupTotal = 0;
+  let initialWarmupLabel = 'Preparing IIIF layers';
 
   // ─── Layer helpers ─────────────────────────────────────────────────────────
 
@@ -174,7 +186,42 @@
 
   function colorForGroupId(gid: string): string {
     const mainId = groupIdToMainId.get(gid);
-    return MAIN_LAYER_META[mainId ?? '']?.color ?? '#4ade80';
+    return MAIN_LAYER_META[mainId ?? '']?.color ?? '#888888';
+  }
+
+  function closeImageCollectionBubble() {
+    imageCollectionBubbleItem = null;
+    imageCollectionBubbleLngLat = null;
+    imageCollectionBubblePlaceBelow = false;
+  }
+
+  function syncImageCollectionBubblePosition() {
+    if (!map || !imageCollectionBubbleLngLat) return;
+    const point = map.project([imageCollectionBubbleLngLat.lon, imageCollectionBubbleLngLat.lat]);
+    const canvas = map.getCanvas();
+    const viewportMargin = 16;
+    const offscreen =
+      point.x < -viewportMargin ||
+      point.y < -viewportMargin ||
+      point.x > canvas.clientWidth + viewportMargin ||
+      point.y > canvas.clientHeight + viewportMargin;
+
+    if (offscreen) {
+      closeImageCollectionBubble();
+      return;
+    }
+
+    imageCollectionBubbleX = point.x;
+    imageCollectionBubbleY = point.y;
+    imageCollectionBubblePlaceBelow = point.y < 260;
+  }
+
+  function openImageCollectionBubble(item: MassartItem) {
+    imageCollectionBubbleItem = item;
+    imageCollectionBubbleLngLat = item.lon != null && item.lat != null
+      ? { lon: item.lon, lat: item.lat }
+      : null;
+    syncImageCollectionBubblePosition();
   }
 
   function normalizeSourceLayers(index: CompiledIndex): UILayerInfo[] {
@@ -249,6 +296,7 @@
 
   async function loadIiifLayer(layerInfo: UILayerInfo) {
     const gid = layerInfo.uiLayerId;
+    log('INFO', `[loadIiif] start gid=${gid} path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? 'all'}`);
     layerProgress = { ...layerProgress, [gid]: { done: 0, total: 0 } };
     startBulkRun('mirror');
     try {
@@ -260,14 +308,119 @@
           ingestRunResult(result);
         },
       });
+      log('INFO', `[loadIiif] done gid=${gid}`);
     } finally {
       layerProgress = { ...layerProgress, [gid]: { done: 0, total: 0 } };
       endBulkRun();
     }
   }
 
+  function getIiifMainLayerIds(): string[] {
+    return mainLayerOrder.filter((mainId) =>
+      (MAIN_LAYER_SUBS[mainId] ?? []).some((subId) => SUB_LAYER_DEFS[subId]?.kind === 'iiif')
+    );
+  }
+
+  async function warmInitialIiifLayers() {
+    if (!initialWarmupPending || initialWarmupRunning) return;
+
+    const iiifMainIds = getIiifMainLayerIds();
+    initialWarmupRunning = true;
+    initialWarmupTotal = iiifMainIds.length;
+    initialWarmupDone = 0;
+    initialWarmupLabel = 'Preparing IIIF layers';
+
+    try {
+      for (const mainId of iiifMainIds) {
+        const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find((s) => SUB_LAYER_DEFS[s]?.kind === 'iiif');
+        if (!iiifSubId) continue;
+        const info = getIiifInfoForSub(iiifSubId);
+        if (!info) continue;
+
+        initialWarmupLabel = `Preparing ${MAIN_LAYER_LABELS[mainId] ?? mainId}`;
+        mainLayerLoading = { ...mainLayerLoading, [mainId]: true };
+        try {
+          await loadIiifLayer(info);
+          await parkLayerGroup(map, info.uiLayerId);
+        } catch (e: any) {
+          log('ERROR', `[Warmup] ${mainId} failed: ${e?.message ?? String(e)}`);
+        } finally {
+          mainLayerLoading = { ...mainLayerLoading, [mainId]: false };
+          initialWarmupDone += 1;
+        }
+      }
+      initialWarmupPending = false;
+    } finally {
+      initialWarmupRunning = false;
+      initialWarmupLabel = 'IIIF layers ready';
+    }
+  }
+
+  function shouldShowIiifGroup(mainId: string, iiifSubId: string): boolean {
+    return Boolean(mainLayerEnabled[mainId] && subLayerEnabled[iiifSubId]);
+  }
+
+  async function syncIiifMainLayer(mainId: string) {
+    const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
+    if (!iiifSubId) { log('WARN', `[syncIiif] ${mainId} no iiif sublayer`); return; }
+    const info = getIiifInfoForSub(iiifSubId);
+    if (!info) { log('WARN', `[syncIiif] ${mainId} getIiifInfoForSub returned undefined (layers.length=${layers.length})`); return; }
+
+    const gid = info.uiLayerId;
+    const shouldShow = shouldShowIiifGroup(mainId, iiifSubId);
+    const parked = isLayerGroupParked(gid);
+    const knownLayerIds = getLayerGroupLayerIds(gid);
+    const hasLoadedGroup = knownLayerIds.length > 0;
+
+    log('INFO', `[syncIiif] ${mainId} target=${shouldShow} parked=${parked} loaded=${hasLoadedGroup}`);
+
+    if (!shouldShow) {
+      if (!parked && hasLoadedGroup) {
+        await parkLayerGroup(map, gid);
+      }
+      applyZOrder();
+      return;
+    }
+
+    if (hasLoadedGroup && !parked) {
+      setLayerGroupOpacity(map, gid, mainLayerOpacity[mainId] ?? 1);
+      applyZOrder();
+      return;
+    }
+
+    mainLayerLoading = { ...mainLayerLoading, [mainId]: true };
+    try {
+      await loadIiifLayer(info);
+      const shouldStillShow = shouldShowIiifGroup(mainId, iiifSubId);
+      log('INFO', `[syncIiif] ${mainId} post-load shouldShow=${shouldStillShow}`);
+      if (!shouldStillShow) {
+        await parkLayerGroup(map, gid);
+        applyZOrder();
+        return;
+      }
+      setLayerGroupOpacity(map, gid, mainLayerOpacity[mainId] ?? 1);
+      applyZOrder();
+    } catch (e: any) {
+      log('ERROR', `[syncIiif] ${mainId} load failed: ${e?.message ?? String(e)}`);
+    } finally {
+      mainLayerLoading = { ...mainLayerLoading, [mainId]: false };
+    }
+  }
+
+  function scheduleIiifMainLayerSync(mainId: string) {
+    const prev = iiifSyncByMain.get(mainId) ?? Promise.resolve();
+    const next = prev
+      .catch(() => {})
+      .then(() => syncIiifMainLayer(mainId));
+    iiifSyncByMain.set(mainId, next);
+    return next;
+  }
+
   async function toggleMainLayer(mainId: string, enabled: boolean) {
-    if (mainLayerEnabled[mainId] === enabled) return;
+    if (mainLayerEnabled[mainId] === enabled) {
+      log('INFO', `[toggleMain] ${mainId} already ${enabled} — skip`);
+      return;
+    }
     mainLayerEnabled = { ...mainLayerEnabled, [mainId]: enabled };
 
     const wmtsKey = getMainWmtsKey(mainId);
@@ -279,48 +432,16 @@
     }
 
     const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
-    if (!iiifSubId) return;
-    const info = getIiifInfoForSub(iiifSubId);
-    if (!info) return;
-    const gid = info.uiLayerId;
-
-    if (enabled) {
-      pendingPark.delete(gid);
-      const restoring = isLayerGroupParked(gid);
-      if (!restoring) mainLayerLoading = { ...mainLayerLoading, [mainId]: true };
-      try {
-        await loadIiifLayer(info);
-        // A disable arrived while we were loading — park immediately instead of showing.
-        if (pendingPark.has(gid)) {
-          pendingPark.delete(gid);
-          await parkLayerGroup(map, gid);
-          applyZOrder();
-          return;
-        }
-        setLayerGroupOpacity(map, gid, mainLayerOpacity[mainId] ?? 1);
-        applyZOrder();
-      } catch (e: any) {
-        pendingPark.delete(gid);
-        log('ERROR', `Layer load failed: ${e?.message ?? String(e)}`);
-        mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
-        const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
-      } finally {
-        mainLayerLoading = { ...mainLayerLoading, [mainId]: false };
-      }
-    } else {
-      if (mainLayerLoading[mainId]) {
-        // Load in flight — defer park until it completes.
-        pendingPark.add(gid);
-      } else {
-        pendingPark.delete(gid);
-        await parkLayerGroup(map, gid);
-        applyZOrder();
-      }
-    }
+    if (!iiifSubId) { log('WARN', `[toggleMain] ${mainId} no iiif sublayer`); return; }
+    log('INFO', `[toggleMain] ${mainId} ${enabled ? 'ENABLE' : 'DISABLE'}`);
+    await scheduleIiifMainLayerSync(mainId);
   }
 
   async function toggleSubLayer(subId: string, enabled: boolean) {
-    if (subLayerEnabled[subId] === enabled) return;
+    if (subLayerEnabled[subId] === enabled) {
+      log('INFO', `[toggleSub] ${subId} already ${enabled} — skip`);
+      return;
+    }
     subLayerEnabled = { ...subLayerEnabled, [subId]: enabled };
 
     const subDef = SUB_LAYER_DEFS[subId];
@@ -351,44 +472,9 @@
     }
 
     // IIIF sublayer
-    const info = getIiifInfoForSub(subId);
-    if (!info) return;
-    const gid = info.uiLayerId;
-    if (enabled) {
-      // toggleMainLayer is already loading this IIIF group (e.g. triggered by the Timeslider
-      // mainToggle event that fired just before this sublayerChange event in the same tick).
-      // Starting a second concurrent runLayerGroup on the same gid would race and corrupt state.
-      if (mainLayerLoading[mainId]) return;
-      pendingPark.delete(gid);
-      const restoring = isLayerGroupParked(gid);
-      if (!restoring) subLayerLoading = { ...subLayerLoading, [subId]: true };
-      try {
-        await loadIiifLayer(info);
-        if (pendingPark.has(gid)) {
-          pendingPark.delete(gid);
-          await parkLayerGroup(map, gid);
-          applyZOrder();
-          return;
-        }
-        setLayerGroupOpacity(map, gid, opacity);
-        applyZOrder();
-      } catch (e: any) {
-        pendingPark.delete(gid);
-        log('ERROR', `Sublayer load failed: ${e?.message ?? String(e)}`);
-        subLayerEnabled = { ...subLayerEnabled, [subId]: false };
-        const next = { ...layerRenderStats }; delete next[gid]; layerRenderStats = next;
-      } finally {
-        subLayerLoading = { ...subLayerLoading, [subId]: false };
-      }
-    } else {
-      if (subLayerLoading[subId]) {
-        pendingPark.add(gid);
-      } else {
-        pendingPark.delete(gid);
-        await parkLayerGroup(map, gid);
-        applyZOrder();
-      }
-    }
+    if (!getIiifInfoForSub(subId)) { log('WARN', `[toggleSub] ${subId} getIiifInfoForSub returned undefined (layers.length=${layers.length})`); return; }
+    log('INFO', `[toggleSub] ${subId} ${enabled ? 'ENABLE' : 'DISABLE'} sync`);
+    await scheduleIiifMainLayerSync(mainId);
   }
 
   // ─── Index + toponym loading ───────────────────────────────────────────────
@@ -487,6 +573,8 @@
       manifestSearchIndex = buildManifestSearchIndex(index, layers);
       log('INFO', `Manifest search entries loaded: ${manifestSearchIndex.length}`);
 
+      await warmInitialIiifLayers();
+
       // Re-trigger load for any main layers that were marked enabled before the index was
       // ready (e.g. set by Timeslider's onMount firing before layers were populated).
       for (const mainId of mainLayerOrder) {
@@ -533,6 +621,8 @@
     layerRenderStats  = {};
     layerProgress     = {};
     resetBulkMetrics();
+    initialWarmupPending = false;
+    initialWarmupRunning = false;
     await fetchIndex();
   }
 
@@ -638,7 +728,7 @@
     for (const item of items) {
       const key = item.layerLabel ?? '';
       if (!groups.has(key))
-        groups.set(key, { layerLabel: item.layerLabel ?? '', layerColor: item.layerColor ?? '#4ade80', items: [] });
+        groups.set(key, { layerLabel: item.layerLabel ?? '', layerColor: item.layerColor ?? '#888888', items: [] });
       groups.get(key)!.items.push(item);
     }
     return Array.from(groups.values());
@@ -684,10 +774,12 @@
   // ─── Timeslider wiring ─────────────────────────────────────────────────────
 
   async function onTimesliderMainToggle(e: CustomEvent<{ mainId: string; enabled: boolean }>) {
+    log('INFO', `[TS→] mainToggle ${e.detail.mainId} enabled=${e.detail.enabled}`);
     await toggleMainLayer(e.detail.mainId, e.detail.enabled);
   }
 
   async function onTimesliderSublayerChange(e: CustomEvent<{ subId: string; enabled: boolean }>) {
+    log('INFO', `[TS→] sublayerChange ${e.detail.subId} enabled=${e.detail.enabled}`);
     await toggleSubLayer(e.detail.subId, e.detail.enabled);
   }
 
@@ -704,14 +796,15 @@
         if (massartItems.length > 0) {
           setMassartPins(map, massartItems, massartYear, MASSART_LEEWAY);
 
-          // Click on a pin → open the IIIF viewer for that photo.
+          // Click on a pin → open an anchored info bubble for that photo.
           for (const layerId of getMassartClickLayerIds()) {
             map.on('click', layerId, (e) => {
               const feat = e.features?.[0];
               if (!feat?.properties) return;
-              const { title, manifestUrl } = feat.properties as { title: string; manifestUrl: string };
-              viewerItem = { title, sourceManifestUrl: manifestUrl, imageServiceUrl: '' };
-              viewerOpen = true;
+              const { manifestUrl } = feat.properties as { manifestUrl: string };
+              const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
+              if (!item) return;
+              openImageCollectionBubble(item);
             });
             map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
             map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -802,15 +895,21 @@
       }
     };
 
+    const onMapMove = () => {
+      syncImageCollectionBubblePosition();
+    };
+
     map.on('mousemove', onMouseMove);
     map.on('mouseout',  onMouseOut);
     map.on('click',     onClick);
+    map.on('move',      onMapMove);
     void fetchIndex();
 
     return () => {
       map.off('mousemove', onMouseMove);
       map.off('mouseout',  onMouseOut);
       map.off('click',     onClick);
+      map.off('move',      onMapMove);
     };
   });
 
@@ -822,6 +921,19 @@
 <div class="wrap">
   <main class="map-shell">
     <div class="map-canvas" bind:this={mapDiv}></div>
+
+    {#if initialWarmupPending || initialWarmupRunning}
+      <div class="startup-overlay" role="status" aria-live="polite">
+        <div class="startup-card">
+          <div class="startup-loader" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="startup-title">Preparing Maps</div>
+        </div>
+      </div>
+    {/if}
 
     <ToponymSearch
       toponymIndex={toponymIndex}
@@ -863,12 +975,32 @@
       <Timeslider
         {massartItems}
         yearLeeway={MASSART_LEEWAY}
+        loadingLayers={mainLayerLoading}
         on:mainToggle={onTimesliderMainToggle}
         on:sublayerChange={onTimesliderSublayerChange}
         on:year-change={onMassartYearChange}
         on:open-viewer={(e) => { viewerItem = { title: e.detail.title, sourceManifestUrl: e.detail.sourceManifestUrl, imageServiceUrl: e.detail.imageServiceUrl }; viewerOpen = true; }}
       />
     </div>
+
+    {#if imageCollectionBubbleItem}
+      <ImageCollectionBubble
+        item={imageCollectionBubbleItem}
+        x={imageCollectionBubbleX}
+        y={imageCollectionBubbleY}
+        placeBelow={imageCollectionBubblePlaceBelow}
+        on:close={closeImageCollectionBubble}
+        on:open-viewer={(e) => {
+          viewerItem = {
+            title: e.detail.title,
+            sourceManifestUrl: e.detail.sourceManifestUrl,
+            imageServiceUrl: e.detail.imageServiceUrl
+          };
+          closeImageCollectionBubble();
+          viewerOpen = true;
+        }}
+      />
+    {/if}
   </main>
 </div>
 
@@ -888,7 +1020,14 @@
     padding: 0;
     overflow: hidden;
     height: 100%;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--font-ui);
+  }
+
+  :global(button),
+  :global(input),
+  :global(select),
+  :global(textarea) {
+    font: inherit;
   }
 
   .wrap {
@@ -905,6 +1044,70 @@
   .map-canvas {
     width: 100%;
     height: 100%;
+  }
+
+  .startup-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      linear-gradient(180deg, rgba(245, 242, 235, 0.96), rgba(255, 255, 255, 0.92)),
+      radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 36%);
+    backdrop-filter: blur(4px);
+  }
+
+  .startup-card {
+    width: min(280px, calc(100vw - 32px));
+    padding: 24px 24px 22px;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(0,0,0,0.1);
+    background: rgba(255,255,255,0.95);
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .startup-loader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 18px;
+  }
+
+  .startup-loader span {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(180deg, #d4a84b, #c07b28);
+    animation: startup-bounce 0.9s ease-in-out infinite;
+  }
+
+  .startup-loader span:nth-child(2) { animation-delay: 0.12s; }
+  .startup-loader span:nth-child(3) { animation-delay: 0.24s; }
+
+  .startup-title {
+    font-size: 24px;
+    line-height: 1.05;
+    font-weight: 700;
+    color: #171717;
+    text-align: center;
+  }
+
+  @keyframes startup-bounce {
+    0%, 80%, 100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    40% {
+      transform: translateY(-5px);
+      opacity: 1;
+    }
   }
 
   .timeslider-wrap {

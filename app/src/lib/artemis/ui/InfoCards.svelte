@@ -183,7 +183,7 @@
     pointer-events: all;
     width: min(300px, 92vw);
     background: var(--panel-bg);
-    border-radius: 8px 0 0 8px;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
     border: 1px solid var(--panel-border);
     border-right: none;
     box-shadow: var(--shadow-md);
@@ -231,7 +231,7 @@
     padding: 3px;
     cursor: pointer;
     color: var(--text-muted);
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -256,7 +256,7 @@
     font-size: 10px;
     font-weight: 600;
     padding: 1px 6px;
-    border-radius: 10px;
+    border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--group-color, #aaa) 15%, var(--card-bg));
     color: var(--group-color, #555);
   }
@@ -266,7 +266,7 @@
     align-items: center;
     gap: 10px;
     padding: 7px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     border: none;
     background: none;
     color: var(--text-primary);
@@ -285,7 +285,7 @@
     width: 40px;
     height: 40px;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     border: 1px solid rgba(0, 0, 0, 0.1);
     background: rgba(0, 0, 0, 0.06);
   }
@@ -294,7 +294,7 @@
     flex-shrink: 0;
     width: 40px;
     height: 40px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     background: rgba(0, 0, 0, 0.05);
     border: 1px solid rgba(0, 0, 0, 0.08);
   }
@@ -329,7 +329,7 @@
     display: flex;
     gap: 8px;
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--group-color, #aaa) 7%, var(--card-bg));
     font-size: 12px;
     line-height: 1.4;
@@ -349,6 +349,6 @@
   }
 
   .mono {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-family: var(--font-mono);
   }
 </style>

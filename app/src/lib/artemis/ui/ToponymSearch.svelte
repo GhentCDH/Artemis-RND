@@ -183,7 +183,7 @@
     gap: 8px;
     padding: 8px 10px;
     border: 0.5px solid var(--panel-border);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     background: var(--panel-bg);
     box-shadow: var(--shadow-md);
   }
@@ -196,6 +196,7 @@
     font-size: 14px;
     color: var(--text-primary);
     flex: 1;
+    font-family: var(--font-ui);
   }
 
   .toponym-search-input::placeholder { color: var(--text-muted); }
@@ -213,7 +214,7 @@
     gap: 2px;
     padding: 6px;
     border: 0.5px solid var(--panel-border);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     background: var(--panel-bg);
     box-shadow: var(--shadow-md);
   }
@@ -239,7 +240,7 @@
   .toponym-result {
     border: 0;
     background: var(--result-bg);
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -274,7 +275,7 @@
   .toponym-search-error,
   .toponym-search-empty {
     padding: 6px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     background: var(--panel-bg);
     border: 0.5px solid var(--panel-border);
     font-size: 11px;

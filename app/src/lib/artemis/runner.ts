@@ -179,14 +179,36 @@ export async function loadCanvasInfoIndex(cfg: CompiledRunnerConfig): Promise<Ma
 // ---------------------------------------------------------------------------
 
 function waitForMapReady(map: maplibregl.Map): Promise<void> {
-  if (map.isStyleLoaded()) return Promise.resolve();
+  const isUsable = () => {
+    try {
+      return Boolean(
+        map.isStyleLoaded?.() ||
+        map.loaded?.() ||
+        (map.getStyle?.()?.layers?.length ?? 0) > 0
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  if (isUsable()) return Promise.resolve();
 
   return new Promise((resolve) => {
-    const onLoad = () => {
-      map.off("load", onLoad);
+    const finish = () => {
+      map.off("load", onMapEvent);
+      map.off("styledata", onMapEvent);
+      map.off("idle", onMapEvent);
       resolve();
     };
-    map.on("load", onLoad);
+    const onMapEvent = () => {
+      if (isUsable()) finish();
+    };
+    map.on("load", onMapEvent);
+    map.on("styledata", onMapEvent);
+    map.on("idle", onMapEvent);
+    // Re-check after attaching listeners to avoid missing a transition that
+    // happened between the synchronous guard above and listener registration.
+    if (isUsable()) finish();
   });
 }
 
@@ -402,8 +424,11 @@ export async function runLayerGroup(opts: {
 }): Promise<RunResult[]> {
   const { map, cfg, layerInfo, log } = opts;
   const layerLabel = layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel;
+  log?.("INFO", `[runLayerGroup] start label="${layerLabel}" path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? "all"}`);
 
+  log?.("INFO", `[runLayerGroup] waiting for map ready label="${layerLabel}"`);
   await waitForMapReady(map);
+  log?.("INFO", `[runLayerGroup] map ready label="${layerLabel}"`);
 
   const groupId = getLayerGroupId(layerInfo);
 
@@ -420,6 +445,7 @@ export async function runLayerGroup(opts: {
 
   // Remove any previously loaded version of this layer group
   await removeLayerGroup(map, groupId);
+  log?.("INFO", `[runLayerGroup] removed stale group label="${layerLabel}" groupId=${groupId}`);
 
   const [index, infoByServiceUrl] = await Promise.all([
     loadCompiledIndex(cfg),
@@ -427,10 +453,12 @@ export async function runLayerGroup(opts: {
   ]);
   const timeout = cfg.fetchTimeoutMs ?? 30000;
   const compiledCollectionUrl = joinUrl(cfg.datasetBaseUrl, layerInfo.compiledCollectionPath);
+  log?.("INFO", `[runLayerGroup] fetching compiled collection label="${layerLabel}" url=${compiledCollectionUrl}`);
   const compiledCollection = await fetchJson<{ manifests?: Array<{ "@id"?: string }> }>(
     compiledCollectionUrl,
     timeout
   );
+  log?.("INFO", `[runLayerGroup] compiled collection fetched label="${layerLabel}" manifests=${compiledCollection.manifests?.length ?? 0}`);
 
   const entryByAbsoluteManifestUrl = new Map<string, CompiledIndexEntry>();
   const entryByRelativeManifestPath = new Map<string, CompiledIndexEntry>();

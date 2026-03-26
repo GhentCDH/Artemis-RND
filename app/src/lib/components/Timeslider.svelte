@@ -6,6 +6,7 @@
 
   export let massartItems: MassartItem[] = [];
   export let yearLeeway: number = 3;
+  export let loadingLayers: Record<string, boolean> = {};
 
   const dispatch = createEventDispatcher<{
     mainToggle:     { mainId: string; enabled: boolean };
@@ -26,7 +27,7 @@
     },
     {
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
-      start: 1770, end: 1778, repr: 1774, color: '#2E8B72', row: 1,
+      start: 1770, end: 1778, repr: 1774, color: '#B8860B', row: 1,
       sublayers: [
         { id: 'wmts',    subId: 'ferraris-wmts',      label: 'Map tiles', defaultOn: true  },
         { id: 'landuse', subId: 'ferraris-landusage',  label: 'Land use',  defaultOn: false },
@@ -51,7 +52,7 @@
     },
     {
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
-      start: 1847, end: 1855, repr: 1851, color: '#2A6FAA', row: 2,
+      start: 1847, end: 1855, repr: 1851, color: '#9440A0', row: 2,
       sublayers: [
         { id: 'iiif',    subId: 'gereduceerd-iiif',      label: 'IIIF sheets', defaultOn: true  },
         { id: 'parcels', subId: 'gereduceerd-parcels',   label: 'Parcels',     defaultOn: false },
@@ -132,7 +133,6 @@
   // ─── Visibility tracking ───────────────────────────────────────────────────
 
   let prevVisible: Record<string, boolean> = {};
-
   onMount(async () => {
     // Dispatch initial layer visibility state.
     for (const src of SOURCES) {
@@ -249,17 +249,26 @@
 {#if panelSources.length > 0}
   <div class="ts-sub-panel" transition:fade={{ duration: 140 }}>
     {#each panelSources as src}
-      {#each src.sublayers as sub}
-        <!-- svelte-ignore a11y-interactive-supports-focus -->
-        <button
-          class="sub-pill"
-          class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
-          style="--c:{src.color}"
-          type="button"
-          title="{src.label} — {sub.label}"
-          on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
-        >{sub.label}</button>
-      {/each}
+      <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
+        <div class="sub-menu-header">
+          <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+          <span class="sub-menu-title">{src.label}</span>
+        </div>
+        <div class="sub-menu-pills">
+          {#each src.sublayers as sub}
+            <!-- svelte-ignore a11y-interactive-supports-focus -->
+            <button
+              class="sub-pill"
+              class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+              class:is-layer-disabled={!enabledLayers[src.key]}
+              style="--c:{src.color}"
+              type="button"
+              title="{src.label} — {sub.label}"
+              on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+            >{sub.label}</button>
+          {/each}
+        </div>
+      </section>
     {/each}
   </div>
 {/if}
@@ -298,7 +307,8 @@
         <div
           class="source-block"
           class:is-disabled={!enabled}
-          class:is-active={panelSources.some(p => p.key === src.key)}
+          class:is-current={enabled && panelSources.some(p => p.key === src.key)}
+          class:is-loading={loadingLayers[src.mainId]}
           style="left:{pct(src.start,axisStart,axisSpan)};width:{widthPct(src.start,src.end,axisSpan)};--c:{src.color}"
           role="button"
           tabindex="0"
@@ -364,7 +374,8 @@
         <div
           class="source-block"
           class:is-disabled={!enabled}
-          class:is-active={panelSources.some(p => p.key === src.key)}
+          class:is-current={enabled && panelSources.some(p => p.key === src.key)}
+          class:is-loading={loadingLayers[src.mainId]}
           style="left:{pct(src.start,axisStart,axisSpan)};width:{widthPct(src.start,src.end,axisSpan)};--c:{src.color}"
           role="button"
           tabindex="0"
@@ -392,8 +403,60 @@
     z-index: 50;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 0.5px solid rgba(0, 0, 0, 0.12);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
     pointer-events: all;
+  }
+
+  .sub-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 180px;
+    padding: 10px;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: var(--radius-sm);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);
+  }
+
+  .sub-menu.is-layer-disabled {
+    background: rgba(248, 248, 248, 0.98);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  .sub-menu-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sub-menu-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-pill);
+    background: var(--c);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+    flex: 0 0 auto;
+  }
+
+  .sub-menu-title {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(0,0,0,0.72);
+    line-height: 1.2;
+  }
+
+  .sub-menu-pills {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .sub-pill {
@@ -401,14 +464,14 @@
     background: var(--c);
     color: #ffffff;
     border: none;
-    border-radius: 6px;
-    font-family: 'DM Sans', 'Inter', sans-serif;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-ui);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
     text-align: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.14);
+    box-shadow: var(--shadow-sm);
     transition: opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
   }
 
@@ -418,7 +481,13 @@
     box-shadow: none;
   }
 
-  .sub-pill:hover:not(.is-disabled) {
+  .sub-pill.is-layer-disabled {
+    opacity: 0.55;
+    filter: saturate(0.5) brightness(0.94);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+
+  .sub-pill:hover:not(.is-disabled):not(.is-layer-disabled) {
     filter: brightness(1.09);
   }
 
@@ -427,11 +496,11 @@
   .timeslider {
     background: #ffffff;
     border: 0.5px solid rgba(0,0,0,0.1);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     padding: 12px 16px;
     user-select: none;
-    font-family: 'DM Sans', 'Inter', sans-serif;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1), 0 1px 4px rgba(0,0,0,0.06);
+    font-family: var(--font-ui);
+    box-shadow: var(--shadow-md);
   }
 
   /* ── Track ───────────────────────────────────────────────────────────────── */
@@ -463,7 +532,7 @@
     justify-content: center;
     gap: 3px;
     background: var(--c);
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     z-index: 2;
     overflow: hidden;
@@ -476,27 +545,44 @@
     filter: saturate(0);
   }
 
+  .source-block.is-loading::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: pill-shimmer 1.3s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes pill-shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
   .source-block:hover:not(.is-disabled) {
     filter: brightness(1.09);
   }
 
   /* Active (scrubber overlapping): scale away from axis, rows grow outward */
-  .ts-row--above .source-block.is-active {
+  .source-block.is-current {
+    z-index: 3;
+  }
+
+  .ts-row--above .source-block.is-current {
     transform: scaleY(1.18);
     transform-origin: bottom center;
     box-shadow: 0 -3px 10px rgba(0,0,0,0.18);
-    z-index: 3;
   }
 
-  .ts-row--below .source-block.is-active {
+  .ts-row--below .source-block.is-current {
     transform: scaleY(1.18);
     transform-origin: top center;
     box-shadow: 0 3px 10px rgba(0,0,0,0.18);
-    z-index: 3;
   }
 
   .block-label {
-    font-family: 'DM Sans', 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 12px;
     font-weight: 700;
     color: #ffffff;
@@ -510,7 +596,7 @@
   }
 
   .block-date {
-    font-family: 'DM Mono', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 400;
     color: rgba(255,255,255,0.65);
@@ -523,9 +609,10 @@
 
   .ts-axis-line {
     position: relative;
-    height: 2px;
-    background: rgba(0,0,0,0.15);
-    z-index: 3;
+    height: 6px;
+    background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.18));
+    border-radius: var(--radius-pill);
+    z-index: 8;
     overflow: visible;
     pointer-events: none;
   }
@@ -537,18 +624,18 @@
     /* clear the top row (39px) plus a small gap */
     bottom: calc(100% + 43px);
     transform: translateX(-50%);
-    font-family: 'DM Mono', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 500;
     color: rgba(0,0,0,0.65);
     background: #ffffff;
     border: 0.5px solid rgba(0,0,0,0.12);
-    border-radius: 4px;
-    padding: 1px 5px;
+    border-radius: var(--radius-xs);
+    padding: 3px 8px;
     white-space: nowrap;
     pointer-events: none;
-    z-index: 6;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    z-index: 12;
+    box-shadow: var(--shadow-md);
   }
 
   /* ── Range scrubber ──────────────────────────────────────────────────────── */
@@ -557,12 +644,12 @@
     position: absolute;
     left: 0;
     top: 50%;
-    height: 18px;
+    height: 28px;
     transform: translateY(-50%);
     width: 100%;
     margin: 0;
     padding: 0;
-    z-index: 5;
+    z-index: 11;
     cursor: ew-resize;
     -webkit-appearance: none;
     appearance: none;
@@ -572,27 +659,35 @@
 
   .ts-scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
-    background: #ffffff;
-    border: 1.5px solid rgba(0,0,0,0.30);
+    background: linear-gradient(180deg, #ffffff, #f4f0e8);
+    border: 2px solid rgba(192,123,40,0.55);
     cursor: ew-resize;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.10);
+    box-shadow: var(--shadow-card);
   }
 
   .ts-scrubber::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
-    background: #ffffff;
-    border: 1.5px solid rgba(0,0,0,0.30);
+    background: linear-gradient(180deg, #ffffff, #f4f0e8);
+    border: 2px solid rgba(192,123,40,0.55);
     cursor: ew-resize;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.10);
+    box-shadow: var(--shadow-card);
   }
 
-  .ts-scrubber::-webkit-slider-runnable-track { background: transparent; }
-  .ts-scrubber::-moz-range-track             { background: transparent; }
+  .ts-scrubber::-webkit-slider-runnable-track {
+    height: 28px;
+    background: transparent;
+  }
+
+  .ts-scrubber::-moz-range-track {
+    height: 28px;
+    background: transparent;
+    border: none;
+  }
 
   /* ── Image dots ──────────────────────────────────────────────────────────── */
 
@@ -607,7 +702,7 @@
     border: 1.5px solid #ffffff;
     padding: 0;
     cursor: pointer;
-    z-index: 4;
+    z-index: 9;
     pointer-events: auto;
     transition: transform 150ms ease;
   }
@@ -636,11 +731,11 @@
     z-index: 60;
     background: #ffffff;
     border: 0.5px solid rgba(0,0,0,0.12);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     padding: 10px 12px;
     min-width: 200px;
     max-width: 280px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.07);
+    box-shadow: var(--shadow-md);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -655,7 +750,7 @@
   }
 
   .dot-popup-year {
-    font-family: 'DM Mono', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
     color: #D4A84B;
@@ -675,7 +770,7 @@
   .dot-popup-close:hover { color: rgba(0,0,0,0.7); }
 
   .dot-popup-title {
-    font-family: 'DM Sans', 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 12px;
     font-weight: 500;
     color: #1a1a1a;
@@ -683,7 +778,7 @@
   }
 
   .dot-popup-location {
-    font-family: 'DM Sans', 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 11px;
     color: rgba(0,0,0,0.45);
   }
@@ -692,7 +787,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-family: 'DM Mono', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: rgba(0,0,0,0.45);
   }
@@ -700,7 +795,7 @@
   .dot-popup-nav button {
     background: none;
     border: 0.5px solid rgba(0,0,0,0.2);
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     padding: 1px 6px;
     font-size: 13px;
     cursor: pointer;
@@ -712,13 +807,13 @@
   .dot-popup-open {
     margin-top: 2px;
     padding: 5px 10px;
-    font-family: 'DM Sans', 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 11px;
     font-weight: 500;
     background: #1a1a1a;
     color: #ffffff;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     align-self: flex-start;
     transition: background 0.15s;
@@ -749,7 +844,7 @@
   .ts-tick--century::before { height: 18px; background: rgba(0,0,0,0.55); }
 
   .ts-tick-label {
-    font-family: 'DM Mono', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     color: rgba(0,0,0,0.38);
     margin-top: 2px;

@@ -60,7 +60,6 @@ const LAND_USAGE_LAYERS: Record<
 const BELGIUM_BOUNDS: [number, number, number, number] = [2.53, 50.685, 5.92, 51.52];
 
 const IIIF_HOVER_SOURCE_ID = "iiif-hover-mask-source";
-const IIIF_HOVER_FILL_LAYER_ID = "iiif-hover-mask-fill";
 const IIIF_HOVER_LINE_LAYER_ID = "iiif-hover-mask-line";
 
 const PRIMITIVE_SOURCE_ID = "primitive-parcels-source";
@@ -204,17 +203,6 @@ function ensureIiifHoverLayers(m: maplibregl.Map): void {
       data: { type: "FeatureCollection", features: [] }
     });
   }
-  if (!m.getLayer(IIIF_HOVER_FILL_LAYER_ID)) {
-    m.addLayer({
-      id: IIIF_HOVER_FILL_LAYER_ID,
-      type: "fill",
-      source: IIIF_HOVER_SOURCE_ID,
-      paint: {
-        "fill-color": ["get", "fillColor"] as any,
-        "fill-opacity": 0.28
-      }
-    });
-  }
   if (!m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) {
     m.addLayer({
       id: IIIF_HOVER_LINE_LAYER_ID,
@@ -246,8 +234,6 @@ export function setIiifHoverMasks(m: maplibregl.Map, masks: IiifHoverMask[] | nu
       properties: { fillColor, lineColor }
     }));
   source.setData({ type: "FeatureCollection", features });
-  // Move hover layers above the warped map layers so the fill renders on top.
-  try { if (m.getLayer(IIIF_HOVER_FILL_LAYER_ID)) m.moveLayer(IIIF_HOVER_FILL_LAYER_ID); } catch { /* ignore */ }
   try { if (m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_HOVER_LINE_LAYER_ID); } catch { /* ignore */ }
 }
 
@@ -292,7 +278,7 @@ export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, 
         source: PRIMITIVE_SOURCE_ID,
         filter: ["==", ["get", "type"], "parcel"],
         paint: {
-          "line-color": "#2980b9",
+          "line-color": "#C07B28",
           "line-width": 1.1,
           "line-opacity": 1
         }
@@ -329,7 +315,7 @@ export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, 
         type: "fill",
         source: PRIMITIVE_SELECT_SOURCE_ID,
         paint: {
-          "fill-color": "#2980b9",
+          "fill-color": "#C07B28",
           "fill-opacity": 0.28
         }
       });
@@ -340,7 +326,7 @@ export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, 
         type: "line",
         source: PRIMITIVE_SELECT_SOURCE_ID,
         paint: {
-          "line-color": "#2980b9",
+          "line-color": "#C07B28",
           "line-width": 2,
           "line-opacity": 1
         }

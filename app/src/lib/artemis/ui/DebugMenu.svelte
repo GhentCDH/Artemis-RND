@@ -160,7 +160,7 @@
     right: 14px;
     z-index: 3;
     border: 1px solid var(--border-ui);
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     background: var(--overlay-bg);
     padding: 8px 10px;
     font-size: 12px;
@@ -181,7 +181,7 @@
     flex-direction: column;
     gap: 10px;
     padding: 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border-ui);
     background: var(--overlay-bg);
     backdrop-filter: blur(4px);
@@ -199,7 +199,7 @@
 
   .debug-close {
     border: 1px solid var(--border-ui);
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     background: var(--card-bg);
     padding: 5px 8px;
     font-size: 11px;
@@ -224,7 +224,7 @@
 
   .metrics {
     border: 1px solid var(--border-light);
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     padding: 10px;
     font-size: 12px;
   }
@@ -260,7 +260,7 @@
 
   .problem-item {
     border: 1px solid var(--problem-border);
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     padding: 6px 8px;
     background: var(--problem-bg);
     display: grid;
@@ -272,7 +272,7 @@
 
   .log-details {
     border: 1px solid var(--border-light);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
 
   .log-details summary {
@@ -288,7 +288,7 @@
   .logs {
     max-height: 260px;
     overflow: auto;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     padding: 6px;
   }
@@ -315,7 +315,7 @@
   }
 
   .mono {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-family: var(--font-mono);
   }
 
   @media (max-width: 900px) {
