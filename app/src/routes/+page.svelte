@@ -13,6 +13,7 @@
     setPrimitiveLayerOpacity, getPrimitiveLayerIds,
     setPrimitiveHoverFeature, setPrimitiveSelectFeature,
     setIiifHoverMasks,
+    setMassartPins, updateMassartActiveYear, getMassartClickLayerIds,
   } from '$lib/artemis/map/mapInit';
   import { attachAllmapsDebugEvents } from '$lib/artemis/debug/attachAllmapsDebugEvents';
   import {
@@ -34,7 +35,7 @@
   } from '$lib/artemis/layerConfig';
   import type {
     ToponymIndexItem, RawToponymIndexItem, ManifestSearchItem,
-    IiifMapInfo, ParcelClickInfo, PinnedCard, IiifPanelGroup, UILog,
+    IiifMapInfo, ParcelClickInfo, PinnedCard, IiifPanelGroup, UILog, MassartItem,
   } from '$lib/artemis/types';
 
   import ToponymSearch from '$lib/artemis/ui/ToponymSearch.svelte';
@@ -73,6 +74,27 @@
 
   function primitiveGeojsonUrl(): string {
     return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/Primitive/index.geojson`;
+  }
+
+  // ─── Massart ───────────────────────────────────────────────────────────────
+
+  const MASSART_LEEWAY = 3; // years each side of the scrubber that count as "active"
+  let massartItems: MassartItem[] = [];
+  let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
+
+  async function loadMassartData() {
+    try {
+      const url = `${cfg().datasetBaseUrl}/Massart/index.json`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      massartItems = Array.isArray(data.items) ? data.items : [];
+    } catch { /* degrade silently — pins won't appear */ }
+  }
+
+  function onMassartYearChange(e: CustomEvent<{ year: number }>) {
+    massartYear = e.detail.year;
+    if (map?.isStyleLoaded()) updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
   }
 
   // ─── Logging ───────────────────────────────────────────────────────────────
@@ -428,6 +450,20 @@
       }
       manifestSearchIndex = buildManifestSearchIndex(index, layers);
       log('INFO', `Manifest search entries loaded: ${manifestSearchIndex.length}`);
+
+      // Re-trigger load for any main layers that were marked enabled before the index was
+      // ready (e.g. set by Timeslider's onMount firing before layers were populated).
+      for (const mainId of mainLayerOrder) {
+        if (!mainLayerEnabled[mainId]) continue;
+        const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
+        if (!iiifSubId) continue; // WMTS layers (ferraris, vandermaelen) don't need this
+        const info = getIiifInfoForSub(iiifSubId);
+        if (!info) continue;
+        log('INFO', `[Init] Triggering deferred load for ${mainId}`);
+        mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
+        await toggleMainLayer(mainId, true);
+      }
+
       await loadToponymIndex();
     } catch (e: any) {
       manifestSearchIndex = [];
@@ -624,7 +660,29 @@
   onMount(() => {
     map = ensureMapContext(mapDiv);
     attachAllmapsDebugEvents(map, log);
-    map.on('load', () => applyZOrder());
+    map.on('load', () => {
+      applyZOrder();
+
+      // Load Massart data then add pins to the map.
+      loadMassartData().then(() => {
+        if (massartItems.length > 0) {
+          setMassartPins(map, massartItems, massartYear, MASSART_LEEWAY);
+
+          // Click on a pin → open the IIIF viewer for that photo.
+          for (const layerId of getMassartClickLayerIds()) {
+            map.on('click', layerId, (e) => {
+              const feat = e.features?.[0];
+              if (!feat?.properties) return;
+              const { title, manifestUrl } = feat.properties as { title: string; manifestUrl: string };
+              viewerItem = { title, sourceManifestUrl: manifestUrl, imageServiceUrl: '' };
+              viewerOpen = true;
+            });
+            map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+          }
+        }
+      });
+    });
 
     const onMouseMove = (e: any) => {
       // Primitive parcel hover
@@ -767,8 +825,12 @@
 
     <div class="timeslider-wrap">
       <Timeslider
+        {massartItems}
+        yearLeeway={MASSART_LEEWAY}
         on:mainToggle={onTimesliderMainToggle}
         on:sublayerChange={onTimesliderSublayerChange}
+        on:year-change={onMassartYearChange}
+        on:open-viewer={(e) => { viewerItem = { title: e.detail.title, sourceManifestUrl: e.detail.sourceManifestUrl, imageServiceUrl: e.detail.imageServiceUrl }; viewerOpen = true; }}
       />
     </div>
   </main>

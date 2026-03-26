@@ -477,3 +477,103 @@ function attachPrimitiveDebugListeners(map: maplibregl.Map, geojsonUrl: string):
     map.off("error", onError);
   });
 }
+
+// ─── Massart photo pins ───────────────────────────────────────────────────────
+
+import type { MassartItem } from "$lib/artemis/types";
+
+const MASSART_SOURCE_ID = "massart-pins-source";
+const MASSART_LAYER_INACTIVE = "massart-pins-inactive";
+const MASSART_LAYER_ACTIVE   = "massart-pins-active";
+
+function massartGeoJSON(items: MassartItem[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: items
+      .filter((i) => i.lat != null && i.lon != null)
+      .map((i) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [i.lon!, i.lat!] },
+        properties: {
+          year: parseInt(i.year ?? "0", 10),
+          title: i.title,
+          location: i.location ?? "",
+          manifestUrl: i.manifestUrl,
+        },
+      })),
+  };
+}
+
+function massartActiveFilter(year: number, leeway: number): maplibregl.FilterSpecification {
+  return ["<=", ["abs", ["-", ["get", "year"], year]], leeway] as maplibregl.FilterSpecification;
+}
+
+function massartInactiveFilter(year: number, leeway: number): maplibregl.FilterSpecification {
+  return [">", ["abs", ["-", ["get", "year"], year]], leeway] as maplibregl.FilterSpecification;
+}
+
+export function setMassartPins(
+  map: maplibregl.Map,
+  items: MassartItem[],
+  year: number,
+  leeway: number
+): void {
+  const data = massartGeoJSON(items);
+
+  if (map.getSource(MASSART_SOURCE_ID)) {
+    (map.getSource(MASSART_SOURCE_ID) as maplibregl.GeoJSONSource).setData(data);
+  } else {
+    map.addSource(MASSART_SOURCE_ID, { type: "geojson", data });
+  }
+
+  if (!map.getLayer(MASSART_LAYER_INACTIVE)) {
+    map.addLayer({
+      id: MASSART_LAYER_INACTIVE,
+      type: "circle",
+      source: MASSART_SOURCE_ID,
+      filter: massartInactiveFilter(year, leeway),
+      paint: {
+        "circle-radius": 6,
+        "circle-color": "#D4A84B",
+        "circle-opacity": 0.28,
+        "circle-stroke-width": 1,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-opacity": 0.3,
+      },
+    });
+  }
+
+  if (!map.getLayer(MASSART_LAYER_ACTIVE)) {
+    map.addLayer({
+      id: MASSART_LAYER_ACTIVE,
+      type: "circle",
+      source: MASSART_SOURCE_ID,
+      filter: massartActiveFilter(year, leeway),
+      paint: {
+        "circle-radius": 9,
+        "circle-color": "#D4A84B",
+        "circle-opacity": 1,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+      },
+    });
+  }
+
+  updateMassartActiveYear(map, year, leeway);
+}
+
+export function updateMassartActiveYear(
+  map: maplibregl.Map,
+  year: number,
+  leeway: number
+): void {
+  if (!map.getSource(MASSART_SOURCE_ID)) return;
+  if (map.getLayer(MASSART_LAYER_ACTIVE))
+    map.setFilter(MASSART_LAYER_ACTIVE, massartActiveFilter(year, leeway));
+  if (map.getLayer(MASSART_LAYER_INACTIVE))
+    map.setFilter(MASSART_LAYER_INACTIVE, massartInactiveFilter(year, leeway));
+}
+
+export function getMassartClickLayerIds(): string[] {
+  return [MASSART_LAYER_ACTIVE, MASSART_LAYER_INACTIVE];
+}
