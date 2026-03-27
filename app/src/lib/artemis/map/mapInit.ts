@@ -2,6 +2,8 @@
 import maplibregl from "maplibre-gl";
 
 let map: maplibregl.Map | null = null;
+type BaseMapTheme = "light" | "dark";
+const mapThemeByInstance = new WeakMap<maplibregl.Map, BaseMapTheme>();
 
 type HistCartLayerKey = "ferraris" | "vandermaelen";
 
@@ -79,13 +81,24 @@ function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
 }
 
 export function createMapContext(container: HTMLElement): maplibregl.Map {
+  return createMapContextWithTheme(container, "light");
+}
+
+export function getBaseMapStyleUrl(theme: BaseMapTheme): string {
+  return theme === "dark"
+    ? "https://tiles.openfreemap.org/styles/dark"
+    : "https://tiles.openfreemap.org/styles/positron";
+}
+
+export function createMapContextWithTheme(container: HTMLElement, theme: BaseMapTheme = "light"): maplibregl.Map {
   const nextMap = new maplibregl.Map({
     container,
-    style: "https://tiles.openfreemap.org/styles/positron",
+    style: getBaseMapStyleUrl(theme),
     center: [4.23, 51.10], // Bornem, Scheldt valley
     zoom: 10,
     attributionControl: false
   });
+  mapThemeByInstance.set(nextMap, theme);
 
   // Resize once style is loaded (helps when container size settles after layout mount)
   nextMap.once("load", () => {
@@ -100,13 +113,20 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
   return nextMap;
 }
 
+export function setBaseMapTheme(targetMap: maplibregl.Map, theme: BaseMapTheme): boolean {
+  if (mapThemeByInstance.get(targetMap) === theme) return false;
+  targetMap.setStyle(getBaseMapStyleUrl(theme));
+  mapThemeByInstance.set(targetMap, theme);
+  return true;
+}
+
 export function destroyMapContextInstance(targetMap: maplibregl.Map | null | undefined) {
   targetMap?.remove();
 }
 
-export function ensureMapContext(container: HTMLElement): maplibregl.Map {
+export function ensureMapContext(container: HTMLElement, theme: BaseMapTheme = "light"): maplibregl.Map {
   if (map) return map;
-  map = createMapContext(container);
+  map = createMapContextWithTheme(container, theme);
   return map;
 }
 

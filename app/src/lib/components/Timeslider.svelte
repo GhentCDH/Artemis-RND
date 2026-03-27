@@ -10,23 +10,26 @@
   export let yearLeeway: number = 3;
   export let loadingLayers: Record<string, boolean> = {};
   export let dualPaneEnabled = false;
+  export let showLeftPaneControls = true;
+  export let showRightPaneControls = true;
+  export let disabledPane: PaneId | null = null;
   export let leftYear: number | undefined = undefined;
   export let rightYear: number | undefined = undefined;
 
   const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
     left: {
       label: 'Left',
-      color: '#00a99a',
-      badgeBg: '#bff5ee',
-      badgeText: '#005f55',
-      panelTint: 'rgba(0, 169, 154, 0.14)',
+      color: 'var(--pane-left-color)',
+      badgeBg: 'var(--pane-left-badge-bg)',
+      badgeText: 'var(--pane-left-badge-text)',
+      panelTint: 'var(--pane-left-panel-tint)',
     },
     right: {
       label: 'Right',
-      color: '#8a6ad6',
-      badgeBg: '#eee6fb',
-      badgeText: '#5c4697',
-      panelTint: 'rgba(138, 106, 214, 0.12)',
+      color: 'var(--pane-right-color)',
+      badgeBg: 'var(--pane-right-badge-bg)',
+      badgeText: 'var(--pane-right-badge-text)',
+      panelTint: 'var(--pane-right-panel-tint)',
     },
   };
 
@@ -36,13 +39,14 @@
     paneMainToggle: { pane: PaneId; mainId: string; enabled: boolean };
     paneSublayerChange: { pane: PaneId; subId: string; enabled: boolean };
     'open-viewer':  { title: string; sourceManifestUrl: string; imageServiceUrl: string };
+    'focus-image':  { title: string; lon: number; lat: number };
     'year-change':  { pane: PaneId; year: number };
   }>();
 
   const SOURCES = [
     {
       key: 'hand', mainId: 'handdrawn', label: 'Hand drawn',
-      start: 1700, end: 1715, repr: 1707, color: '#888780', row: 1,
+      start: 1700, end: 1715, repr: 1707, color: 'var(--layer-hand-color)', row: 1,
       sublayers: [
         { id: 'iiif', subId: 'handdrawn-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'handdrawn-parcels', label: 'Parcels', defaultOn: false },
@@ -51,7 +55,7 @@
     },
     {
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
-      start: 1770, end: 1778, repr: 1774, color: '#6aaa5a', row: 1,
+      start: 1770, end: 1778, repr: 1774, color: 'var(--layer-ferraris-color)', row: 1,
       sublayers: [
         { id: 'wmts', subId: 'ferraris-wmts', label: 'Map', defaultOn: true },
         { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
@@ -59,7 +63,7 @@
     },
     {
       key: 'primitief', mainId: 'primitief', label: 'Primitief Kadaster',
-      start: 1808, end: 1834, repr: 1814, color: '#c97a2e', row: 2,
+      start: 1808, end: 1834, repr: 1814, color: 'var(--layer-primitief-color)', row: 2,
       sublayers: [
         { id: 'iiif', subId: 'primitief-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'primitief-parcels', label: 'Parcels', defaultOn: false },
@@ -68,7 +72,7 @@
     },
     {
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
-      start: 1846, end: 1854, repr: 1850, color: '#c45000', row: 2,
+      start: 1846, end: 1854, repr: 1850, color: 'var(--layer-vander-color)', row: 2,
       sublayers: [
         { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map', defaultOn: true },
         { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
@@ -76,7 +80,7 @@
     },
     {
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
-      start: 1847, end: 1855, repr: 1851, color: '#a0b020', row: 1,
+      start: 1847, end: 1855, repr: 1851, color: 'var(--layer-gereduceerd-color)', row: 1,
       sublayers: [
         { id: 'iiif', subId: 'gereduceerd-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'gereduceerd-parcels', label: 'Parcels', defaultOn: false },
@@ -123,11 +127,6 @@
 
   let prevVisible: Record<string, boolean> = {};
   let prevPaneVisible: Record<PaneId, Record<string, boolean>> = { left: {}, right: {} };
-
-  let popupItems: MassartItem[] = [];
-  let popupIdx = 0;
-  let popupX = 0;
-  let popupY = 0;
 
   $: massartByYear = massartItems.reduce<Map<number, MassartItem[]>>((acc, item) => {
     const y = parseInt(item.year ?? '0', 10);
@@ -212,27 +211,15 @@
     return visiblePanes.some((pane) => Math.abs(yr - pane.year) <= yearLeeway);
   }
 
-  function openDotPopup(e: MouseEvent, items: MassartItem[]) {
-    popupItems = items;
-    popupIdx = 0;
-    popupX = e.clientX;
-    popupY = e.clientY;
-    e.stopPropagation();
-  }
-
-  function closePopup() {
-    popupItems = [];
-  }
-
-  function openInViewer() {
-    const item = popupItems[popupIdx];
-    if (!item) return;
-    dispatch('open-viewer', {
-      title: item.title,
-      sourceManifestUrl: item.manifestUrl,
-      imageServiceUrl: '',
-    });
-    closePopup();
+  function focusDot(items: MassartItem[]) {
+    const firstItem = items[0];
+    if (firstItem && Number.isFinite(firstItem.lon) && Number.isFinite(firstItem.lat)) {
+      dispatch('focus-image', {
+        title: firstItem.title,
+        lon: Number(firstItem.lon),
+        lat: Number(firstItem.lat),
+      });
+    }
   }
 
   function handleBlockClick(key: SourceKey) {
@@ -464,7 +451,7 @@
 </script>
 
 {#if dualPaneEnabled}
-  {#if leftPanelSources.length > 0}
+  {#if showLeftPaneControls && leftPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
       {#each leftPanelSources as src}
         <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
@@ -493,7 +480,7 @@
     </div>
   {/if}
 
-  {#if rightPanelSources.length > 0}
+  {#if showRightPaneControls && rightPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--right" transition:fade={{ duration: 140 }}>
       {#each rightPanelSources as src}
         <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
@@ -521,7 +508,7 @@
       {/each}
     </div>
   {/if}
-{:else if singlePanelSources.length > 0}
+{:else if showLeftPaneControls && singlePanelSources.length > 0}
   <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
     {#each singlePanelSources as src}
       <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
@@ -547,26 +534,6 @@
         </div>
       </section>
     {/each}
-  </div>
-{/if}
-
-{#if popupItems.length > 0}
-  {@const item = popupItems[popupIdx]}
-  <div class="dot-popup" style="left:{popupX}px;top:{popupY}px" transition:fade={{ duration: 120 }}>
-    <div class="dot-popup-header">
-      <span class="dot-popup-year">{item.year}</span>
-      <button class="dot-popup-close" type="button" on:click={closePopup} aria-label="Close">×</button>
-    </div>
-    <div class="dot-popup-title">{item.title}</div>
-    {#if item.location}<div class="dot-popup-location">{item.location}</div>{/if}
-    {#if popupItems.length > 1}
-      <div class="dot-popup-nav">
-        <button type="button" on:click={() => popupIdx = (popupIdx - 1 + popupItems.length) % popupItems.length}>‹</button>
-        <span>{popupIdx + 1} / {popupItems.length}</span>
-        <button type="button" on:click={() => popupIdx = (popupIdx + 1) % popupItems.length}>›</button>
-      </div>
-    {/if}
-    <button class="dot-popup-open" type="button" on:click={openInViewer}>Open in viewer</button>
   </div>
 {/if}
 
@@ -601,6 +568,7 @@
           <span
             class="scrubber-label"
             class:scrubber-label--right={pane.id === 'right'}
+            class:is-disabled={disabledPane === pane.id}
             style="left:{scrubberCenterPx(yearForPane(pane.id))}px;--pane-color:{pane.color};--pane-badge-bg:{PANE_META[pane.id].badgeBg};--pane-badge-text:{PANE_META[pane.id].badgeText}"
             aria-hidden="true"
           >{pane.label} · {Math.round(pane.year)}</span>
@@ -627,7 +595,7 @@
           style="left:{pct(yr,axisStart,axisSpan)}"
           title="{yr} · {items.length} photo{items.length > 1 ? 's' : ''}"
           aria-label="Massart photos {yr}"
-          on:click={(e) => openDotPopup(e, items)}
+          on:click={() => focusDot(items)}
         ></button>
       {/each}
 
@@ -636,12 +604,14 @@
           <input
             class="ts-scrubber"
             class:ts-scrubber--right={pane.id === 'right'}
+            class:is-disabled={disabledPane === pane.id}
             style="--pane-color:{pane.color}"
             type="range"
             min={axisStart}
             max={axisEnd}
             step="1"
             value={yearForPane(pane.id)}
+            disabled={disabledPane === pane.id}
             on:input={(e) => onSliderInput(pane.id, e)}
             aria-label="{pane.label} timeline year"
           />
@@ -695,8 +665,8 @@
     align-items: stretch;
     gap: 10px;
     padding: 10px;
-    background: rgba(255, 255, 255, 0.96);
-    border: 0.5px solid rgba(0, 0, 0, 0.12);
+    background: var(--surface-floating);
+    border: 0.5px solid var(--surface-outline-soft);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
     pointer-events: all;
@@ -704,14 +674,14 @@
 
   .ts-sub-panel--left {
     left: 12px;
-    --pane-border: #00a99a;
-    --pane-header-tint: rgba(0, 169, 154, 0.14);
+    --pane-border: var(--pane-left-color);
+    --pane-header-tint: var(--pane-left-panel-tint);
   }
 
   .ts-sub-panel--right {
     right: 12px;
-    --pane-border: #8a6ad6;
-    --pane-header-tint: rgba(138, 106, 214, 0.12);
+    --pane-border: var(--pane-right-color);
+    --pane-header-tint: var(--pane-right-panel-tint);
   }
 
   .sub-menu {
@@ -720,15 +690,15 @@
     gap: 8px;
     min-width: 180px;
     padding: 10px;
-    background: #ffffff;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: var(--surface-raised);
+    border: 1px solid var(--sub-menu-border);
     border-radius: var(--radius-md);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);
+    box-shadow: inset 0 0 0 1px var(--surface-inset);
   }
 
   .sub-menu.is-layer-disabled {
-    background: rgba(248, 248, 248, 0.98);
-    border-color: rgba(0, 0, 0, 0.1);
+    background: var(--surface-disabled);
+    border-color: var(--surface-outline-soft);
   }
 
   .sub-menu-header {
@@ -748,7 +718,7 @@
     position: absolute;
     inset: 0;
     background-image:
-      linear-gradient(115deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 42%, transparent 42%),
+      var(--sub-menu-header-overlay),
       var(--pattern);
     background-size: auto, var(--pattern-size);
     background-position: center, center;
@@ -767,7 +737,7 @@
     height: 10px;
     border-radius: var(--radius-pill);
     background: var(--c);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 0 0 1px var(--sub-menu-swatch-ring);
     flex: 0 0 auto;
   }
 
@@ -775,7 +745,7 @@
     font-family: var(--font-ui);
     font-size: 12px;
     font-weight: 700;
-    color: rgba(0,0,0,0.72);
+    color: var(--text-secondary);
     line-height: 1.2;
   }
 
@@ -789,19 +759,19 @@
     margin-top: 8px;
     padding: 8px 10px;
     border-radius: var(--radius-xs);
-    background: rgba(0, 0, 0, 0.06);
-    color: rgba(0, 0, 0, 0.68);
+    background: var(--surface-muted);
+    color: var(--text-secondary);
     font-size: 11px;
     font-weight: 700;
     line-height: 1.35;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.38);
+    box-shadow: inset 0 0 0 1px var(--sub-menu-note-inset);
   }
 
   .sub-pill {
     position: relative;
     padding: 9px 18px;
     background: var(--c);
-    color: #ffffff;
+    color: var(--text-on-accent);
     border: none;
     border-radius: var(--radius-xs);
     font-family: var(--font-ui);
@@ -819,8 +789,8 @@
     opacity: 0.7;
     filter: saturate(0.72) brightness(0.96);
     box-shadow:
-      0 0 0 1.5px rgba(0,0,0,0.25),
-      0 1px 4px rgba(0,0,0,0.12);
+      0 0 0 1.5px var(--surface-outline),
+      var(--shadow-sm);
     cursor: pointer;
   }
 
@@ -828,8 +798,8 @@
     opacity: 0.72;
     filter: saturate(0.76) brightness(0.96);
     box-shadow:
-      0 0 0 1.5px rgba(0,0,0,0.25),
-      0 1px 4px rgba(0,0,0,0.12);
+      0 0 0 1.5px var(--surface-outline),
+      var(--shadow-sm);
     cursor: pointer;
   }
 
@@ -844,19 +814,19 @@
     opacity: 0.72;
     filter: saturate(0.72) brightness(1.02);
     box-shadow:
-      0 0 0 2px rgba(255,255,255,0.18) inset,
-      0 4px 10px rgba(0,0,0,0.12);
+      0 0 0 2px var(--pill-disabled-hover-inset) inset,
+      var(--shadow-md);
     transform: translateY(-1px);
   }
 
   .timeslider {
-    background: #ffffff;
-    border: 0.5px solid rgba(0,0,0,0.1);
+    background: var(--surface-raised);
+    border: 0.5px solid var(--panel-border);
     border-radius: var(--radius-md);
     padding: 12px 16px;
     user-select: none;
     font-family: var(--font-ui);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-timeline);
     pointer-events: auto;
   }
 
@@ -896,7 +866,7 @@
     position: absolute;
     inset: 1px;
     border-radius: calc(var(--radius-xs) - 1px);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+    box-shadow: inset 0 1px 0 var(--pill-sheen);
     pointer-events: none;
     z-index: 1;
   }
@@ -905,8 +875,8 @@
     opacity: 0.66;
     filter: saturate(0.72) brightness(0.95);
     box-shadow:
-      0 0 0 2px rgba(0,0,0,0.25),
-      0 2px 8px rgba(0,0,0,0.12);
+      0 0 0 2px var(--surface-outline),
+      var(--shadow-sm);
   }
 
   .source-block.is-disabled:hover,
@@ -914,25 +884,25 @@
     opacity: 0.8;
     filter: saturate(0.84) brightness(1);
     box-shadow:
-      0 0 0 2px rgba(0,0,0,0.25),
-      0 6px 14px rgba(0,0,0,0.12),
-      0 0 0 2px rgba(255,255,255,0.22) inset;
+      0 0 0 2px var(--surface-outline),
+      var(--shadow-md),
+      0 0 0 2px var(--source-disabled-hover-inset) inset;
   }
 
   .source-block.is-disabled .block-label {
-    color: rgba(255,255,255,0.96);
-    text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+    color: var(--text-on-accent);
+    text-shadow: var(--accent-text-shadow);
   }
 
   .source-block.is-disabled .block-date {
-    color: rgba(255,255,255,0.86);
+    color: var(--text-on-accent-muted);
   }
 
   .source-block.is-loading::after {
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%);
+    background: linear-gradient(90deg, transparent 0%, var(--pill-shimmer) 50%, transparent 100%);
     background-size: 200% 100%;
     animation: pill-shimmer 1.3s ease-in-out infinite;
     pointer-events: none;
@@ -947,16 +917,16 @@
   .source-block:hover:not(.is-disabled) {
     filter: brightness(1.09);
     box-shadow:
-      0 8px 18px rgba(0,0,0,0.16),
-      0 0 0 2px rgba(255,255,255,0.28) inset;
+      var(--shadow-floating-ui),
+      0 0 0 2px var(--pill-inset-soft) inset;
   }
 
   .source-block:focus-visible {
-    outline: 2px solid rgba(0, 0, 0, 0.55);
+    outline: 2px solid var(--surface-focus);
     outline-offset: 2px;
     box-shadow:
-      0 8px 18px rgba(0,0,0,0.18),
-      0 0 0 2px rgba(255,255,255,0.35) inset;
+      var(--shadow-floating-ui),
+      0 0 0 2px var(--source-focus-inset) inset;
   }
 
   .source-block.is-current {
@@ -967,16 +937,16 @@
     transform: translateY(-3px) scale(1.06, 1.3);
     transform-origin: bottom center;
     box-shadow:
-      0 -8px 22px rgba(0,0,0,0.24),
-      0 0 0 2px rgba(255,255,255,0.24) inset;
+      var(--shadow-lg),
+      0 0 0 2px var(--pill-inset-active) inset;
   }
 
   .ts-row--below .source-block.is-current {
     transform: translateY(3px) scale(1.06, 1.3);
     transform-origin: top center;
     box-shadow:
-      0 8px 22px rgba(0,0,0,0.24),
-      0 0 0 2px rgba(255,255,255,0.24) inset;
+      var(--shadow-lg),
+      0 0 0 2px var(--pill-inset-active) inset;
   }
 
   .block-label {
@@ -985,7 +955,7 @@
     font-family: var(--font-ui);
     font-size: 12px;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--text-on-accent);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1001,7 +971,7 @@
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 400;
-    color: rgba(255,255,255,0.65);
+    color: var(--text-on-accent-muted);
     white-space: nowrap;
     text-align: center;
     line-height: 1.2;
@@ -1010,7 +980,7 @@
   .ts-axis-line {
     position: relative;
     height: 6px;
-    background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.18));
+    background: var(--timeline-track-bg);
     border-radius: var(--radius-pill);
     z-index: 8;
     overflow: visible;
@@ -1026,21 +996,26 @@
     font-weight: 700;
     color: var(--pane-badge-text);
     background: var(--pane-badge-bg);
-    border: 2px solid color-mix(in srgb, var(--pane-color) 52%, white);
+    border: 2px solid var(--scrubber-badge-border);
     border-radius: 99px;
     padding: 6px 11px;
     white-space: nowrap;
     pointer-events: none;
     z-index: 12;
     box-shadow:
-      0 0 0 2px color-mix(in srgb, var(--pane-color) 14%, transparent),
+      0 0 0 2px var(--scrubber-badge-ring),
       var(--shadow-md);
   }
 
+  .scrubber-label.is-disabled {
+    opacity: 0.42;
+    filter: saturate(0.18);
+  }
+
   .scrubber-label--single {
-    color: rgba(25, 25, 25, 0.86);
-    background: rgba(255, 255, 255, 0.96);
-    border-color: rgba(0, 0, 0, 0.12);
+    color: var(--text-secondary);
+    background: var(--surface-floating);
+    border-color: var(--surface-outline-soft);
     border-radius: var(--radius-xs);
     padding: 3px 8px;
   }
@@ -1070,6 +1045,11 @@
     pointer-events: none;
   }
 
+  .ts-scrubber.is-disabled {
+    opacity: 0.34;
+    filter: saturate(0.18);
+  }
+
   .ts-scrubber--right {
     z-index: 10;
   }
@@ -1079,7 +1059,7 @@
     width: 28px;
     height: 54px;
     border-radius: 14px;
-    background-color: #ffffff;
+    background-color: var(--scrubber-thumb-bg);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='54' viewBox='0 0 28 54'%3E%3Cpath d='M11 27 L7 23 M11 27 L7 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M17 27 L21 23 M17 27 L21 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
@@ -1087,18 +1067,25 @@
     cursor: ew-resize;
     box-shadow:
       0 4px 16px rgba(0, 0, 0, 0.22),
-      0 0 0 4px color-mix(in srgb, var(--pane-color) 18%, transparent),
-      0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+      0 0 0 4px var(--scrubber-thumb-ring),
+      0 0 0 1px var(--surface-inset-strong) inset;
     pointer-events: auto;
     transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+
+  .ts-scrubber.is-disabled::-webkit-slider-thumb {
+    cursor: default;
+    box-shadow:
+      0 4px 10px rgba(0, 0, 0, 0.14),
+      0 0 0 2px var(--surface-inset) inset;
   }
 
   .ts-scrubber::-webkit-slider-thumb:hover {
     transform: scaleY(1.06);
     box-shadow:
       0 6px 22px rgba(0, 0, 0, 0.28),
-      0 0 0 6px color-mix(in srgb, var(--pane-color) 22%, transparent),
-      0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+      0 0 0 6px var(--scrubber-thumb-ring-hover),
+      0 0 0 1px var(--surface-inset-strong) inset;
   }
 
   .ts-scrubber::-moz-range-thumb {
@@ -1106,7 +1093,7 @@
     width: 28px;
     height: 54px;
     border-radius: 14px;
-    background-color: #ffffff;
+    background-color: var(--scrubber-thumb-bg);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='54' viewBox='0 0 28 54'%3E%3Cpath d='M11 27 L7 23 M11 27 L7 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M17 27 L21 23 M17 27 L21 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
@@ -1114,9 +1101,16 @@
     cursor: ew-resize;
     box-shadow:
       0 4px 16px rgba(0, 0, 0, 0.22),
-      0 0 0 4px color-mix(in srgb, var(--pane-color) 18%, transparent),
-      0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+      0 0 0 4px var(--scrubber-thumb-ring),
+      0 0 0 1px var(--surface-inset-strong) inset;
     pointer-events: auto;
+  }
+
+  .ts-scrubber.is-disabled::-moz-range-thumb {
+    cursor: default;
+    box-shadow:
+      0 4px 10px rgba(0, 0, 0, 0.14),
+      0 0 0 2px var(--surface-inset) inset;
   }
 
   .ts-scrubber::-moz-focus-outer {
@@ -1124,7 +1118,7 @@
   }
 
   .ts-scrubber--single {
-    --pane-color: rgba(34, 34, 34, 0.36);
+    --pane-color: var(--surface-outline);
   }
 
   .ts-scrubber::-webkit-slider-runnable-track {
@@ -1150,143 +1144,38 @@
     width: 18px;
     height: 18px;
     border-radius: 5px;
-    background-color: #ffffff;
+    background-color: var(--photo-chip-bg);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Crect x='2.25' y='3' width='13.5' height='12' rx='2' fill='%23d4a84b'/%3E%3Ccircle cx='6.2' cy='7.1' r='1.35' fill='white'/%3E%3Cpath d='M4.2 13l3.1-3.2 2.1 2 2.2-2.5 2.2 3.7H4.2z' fill='white'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
-    border: 1.5px solid rgba(255, 255, 255, 0.96);
+    border: 1.5px solid var(--photo-chip-border);
     padding: 0;
     cursor: pointer;
     z-index: 9;
     pointer-events: auto;
-    box-shadow:
-      0 0 0 2px rgba(212, 168, 75, 0.2),
-      0 2px 8px rgba(86, 54, 8, 0.26);
+    box-shadow: var(--photo-chip-shadow);
     transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
   }
 
   .img-dot:hover {
     transform: translate(-50%, -50%) scale(1.35);
-    box-shadow:
-      0 0 0 3px rgba(212, 168, 75, 0.28),
-      0 4px 12px rgba(86, 54, 8, 0.3);
+    box-shadow: var(--photo-chip-shadow-hover);
   }
 
   .img-dot--multi {
     width: 20px;
     height: 20px;
-    box-shadow:
-      0 0 0 3px rgba(212, 168, 75, 0.34),
-      0 4px 12px rgba(86, 54, 8, 0.28);
+    box-shadow: var(--photo-chip-shadow-multi);
   }
 
   .img-dot--near {
     width: 22px;
     height: 22px;
-    background-color: #ffffff;
+    background-color: var(--photo-chip-bg);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Crect x='2.5' y='3.25' width='17' height='15' rx='2.4' fill='%23f59e0b'/%3E%3Ccircle cx='7.7' cy='8.5' r='1.65' fill='white'/%3E%3Cpath d='M5.2 15.9l4-4.1 2.7 2.5 2.8-3.2 2.8 4.8H5.2z' fill='white'/%3E%3C/svg%3E");
     transform: translate(-50%, -50%) scale(1.18);
-    box-shadow:
-      0 0 0 4px rgba(245, 158, 11, 0.32),
-      0 0 0 8px rgba(245, 158, 11, 0.14),
-      0 6px 16px rgba(124, 72, 1, 0.34);
+    box-shadow: var(--photo-chip-shadow-near);
   }
-
-  .dot-popup {
-    position: fixed;
-    transform: translate(-50%, calc(-100% - 14px));
-    z-index: 60;
-    background: #ffffff;
-    border: 0.5px solid rgba(0,0,0,0.12);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    min-width: 200px;
-    max-width: 280px;
-    box-shadow: var(--shadow-md);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    pointer-events: all;
-  }
-
-  .dot-popup-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .dot-popup-year {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 600;
-    color: #D4A84B;
-  }
-
-  .dot-popup-close {
-    background: none;
-    border: none;
-    padding: 0 2px;
-    font-size: 16px;
-    line-height: 1;
-    color: rgba(0,0,0,0.35);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .dot-popup-close:hover { color: rgba(0,0,0,0.7); }
-
-  .dot-popup-title {
-    font-family: var(--font-ui);
-    font-size: 12px;
-    font-weight: 500;
-    color: #1a1a1a;
-    line-height: 1.4;
-  }
-
-  .dot-popup-location {
-    font-family: var(--font-ui);
-    font-size: 11px;
-    color: rgba(0,0,0,0.45);
-  }
-
-  .dot-popup-nav {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: rgba(0,0,0,0.45);
-  }
-
-  .dot-popup-nav button {
-    background: none;
-    border: 0.5px solid rgba(0,0,0,0.2);
-    border-radius: var(--radius-xs);
-    padding: 1px 6px;
-    font-size: 13px;
-    cursor: pointer;
-    color: rgba(0,0,0,0.5);
-  }
-
-  .dot-popup-nav button:hover { background: rgba(0,0,0,0.05); color: #1a1a1a; }
-
-  .dot-popup-open {
-    margin-top: 2px;
-    padding: 5px 10px;
-    font-family: var(--font-ui);
-    font-size: 11px;
-    font-weight: 500;
-    background: #1a1a1a;
-    color: #ffffff;
-    border: none;
-    border-radius: var(--radius-xs);
-    cursor: pointer;
-    align-self: flex-start;
-    transition: background 0.15s;
-  }
-
-  .dot-popup-open:hover { background: #333333; }
 
   .ts-tick {
     position: absolute;
@@ -1305,19 +1194,19 @@
     width: 1px;
   }
 
-  .ts-tick--decade::before { height: 8px; background: rgba(0,0,0,0.22); }
-  .ts-tick--century::before { height: 18px; background: rgba(0,0,0,0.55); }
+  .ts-tick--decade::before { height: 8px; background: var(--timeline-tick); }
+  .ts-tick--century::before { height: 18px; background: var(--timeline-tick-strong); }
 
   .ts-tick-label {
     font-family: var(--font-mono);
     font-size: 9px;
-    color: rgba(0,0,0,0.38);
+    color: var(--timeline-label);
     margin-top: 2px;
     white-space: nowrap;
   }
 
   .ts-tick--century .ts-tick-label {
-    color: rgba(0,0,0,0.65);
+    color: var(--timeline-label-strong);
     font-weight: 600;
   }
 </style>

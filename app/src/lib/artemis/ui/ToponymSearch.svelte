@@ -185,7 +185,7 @@
     border: 0.5px solid var(--panel-border);
     border-radius: var(--radius-sm);
     background: var(--panel-bg);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-floating-ui);
   }
 
   .toponym-search-input {
@@ -216,7 +216,7 @@
     border: 0.5px solid var(--panel-border);
     border-radius: var(--radius-sm);
     background: var(--panel-bg);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-floating-ui);
   }
 
   .toponym-suggestions { gap: 6px; padding: 8px; }

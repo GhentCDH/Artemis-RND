@@ -1,6 +1,6 @@
 # Artemis-RnD — LLM Context
 
-_Last updated: 2026-03-27 (performance pass + bug fixes: annotation loop yield, WMTS startup re-sync, gereduceerd/vandermaelen z-order)_
+_Last updated: 2026-03-27 (integrated IIIF viewer dock mode, compare-pane mirroring, timeline/photo interaction updates, Firefox/static build hardening)_
 
 ## What this repo is
 
@@ -42,8 +42,8 @@ This repo is the viewer, not the data pipeline.
 | `app/src/lib/artemis/ui/InfoCards.svelte` | Current floating cards for parcel click state and pinned items; no longer used for transient IIIF click results |
 | `app/src/lib/artemis/ui/DebugMenu.svelte` | Internal debug surface for dataset URL override, reload controls, logs, render stats; gated by `FEATURE_FLAGS.debugMenu` in `+page.svelte` |
 | `app/src/lib/artemis/ui/ImageCollectionBubble.svelte` | Anchored popup for image-collection pins with preview + explicit viewer-open action |
-| `app/src/lib/artemis/viewer/IiifViewer.svelte` | IIIF viewer overlay |
-| `app/src/lib/artemis/viewer/manifestPreview.ts` | Shared manifest parsing helper for preview thumbnails and image-service extraction |
+| `app/src/lib/artemis/viewer/IiifViewer.svelte` | Docked/fullscreen IIIF viewer; in current UX primarily used as an integrated pane rather than a fullscreen modal |
+| `app/src/lib/artemis/viewer/manifestPreview.ts` | Shared manifest parsing helper for preview thumbnails, image-service extraction, and manifest metadata fallback |
 
 ## Layer model
 
@@ -97,11 +97,13 @@ For IIIF main layers, visible state is still reconciled in `+page.svelte` throug
 - `loadingLayers` passed from `+page.svelte` adds a shimmer state to era pills during IIIF load/restore work
 - The scrubber is intentionally visually dominant: thicker rail, larger thumb, higher z-index than pills/ticks
 - The axis range is reactive and expands to include loaded Massart years
-- Massart items are grouped by year and rendered as clickable dots on the same timeline
-- Clicking a timeline dot opens a small dot popup with metadata and an `Open in viewer` button
+- Massart items are grouped by year and rendered as clickable photo markers on the same timeline
+- Clicking a timeline photo marker no longer opens a popup; it pans/focuses the map to that image location
 - Dual-pane mode uses fixed viewport-identity colours distinct from dataset colours
 - Left viewport identity color is teal; right viewport identity color is purple
 - Split/swipe scrubber years persist across mode toggles
+- If a compare pane is temporarily occupied by a docked IIIF viewer, that pane's scrubber is greyed out and disabled
+- If a compare pane is occupied by a docked IIIF viewer, that pane's sublayer panel is hidden
 
 ### Events dispatched
 
@@ -109,22 +111,33 @@ For IIIF main layers, visible state is still reconciled in `+page.svelte` throug
 - `sublayerChange: { subId, enabled }`
 - `year-change: { pane, year }`
 - `open-viewer: { title, sourceManifestUrl, imageServiceUrl }`
+- `focus-image: { title, lon, lat }`
 
 ## Dual-pane modes
 
-`+page.svelte` now uses `viewMode: 'single' | 'split' | 'swipe'`.
+`+page.svelte` now uses `viewMode: 'single' | 'split'`.
 
 Current behavior:
 
 - `split`: two half-width panes side by side, each with the same synced location/camera
-- `swipe`: both maps occupy the full stage and the right pane is revealed with a draggable mask
-- the app creates an independent right-side `MapLibre` instance for both dual-pane modes
+- the app creates an independent right-side `MapLibre` instance for split mode
 - left and right panes have independent selected years but synchronized camera state
 - pane-specific IIIF loading uses pane-scoped runner runtime state (`main` vs `right`)
 - the right pane has its own IIIF hover/click interaction path and its own anchored preview bubble positioning
 - left/right year state and right-pane desired visibility state persist across dual-pane toggles
 - when dual-pane mode is torn down, `runner.ts` right-pane runtime state must be reset; otherwise stale parked/active group bookkeeping can suppress IIIF reload on the next enable
 - search remains global rather than pane-scoped
+
+### Integrated IIIF viewer behavior
+
+- `Open in viewer` no longer defaults to a fullscreen overlay; it opens a docked IIIF viewer inside one map pane
+- In single mode, opening a viewer temporarily creates a split layout with the map on the left and the IIIF viewer on the right
+- In compare mode, opening from one pane docks the viewer in the opposite pane so the clicked map stays visible
+- In compare mode, the docked viewer layout mirrors with the pane:
+  - viewer on right: image left, metadata/history right
+  - viewer on left: metadata/history left, image right
+- If compare mode is turned off while the viewer is open, the viewer is rehomed to the right pane
+- Viewer history selections reopen inside the same currently occupied viewer pane; they do not flip sides
 
 ## Data flow
 
@@ -194,7 +207,7 @@ Massart items are not georeferenced Allmaps layers. They are used for timeline d
 - Primitive parcels use rendered-feature hover/click
 - Clicking IIIF maps no longer opens transient `InfoCards`; it opens `ImageCollectionBubble.svelte` with manifest preview content
 - Clicking image-collection map pins also opens `ImageCollectionBubble.svelte`
-- The image-collection bubble is anchored to map coordinates, follows map movement while the source item remains on screen, flips below the anchor near the top edge, and closes if the source item moves offscreen
+- The image-collection bubble is anchored to map coordinates, flips below the anchor near the top edge, and closes immediately when the user pans either map
 - In compare mode, bubble positioning is pane-aware; right-pane interactions project against the right map canvas rather than the left one
 - `InfoCards.svelte` still supports parcel click state plus pinned items and focus/fly-to actions
 
@@ -219,11 +232,53 @@ Current flow:
 - map pin click in `+page.svelte` finds the `MassartItem`, opens `ImageCollectionBubble.svelte`, and stores the pin lon/lat plus source pane
 - IIIF map click in `+page.svelte` now builds a `PreviewBubbleItem` from the clicked manifest and opens the same bubble flow
 - `ImageCollectionBubble.svelte` fetches preview metadata through `manifestPreview.ts`
-- the bubble shows title, year/location chips when available, preview image, and an explicit `Open in viewer` button
+- the bubble shows title, year/location chips when available, capped previews, and an explicit `Open in viewer` button
+- if a click hits multiple IIIF manifests at the same map location, the bubble renders them side by side rather than forcing arrow navigation
+- bubble sizing is asymmetric:
+  - single-item bubbles can hug the preview width more tightly
+  - multi-item bubbles use a stable multi-column card layout
 - `manifestPreview.ts` is the shared helper for:
   - extracting image service URLs from IIIF v2/v3 manifests
   - deriving preview thumbnails when the manifest includes `thumbnail`
   - falling back to `{imageService}/full/400,/0/default.jpg`
+  - deriving fallback metadata for sparse IIIF v2 manifests (for example Gereduceerd Kadaster)
+
+## Integrated IIIF viewer UI
+
+Current docked-viewer design rules:
+
+- no inline horizontal top bar in docked mode; the close button lives in the metadata column
+- no duplicate title above the image; the manifest title is only shown in the metadata column
+- the metadata column contains:
+  - close button
+  - recent manifest history
+  - a scrollable metadata region
+- recent manifest history is capped at 10 entries
+- the metadata region scrolls independently so history stays visible
+- internal divider lines were intentionally removed for a more minimal look
+- separation between image area and metadata column is done with a soft vertical shadow rather than hard rules
+- the docked viewer sits below the search bar and timeline chrome
+- the search UI, timeline, and docked viewer all use intentionally stronger shadows to clarify plane separation
+
+## Browser/build hardening
+
+- Firefox rendering was normalized with:
+  - `text-size-adjust` resets
+  - global `box-sizing: border-box`
+  - additional `range` input normalization for Firefox
+- the static build was cleaned up:
+  - stale `codeSplitting` warning removed
+  - heavy vendor code manually chunked in `vite.config.ts`
+  - chunk warning thresholds adjusted to match intentional vendor chunking
+
+## Recent implementation notes worth preserving
+
+- `runner.ts` no longer yields inside the annotation registration loop; that anti-freeze experiment caused delayed/missing IIIF map visibility
+- the compare divider is intentionally subtle but visible; do not remove the seam entirely
+- Massart/photo markers use image icons both on the timeline and on the map
+- active map pins are the only clickable Massart pins on the map
+- sublayer state is per-pane in compare mode, while the main map-pill enabled state stays shared
+- the default slider year is `1774`
 
 ## External services
 

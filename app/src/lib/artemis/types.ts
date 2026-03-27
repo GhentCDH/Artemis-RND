@@ -86,6 +86,8 @@ export type IiifMapInfo = {
 export type PreviewBubbleItem = {
   title: string;
   manifestUrl: string;
+  imageServiceUrl?: string;
+  alternatives?: PreviewBubbleItem[];
   year?: string;
   location?: string;
   kicker?: string;

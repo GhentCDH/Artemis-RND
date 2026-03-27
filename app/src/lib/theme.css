@@ -18,6 +18,7 @@
 
   /* --- Text ------------------------------------------------ */
   --text-primary:   #1a1a1a;
+  --text-secondary: #303030;
   --text-muted:     rgba(0, 0, 0, 0.42);
   --text-muted-log: #666;
   --text-ok:        #2a7a2a;
@@ -73,11 +74,254 @@
   --shadow-viewer:       0 24px 80px rgba(0, 0, 0, 0.35);
   --shadow-card:         0 12px 30px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
 
+  /* --- Shared chrome -------------------------------------- */
+  --surface-floating:     rgba(255, 255, 255, 0.96);
+  --surface-raised:       #ffffff;
+  --surface-disabled:     rgba(248, 248, 248, 0.98);
+  --surface-muted:        rgba(0, 0, 0, 0.06);
+  --surface-outline:      rgba(0, 0, 0, 0.25);
+  --surface-outline-soft: rgba(0, 0, 0, 0.12);
+  --surface-focus:        rgba(0, 0, 0, 0.55);
+  --surface-inset:        rgba(255, 255, 255, 0.5);
+  --surface-inset-strong: rgba(255, 255, 255, 0.8);
+  --surface-highlight:    rgba(255, 255, 255, 0.18);
+  --shadow-floating-ui:   0 24px 44px rgba(0, 0, 0, 0.22), 0 8px 18px rgba(0, 0, 0, 0.10);
+  --shadow-timeline:      0 28px 48px rgba(0, 0, 0, 0.22), 0 10px 20px rgba(0, 0, 0, 0.10);
+  --text-on-accent:       #ffffff;
+  --text-on-accent-muted: rgba(255, 255, 255, 0.72);
+  --accent-text-shadow:   0 1px 1px rgba(0, 0, 0, 0.2);
+  --pill-sheen:           rgba(255, 255, 255, 0.18);
+  --pill-shimmer:         rgba(255, 255, 255, 0.45);
+  --pill-inset-soft:      rgba(255, 255, 255, 0.28);
+  --pill-inset-strong:    rgba(255, 255, 255, 0.35);
+  --pill-inset-active:    rgba(255, 255, 255, 0.24);
+  --scrubber-thumb-bg:    #ffffff;
+  --photo-chip-bg:        #ffffff;
+  --photo-chip-border:    rgba(255, 255, 255, 0.96);
+  --photo-chip-shadow:    0 0 0 2px rgba(212, 168, 75, 0.2), 0 2px 8px rgba(86, 54, 8, 0.26);
+  --photo-chip-shadow-hover: 0 0 0 3px rgba(212, 168, 75, 0.28), 0 4px 12px rgba(86, 54, 8, 0.3);
+  --photo-chip-shadow-multi: 0 0 0 3px rgba(212, 168, 75, 0.34), 0 4px 12px rgba(86, 54, 8, 0.28);
+  --photo-chip-shadow-near:  0 0 0 4px rgba(245, 158, 11, 0.32), 0 0 0 8px rgba(245, 158, 11, 0.14), 0 6px 16px rgba(124, 72, 1, 0.34);
+  --sub-menu-border:          color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --sub-menu-header-overlay:  linear-gradient(115deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 42%, transparent 42%);
+  --sub-menu-swatch-ring:     color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --sub-menu-note-inset:      color-mix(in srgb, var(--surface-raised) 38%, transparent);
+  --pill-disabled-hover-inset: color-mix(in srgb, var(--surface-raised) 18%, transparent);
+  --source-disabled-hover-inset: color-mix(in srgb, var(--surface-raised) 22%, transparent);
+  --source-focus-inset:       rgba(255, 255, 255, 0.35);
+  --scrubber-badge-border:    color-mix(in srgb, var(--pane-color) 52%, white);
+  --scrubber-badge-ring:      color-mix(in srgb, var(--pane-color) 14%, transparent);
+  --scrubber-thumb-ring:      color-mix(in srgb, var(--pane-color) 18%, transparent);
+  --scrubber-thumb-ring-hover: color-mix(in srgb, var(--pane-color) 22%, transparent);
+  --viewer-chip-border:       color-mix(in srgb, var(--text-primary) 12%, transparent);
+  --viewer-chip-bg:           color-mix(in srgb, var(--viewer-topbar-bg) 70%, white);
+  --viewer-chip-bg-hover:     color-mix(in srgb, var(--viewer-topbar-bg) 88%, white);
+  --viewer-chip-border-hover: color-mix(in srgb, var(--text-primary) 22%, transparent);
+  --viewer-action-bg:         color-mix(in srgb, var(--viewer-topbar-bg) 78%, white);
+  --viewer-action-bg-hover:   color-mix(in srgb, var(--viewer-topbar-bg) 92%, white);
+  --startup-overlay-bg:       linear-gradient(180deg, rgba(245, 242, 235, 0.96), rgba(255, 255, 255, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 36%);
+  --startup-card-border:      rgba(0,0,0,0.1);
+  --startup-card-bg:          rgba(255,255,255,0.95);
+  --startup-loader-fill:      linear-gradient(180deg, #d4a84b, #c07b28);
+  --startup-title-color:      #171717;
+  --bubble-bg:                rgba(255, 255, 255, 0.98);
+  --bubble-border:            rgba(0, 0, 0, 0.12);
+  --bubble-card-bg:           rgba(255,255,255,0.82);
+  --bubble-card-border:       rgba(0,0,0,0.08);
+  --bubble-close:             rgba(0,0,0,0.4);
+  --bubble-kicker:            #9a7b2f;
+  --bubble-title:             var(--text-primary);
+  --bubble-meta:              rgba(0,0,0,0.6);
+  --bubble-meta-strong:       rgba(0,0,0,0.56);
+  --bubble-meta-chip-bg:      rgba(0,0,0,0.05);
+  --bubble-preview-bg:        #f2efe9;
+  --bubble-preview-border:    rgba(0,0,0,0.08);
+  --bubble-status:            rgba(0,0,0,0.55);
+  --bubble-status-error:      rgba(132, 43, 43, 0.82);
+  --bubble-action-bg:         #1f1f1f;
+  --bubble-action-bg-hover:   #333333;
+  --bubble-action-text:       #ffffff;
+
+  /* --- Semantic layer / pane colors ----------------------- */
+  --pane-left-color:          #00a99a;
+  --pane-left-badge-bg:       #bff5ee;
+  --pane-left-badge-text:     #005f55;
+  --pane-left-panel-tint:     rgba(0, 169, 154, 0.14);
+  --pane-right-color:         #8a6ad6;
+  --pane-right-badge-bg:      #eee6fb;
+  --pane-right-badge-text:    #5c4697;
+  --pane-right-panel-tint:    rgba(138, 106, 214, 0.12);
+  --layer-hand-color:         #888780;
+  --layer-ferraris-color:     #6aaa5a;
+  --layer-primitief-color:    #c97a2e;
+  --layer-vander-color:       #c45000;
+  --layer-gereduceerd-color:  #a0b020;
+
+  /* --- Timeline / chrome controls ------------------------- */
+  --toolbar-button-bg:          rgba(255, 255, 255, 0.94);
+  --toolbar-button-hover-bg:    #ffffff;
+  --toolbar-button-active-bg:   var(--text-primary);
+  --toolbar-button-active-text: var(--surface-raised);
+  --toolbar-button-active-border: var(--text-primary);
+  --timeline-track-bg:          linear-gradient(90deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.18));
+  --timeline-tick:              rgba(0, 0, 0, 0.22);
+  --timeline-tick-strong:       rgba(0, 0, 0, 0.55);
+  --timeline-label:             rgba(0, 0, 0, 0.38);
+  --timeline-label-strong:      rgba(0, 0, 0, 0.65);
+
+  /* --- Split view chrome ---------------------------------- */
+  --split-pane-edge-shadow:     rgba(0, 0, 0, 0.16);
+  --split-divider-shine:        rgba(255, 255, 255, 0.78);
+  --split-divider-shine-edge:   rgba(255, 255, 255, 0.14);
+  --split-divider-core:         rgba(0, 0, 0, 0.32);
+  --split-divider-core-edge:    rgba(0, 0, 0, 0.12);
+  --split-divider-outline:      rgba(255, 255, 255, 0.32);
+  --split-divider-shadow:       rgba(0, 0, 0, 0.18);
+
   /* --- IIIF viewer overlay --------------------------------- */
   --viewer-backdrop:    rgba(0, 0, 0, 0.45);
   --viewer-bg:          var(--panel-bg);
   --viewer-topbar-bg:   var(--card-bg);
   --viewer-canvas-bg:   var(--panel-bg);
+  --viewer-meta-bg:     color-mix(in srgb, var(--viewer-bg) 92%, white);
+  --viewer-body-bg:     linear-gradient(180deg, rgba(248, 246, 241, 0.92), rgba(241, 238, 231, 0.92));
+  --viewer-inline-shadow: 0 0 0 1px rgba(0, 0, 0, 0.10), 0 30px 64px rgba(0, 0, 0, 0.26), 0 10px 26px rgba(0, 0, 0, 0.14);
+  --viewer-side-shadow: 22px 0 30px -26px rgba(0, 0, 0, 0.24);
+  --viewer-side-shadow-mirrored: -22px 0 30px -26px rgba(0, 0, 0, 0.24);
+}
+
+html[data-theme='dark'] {
+  --panel-bg:      #0f0f10;
+  --panel-border:  rgba(255, 255, 255, 0.14);
+  --card-bg:       #171719;
+  --card-border:   rgba(255, 255, 255, 0.12);
+  --sublayer-bg:   rgba(255, 255, 255, 0.08);
+  --overlay-bg:    rgba(18, 18, 20, 0.94);
+  --backdrop-color: rgba(0, 0, 0, 0.42);
+
+  --text-primary:   #f5f5f5;
+  --text-secondary: rgba(255, 255, 255, 0.88);
+  --text-muted:     rgba(255, 255, 255, 0.56);
+  --text-muted-log: #b5b5b5;
+  --text-ok:        #8bd88b;
+  --text-error:     #ff8c8c;
+  --text-warn:      #ffd36d;
+
+  --input-bg:      #18181a;
+  --result-bg:     #18181a;
+  --result-hover:  #222225;
+
+  --toggle-off:    rgba(255, 255, 255, 0.16);
+  --toggle-thumb:  #0f0f10;
+
+  --border-light:  rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-ui:     rgba(255, 255, 255, 0.2);
+
+  --problem-border:      rgba(255, 140, 140, 0.28);
+  --problem-bg:          rgba(70, 24, 24, 0.58);
+  --problem-error-color: #ffb1b1;
+
+  --progress-bg:   rgba(255, 255, 255, 0.14);
+  --spinner-color: #a8c7ff;
+
+  --shadow-sm:           0 1px 3px rgba(0, 0, 0, 0.42);
+  --shadow-md:           0 4px 20px rgba(0, 0, 0, 0.34), 0 1px 4px rgba(0, 0, 0, 0.22);
+  --shadow-lg:           0 6px 24px rgba(0, 0, 0, 0.38);
+  --shadow-debug:        0 3px 14px rgba(0, 0, 0, 0.34);
+  --shadow-modal:        0 10px 30px rgba(0, 0, 0, 0.42);
+  --shadow-panel-right:  -4px 0 20px rgba(0, 0, 0, 0.3);
+  --shadow-viewer:       0 24px 80px rgba(0, 0, 0, 0.5);
+  --shadow-card:         0 12px 30px rgba(0, 0, 0, 0.34), 0 2px 8px rgba(0, 0, 0, 0.2);
+
+  --surface-floating:     rgba(10, 10, 11, 0.96);
+  --surface-raised:       #171719;
+  --surface-disabled:     rgba(28, 28, 30, 0.98);
+  --surface-muted:        rgba(255, 255, 255, 0.08);
+  --surface-outline:      rgba(255, 255, 255, 0.24);
+  --surface-outline-soft: rgba(255, 255, 255, 0.14);
+  --surface-focus:        rgba(255, 255, 255, 0.58);
+  --surface-inset:        rgba(255, 255, 255, 0.08);
+  --surface-inset-strong: rgba(255, 255, 255, 0.18);
+  --surface-highlight:    rgba(255, 255, 255, 0.1);
+  --shadow-floating-ui:   0 24px 44px rgba(0, 0, 0, 0.42), 0 8px 18px rgba(0, 0, 0, 0.24);
+  --shadow-timeline:      0 28px 48px rgba(0, 0, 0, 0.42), 0 10px 20px rgba(0, 0, 0, 0.24);
+  --text-on-accent:       #ffffff;
+  --text-on-accent-muted: rgba(255, 255, 255, 0.74);
+  --accent-text-shadow:   0 1px 1px rgba(0, 0, 0, 0.32);
+  --pill-sheen:           rgba(255, 255, 255, 0.08);
+  --pill-shimmer:         rgba(255, 255, 255, 0.22);
+  --pill-inset-soft:      rgba(255, 255, 255, 0.14);
+  --pill-inset-strong:    rgba(255, 255, 255, 0.2);
+  --pill-inset-active:    rgba(255, 255, 255, 0.14);
+  --scrubber-thumb-bg:    #121214;
+  --photo-chip-bg:        #121214;
+  --photo-chip-border:    rgba(255, 255, 255, 0.22);
+  --photo-chip-shadow:    0 0 0 2px rgba(212, 168, 75, 0.24), 0 2px 8px rgba(0, 0, 0, 0.34);
+  --photo-chip-shadow-hover: 0 0 0 3px rgba(212, 168, 75, 0.32), 0 4px 12px rgba(0, 0, 0, 0.38);
+  --photo-chip-shadow-multi: 0 0 0 3px rgba(212, 168, 75, 0.38), 0 4px 12px rgba(0, 0, 0, 0.36);
+  --photo-chip-shadow-near:  0 0 0 4px rgba(245, 158, 11, 0.34), 0 0 0 8px rgba(245, 158, 11, 0.12), 0 6px 16px rgba(0, 0, 0, 0.4);
+  --sub-menu-border:          color-mix(in srgb, var(--text-primary) 12%, transparent);
+  --sub-menu-header-overlay:  linear-gradient(115deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.03) 42%, transparent 42%);
+  --sub-menu-swatch-ring:     color-mix(in srgb, var(--text-primary) 14%, transparent);
+  --sub-menu-note-inset:      color-mix(in srgb, var(--surface-raised) 18%, transparent);
+  --pill-disabled-hover-inset: color-mix(in srgb, var(--surface-raised) 10%, transparent);
+  --source-disabled-hover-inset: color-mix(in srgb, var(--surface-raised) 14%, transparent);
+  --source-focus-inset:       rgba(255, 255, 255, 0.18);
+  --viewer-chip-border:       color-mix(in srgb, var(--text-primary) 16%, transparent);
+  --viewer-chip-bg:           color-mix(in srgb, var(--viewer-topbar-bg) 92%, black);
+  --viewer-chip-bg-hover:     color-mix(in srgb, var(--viewer-topbar-bg) 82%, white);
+  --viewer-chip-border-hover: color-mix(in srgb, var(--text-primary) 28%, transparent);
+  --viewer-action-bg:         color-mix(in srgb, var(--viewer-topbar-bg) 88%, black);
+  --viewer-action-bg-hover:   color-mix(in srgb, var(--viewer-topbar-bg) 80%, white);
+  --startup-overlay-bg:       linear-gradient(180deg, rgba(18, 18, 20, 0.96), rgba(10, 10, 12, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.12), transparent 36%);
+  --startup-card-border:      rgba(255,255,255,0.12);
+  --startup-card-bg:          rgba(18,18,20,0.95);
+  --startup-loader-fill:      linear-gradient(180deg, #e0b55f, #c68a39);
+  --startup-title-color:      #f5f5f5;
+  --bubble-bg:                rgba(18, 18, 20, 0.98);
+  --bubble-border:            rgba(255, 255, 255, 0.14);
+  --bubble-card-bg:           rgba(26,26,28,0.9);
+  --bubble-card-border:       rgba(255,255,255,0.1);
+  --bubble-close:             rgba(255,255,255,0.56);
+  --bubble-kicker:            #d4b06a;
+  --bubble-title:             var(--text-primary);
+  --bubble-meta:              rgba(255,255,255,0.64);
+  --bubble-meta-strong:       rgba(255,255,255,0.56);
+  --bubble-meta-chip-bg:      rgba(255,255,255,0.08);
+  --bubble-preview-bg:        #141416;
+  --bubble-preview-border:    rgba(255,255,255,0.1);
+  --bubble-status:            rgba(255,255,255,0.56);
+  --bubble-status-error:      #ff9d9d;
+  --bubble-action-bg:         #f5f5f5;
+  --bubble-action-bg-hover:   #ffffff;
+  --bubble-action-text:       #111214;
+
+  --toolbar-button-bg:           rgba(14, 14, 15, 0.94);
+  --toolbar-button-hover-bg:     #1a1a1c;
+  --toolbar-button-active-bg:    #ffffff;
+  --toolbar-button-active-text:  #0f0f10;
+  --toolbar-button-active-border: #ffffff;
+  --timeline-track-bg:           linear-gradient(90deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.22));
+  --timeline-tick:               rgba(255, 255, 255, 0.28);
+  --timeline-tick-strong:        rgba(255, 255, 255, 0.56);
+  --timeline-label:              rgba(255, 255, 255, 0.44);
+  --timeline-label-strong:       rgba(255, 255, 255, 0.74);
+
+  --split-pane-edge-shadow:      rgba(255, 255, 255, 0.12);
+  --split-divider-shine:         rgba(255, 255, 255, 0.88);
+  --split-divider-shine-edge:    rgba(255, 255, 255, 0.22);
+  --split-divider-core:          rgba(255, 255, 255, 0.18);
+  --split-divider-core-edge:     rgba(255, 255, 255, 0.08);
+  --split-divider-outline:       rgba(255, 255, 255, 0.22);
+  --split-divider-shadow:        rgba(0, 0, 0, 0.28);
+
+  --viewer-backdrop:             rgba(0, 0, 0, 0.6);
+  --viewer-meta-bg:              color-mix(in srgb, var(--viewer-bg) 96%, black);
+  --viewer-body-bg:              linear-gradient(180deg, rgba(22, 22, 24, 0.95), rgba(12, 12, 14, 0.95));
+  --viewer-inline-shadow:        0 0 0 1px rgba(255, 255, 255, 0.08), 0 30px 64px rgba(0, 0, 0, 0.42), 0 10px 26px rgba(0, 0, 0, 0.26);
+  --viewer-side-shadow:          22px 0 30px -26px rgba(0, 0, 0, 0.42);
+  --viewer-side-shadow-mirrored: -22px 0 30px -26px rgba(0, 0, 0, 0.42);
 }
 
 html {
@@ -85,6 +329,10 @@ html {
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 *,
@@ -96,4 +344,5 @@ html {
 body {
   min-height: 100%;
   font-synthesis: none;
+  color: var(--text-primary);
 }
