@@ -64,9 +64,11 @@
   // ─── Config ────────────────────────────────────────────────────────────────
 
   const DEFAULT_BASE_URL = 'https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/master/build';
-  const FEATURE_FLAGS: { startupPreloadScreen: boolean } = {
+  const FEATURE_FLAGS: { startupPreloadScreen: boolean; debugMenu: boolean } = {
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
+    // Internal-only debug surface. Flip to true when needed locally.
+    debugMenu: false,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 
@@ -1393,15 +1395,17 @@
     {/if}
 
 
-    <DebugMenu
-      bind:datasetBaseUrl
-      {indexLoading}
-      {indexError}
-      {logs}
-      {layerRenderStats}
-      {layerProgress}
-      on:reload={() => reloadIndex()}
-    />
+    {#if FEATURE_FLAGS.debugMenu}
+      <DebugMenu
+        bind:datasetBaseUrl
+        {indexLoading}
+        {indexError}
+        {logs}
+        {layerRenderStats}
+        {layerProgress}
+        on:reload={() => reloadIndex()}
+      />
+    {/if}
 
     <div class="timeslider-wrap">
       <div class="timeslider-toolbar">
@@ -1529,24 +1533,24 @@
   }
 
   .map-stage.is-split .map-pane--left {
-    box-shadow: inset 0 0 0 3px #0a9688;
+    box-shadow: inset 0 0 0 3px #00897b;
   }
 
   .map-stage.is-split .map-pane--right {
-    box-shadow: inset 0 0 0 3px #c2426e;
+    box-shadow: inset 0 0 0 3px #7c3aed;
   }
 
   .map-stage.is-swipe .map-pane--left {
     position: absolute;
     inset: 0;
-    box-shadow: inset 0 0 0 3px #0a9688;
+    box-shadow: inset 0 0 0 3px #00897b;
   }
 
   .map-stage.is-swipe .map-pane--right {
     position: absolute;
     inset: 0;
     z-index: 2;
-    box-shadow: inset 0 0 0 3px #c2426e;
+    box-shadow: inset 0 0 0 3px #7c3aed;
     clip-path: inset(0 0 0 var(--divider-position));
   }
 
@@ -1603,7 +1607,7 @@
     height: 30px;
     border-radius: 999px;
     background:
-      linear-gradient(180deg, #0a9688 0%, #0a9688 48%, #c2426e 52%, #c2426e 100%);
+      linear-gradient(180deg, #00897b 0%, #00897b 48%, #7c3aed 52%, #7c3aed 100%);
   }
 
   .swipe-handle:focus-visible {

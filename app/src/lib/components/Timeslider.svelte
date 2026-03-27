@@ -16,17 +16,17 @@
   const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
     left: {
       label: 'Left',
-      color: '#0a9688',
-      badgeBg: '#dff5f1',
-      badgeText: '#075c53',
-      panelTint: 'rgba(10, 150, 136, 0.08)',
+      color: '#00897b',
+      badgeBg: '#c8f0ea',
+      badgeText: '#00584f',
+      panelTint: 'rgba(0, 137, 123, 0.12)',
     },
     right: {
       label: 'Right',
-      color: '#c2426e',
-      badgeBg: '#faeaf0',
-      badgeText: '#8a2448',
-      panelTint: 'rgba(194, 66, 110, 0.06)',
+      color: '#7c3aed',
+      badgeBg: '#e8dcff',
+      badgeText: '#5521b5',
+      panelTint: 'rgba(124, 58, 237, 0.12)',
     },
   };
 
@@ -657,14 +657,14 @@
 
   .ts-sub-panel--left {
     left: 12px;
-    --pane-border: #0a9688;
-    --pane-header-tint: rgba(10, 150, 136, 0.08);
+    --pane-border: #00897b;
+    --pane-header-tint: rgba(0, 137, 123, 0.12);
   }
 
   .ts-sub-panel--right {
     right: 12px;
-    --pane-border: #c2426e;
-    --pane-header-tint: rgba(194, 66, 110, 0.06);
+    --pane-border: #7c3aed;
+    --pane-header-tint: rgba(124, 58, 237, 0.12);
   }
 
   .sub-menu {
