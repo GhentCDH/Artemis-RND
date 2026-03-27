@@ -48,7 +48,7 @@
   // ─── Map ───────────────────────────────────────────────────────────────────
 
   type PaneId = 'left' | 'right';
-  type ViewMode = 'single' | 'compare' | 'swipe';
+  type ViewMode = 'single' | 'split' | 'swipe';
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
   let mapStageEl: HTMLElement;
@@ -130,8 +130,8 @@
     });
   }
 
-  function toggleCompareMode() {
-    setViewMode(viewMode === 'compare' ? 'single' : 'compare');
+  function toggleSplitMode() {
+    setViewMode(viewMode === 'split' ? 'single' : 'split');
   }
 
   function toggleSwipeMode() {
@@ -206,7 +206,7 @@
   let initialWarmupTotal = 0;
   let initialWarmupLabel = 'Preparing IIIF layers';
   $: dualPaneEnabled = viewMode !== 'single';
-  $: isCompareLayout = viewMode === 'compare';
+  $: isSplitLayout = viewMode === 'split';
   $: isSwipeLayout = viewMode === 'swipe';
 
   // ─── Layer helpers ─────────────────────────────────────────────────────────
@@ -1022,8 +1022,6 @@
     swipePosition = Math.max(0, Math.min(100, pct));
   }
 
-  $: visibleDividerPosition = isCompareLayout ? 50 : swipePosition;
-
   function onSwipeHandlePointerDown(event: PointerEvent) {
     if (!isSwipeLayout) return;
     swipeDragging = true;
@@ -1326,32 +1324,31 @@
   <main class="map-shell">
     <div
       class="map-stage"
-      class:is-compare={isCompareLayout}
+      class:is-split={isSplitLayout}
       class:is-swipe={isSwipeLayout}
       class:is-dual-pane={dualPaneEnabled}
       class:is-swipe-dragging={swipeDragging}
-      style="--divider-position:{visibleDividerPosition}%"
+      style="--divider-position:{swipePosition}%"
       bind:this={mapStageEl}
     >
       <div class="map-pane map-pane--left">
         <div class="map-canvas" bind:this={mapDiv}></div>
       </div>
       {#if dualPaneEnabled}
-        <div class="map-pane map-pane--right" class:is-swipe-pane={isSwipeLayout}>
+        <div class="map-pane map-pane--right">
           <div class="map-canvas" bind:this={rightMapDiv}></div>
         </div>
       {/if}
-      {#if dualPaneEnabled}
+      {#if isSwipeLayout}
         <div class="swipe-divider" style="left:var(--divider-position)">
           <button
             class="swipe-handle"
-            class:is-static={!isSwipeLayout}
             type="button"
             role="slider"
             aria-label="Adjust swipe divider"
             aria-valuemin="0"
             aria-valuemax="100"
-            aria-valuenow={Math.round(visibleDividerPosition)}
+            aria-valuenow={Math.round(swipePosition)}
             on:pointerdown={onSwipeHandlePointerDown}
             on:keydown={onSwipeHandleKeyDown}
           >
@@ -1410,11 +1407,11 @@
       <div class="timeslider-toolbar">
         <button
           class="compare-toggle"
-          class:is-active={isCompareLayout}
+          class:is-active={isSplitLayout}
           type="button"
-          aria-pressed={isCompareLayout}
-          on:click={toggleCompareMode}
-        >{isCompareLayout ? 'Exit Compare' : 'Compare Views'}</button>
+          aria-pressed={isSplitLayout}
+          on:click={toggleSplitMode}
+        >{isSplitLayout ? 'Exit Split' : 'Split Views'}</button>
         <button
           class="compare-toggle compare-toggle--swipe"
           class:is-active={isSwipeLayout}
@@ -1504,6 +1501,12 @@
     position: relative;
   }
 
+  .map-stage.is-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0;
+  }
+
   .map-pane {
     position: relative;
     min-width: 0;
@@ -1512,33 +1515,42 @@
     overflow: hidden;
   }
 
-  .map-pane--left {
-    box-shadow:
-      inset 0 0 0 4px rgba(31, 111, 235, 0.78),
-      inset -2px 0 0 rgba(0, 0, 0, 0.28);
-  }
-
+  .map-pane--left,
   .map-pane--right {
-    box-shadow:
-      inset 0 0 0 4px rgba(217, 119, 6, 0.78),
-      inset 2px 0 0 rgba(0, 0, 0, 0.28);
-  }
-
-  .map-stage.is-dual-pane .map-pane--left {
-    position: absolute;
-    inset: 0;
     box-shadow: none;
   }
 
-  .map-stage.is-dual-pane .map-pane--right {
+  .map-stage.is-split .map-pane--left,
+  .map-stage.is-split .map-pane--right {
+    position: relative;
+    inset: auto;
+    height: 100%;
+    clip-path: none;
+  }
+
+  .map-stage.is-split .map-pane--left {
+    box-shadow: inset 0 0 0 3px #0e8aaa;
+  }
+
+  .map-stage.is-split .map-pane--right {
+    box-shadow: inset 0 0 0 3px #c2426e;
+  }
+
+  .map-stage.is-swipe .map-pane--left {
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 0 0 3px #0e8aaa;
+  }
+
+  .map-stage.is-swipe .map-pane--right {
     position: absolute;
     inset: 0;
     z-index: 2;
-    box-shadow: none;
+    box-shadow: inset 0 0 0 3px #c2426e;
     clip-path: inset(0 0 0 var(--divider-position));
   }
 
-  .map-stage.is-dual-pane.is-swipe-dragging {
+  .map-stage.is-swipe.is-swipe-dragging {
     user-select: none;
   }
 
@@ -1586,20 +1598,16 @@
     pointer-events: auto;
   }
 
-  .swipe-handle.is-static {
-    cursor: default;
-  }
-
   .swipe-handle span {
     width: 6px;
     height: 30px;
     border-radius: 999px;
     background:
-      linear-gradient(180deg, rgba(31, 111, 235, 0.95), rgba(217, 119, 6, 0.95));
+      linear-gradient(180deg, #0e8aaa 0%, #0e8aaa 48%, #c2426e 52%, #c2426e 100%);
   }
 
   .swipe-handle:focus-visible {
-    outline: 2px solid #1f6feb;
+    outline: 2px solid rgba(0, 0, 0, 0.48);
     outline-offset: 2px;
   }
 
@@ -1710,14 +1718,14 @@
   }
 
   .compare-toggle.is-active {
-    background: #1f6feb;
-    border-color: #1f6feb;
+    background: #171717;
+    border-color: #171717;
     color: #ffffff;
   }
 
   .compare-toggle--swipe.is-active {
-    background: #d97706;
-    border-color: #d97706;
+    background: #171717;
+    border-color: #171717;
   }
 
 </style>

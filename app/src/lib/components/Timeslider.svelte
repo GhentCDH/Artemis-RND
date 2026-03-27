@@ -13,9 +13,21 @@
   export let leftYear: number | undefined = undefined;
   export let rightYear: number | undefined = undefined;
 
-  const PANE_META: Record<PaneId, { label: string; color: string }> = {
-    left: { label: 'Left', color: '#1F6FEB' },
-    right: { label: 'Right', color: '#D97706' },
+  const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
+    left: {
+      label: 'Left',
+      color: '#0e8aaa',
+      badgeBg: '#e0f4f9',
+      badgeText: '#0a5f78',
+      panelTint: 'rgba(14, 138, 170, 0.06)',
+    },
+    right: {
+      label: 'Right',
+      color: '#c2426e',
+      badgeBg: '#faeaf0',
+      badgeText: '#8a2448',
+      panelTint: 'rgba(194, 66, 110, 0.06)',
+    },
   };
 
   const dispatch = createEventDispatcher<{
@@ -30,7 +42,7 @@
   const SOURCES = [
     {
       key: 'hand', mainId: 'handdrawn', label: 'Hand drawn',
-      start: 1700, end: 1715, repr: 1707, color: '#8B7EC8', row: 1,
+      start: 1700, end: 1715, repr: 1707, color: '#888780', row: 1,
       sublayers: [
         { id: 'iiif', subId: 'handdrawn-iiif', label: 'IIIF sheets', defaultOn: true },
         { id: 'parcels', subId: 'handdrawn-parcels', label: 'Parcels', defaultOn: false },
@@ -39,7 +51,7 @@
     },
     {
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
-      start: 1770, end: 1778, repr: 1774, color: '#B8860B', row: 1,
+      start: 1770, end: 1778, repr: 1774, color: '#4a9e5c', row: 1,
       sublayers: [
         { id: 'wmts', subId: 'ferraris-wmts', label: 'Map tiles', defaultOn: true },
         { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
@@ -47,7 +59,7 @@
     },
     {
       key: 'primitief', mainId: 'primitief', label: 'Primitief Kadaster',
-      start: 1808, end: 1834, repr: 1814, color: '#C07B28', row: 2,
+      start: 1808, end: 1834, repr: 1814, color: '#c97a2e', row: 2,
       sublayers: [
         { id: 'iiif', subId: 'primitief-iiif', label: 'IIIF sheets', defaultOn: true },
         { id: 'parcels', subId: 'primitief-parcels', label: 'Parcels', defaultOn: false },
@@ -56,7 +68,7 @@
     },
     {
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
-      start: 1846, end: 1854, repr: 1850, color: '#C04A28', row: 1,
+      start: 1846, end: 1854, repr: 1850, color: '#378ADD', row: 2,
       sublayers: [
         { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map tiles', defaultOn: true },
         { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
@@ -64,7 +76,7 @@
     },
     {
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
-      start: 1847, end: 1855, repr: 1851, color: '#9440A0', row: 2,
+      start: 1847, end: 1855, repr: 1851, color: '#7b6fce', row: 1,
       sublayers: [
         { id: 'iiif', subId: 'gereduceerd-iiif', label: 'IIIF sheets', defaultOn: true },
         { id: 'parcels', subId: 'gereduceerd-parcels', label: 'Parcels', defaultOn: false },
@@ -525,7 +537,7 @@
           style={sourceBlockStyle(src)}
           role="button"
           tabindex="0"
-          title="{src.label} ({src.start}–{src.end})"
+          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable to access sublayers`}
           aria-pressed={enabled}
           on:click={() => handleBlockClick(src.key)}
           on:keydown={(e) => e.key === 'Enter' && handleBlockClick(src.key)}
@@ -542,14 +554,14 @@
           <span
             class="scrubber-label"
             class:scrubber-label--right={pane.id === 'right'}
-            style="left:{scrubberPctForPane(pane.id)}%;--pane-color:{pane.color}"
+            style="left:{scrubberPctForPane(pane.id)}%;--pane-color:{pane.color};--pane-badge-bg:{PANE_META[pane.id].badgeBg};--pane-badge-text:{PANE_META[pane.id].badgeText}"
             aria-hidden="true"
-          >{pane.label} {Math.round(pane.year)}</span>
+          >{pane.label} · {Math.round(pane.year)}</span>
         {/each}
       {:else}
         <span
-          class="scrubber-label"
-          style="left:{((sliderYear - axisStart) / axisSpan) * 100}%;--pane-color:{PANE_META.left.color}"
+          class="scrubber-label scrubber-label--single"
+          style="left:{((sliderYear - axisStart) / axisSpan) * 100}%"
           aria-hidden="true"
         >{Math.round(sliderYear)}</span>
       {/if}
@@ -589,8 +601,7 @@
         {/each}
       {:else}
         <input
-          class="ts-scrubber"
-          style="--pane-color:{PANE_META.left.color}"
+          class="ts-scrubber ts-scrubber--single"
           type="range"
           min={axisStart}
           max={axisEnd}
@@ -614,7 +625,7 @@
           style={sourceBlockStyle(src)}
           role="button"
           tabindex="0"
-          title="{src.label} ({src.start}–{src.end})"
+          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable to access sublayers`}
           aria-pressed={enabled}
           on:click={() => handleBlockClick(src.key)}
           on:keydown={(e) => e.key === 'Enter' && handleBlockClick(src.key)}
@@ -646,10 +657,14 @@
 
   .ts-sub-panel--left {
     left: 12px;
+    --pane-border: #0e8aaa;
+    --pane-header-tint: rgba(14, 138, 170, 0.06);
   }
 
   .ts-sub-panel--right {
     right: 12px;
+    --pane-border: #c2426e;
+    --pane-header-tint: rgba(194, 66, 110, 0.06);
   }
 
   .sub-menu {
@@ -673,6 +688,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    margin: -10px -10px 0;
+    padding: 10px;
+    background: var(--pane-header-tint, transparent);
+    border-radius: calc(var(--radius-md) - 2px) calc(var(--radius-md) - 2px) 0 0;
   }
 
   .sub-menu-swatch {
@@ -721,7 +740,7 @@
   }
 
   .sub-pill.is-layer-disabled {
-    opacity: 0.55;
+    opacity: 0.4;
     filter: saturate(0.5) brightness(0.94);
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   }
@@ -857,15 +876,23 @@
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
-    color: var(--pane-color);
-    background: #ffffff;
-    border: 1px solid color-mix(in srgb, var(--pane-color) 38%, white);
-    border-radius: var(--radius-xs);
-    padding: 3px 8px;
+    color: var(--pane-badge-text);
+    background: var(--pane-badge-bg);
+    border: 1px solid color-mix(in srgb, var(--pane-color) 22%, white);
+    border-radius: 99px;
+    padding: 5px 10px;
     white-space: nowrap;
     pointer-events: none;
     z-index: 12;
     box-shadow: var(--shadow-md);
+  }
+
+  .scrubber-label--single {
+    color: rgba(25, 25, 25, 0.86);
+    background: rgba(255, 255, 255, 0.96);
+    border-color: rgba(0, 0, 0, 0.12);
+    border-radius: var(--radius-xs);
+    padding: 3px 8px;
   }
 
   .scrubber-label--right {
@@ -898,8 +925,8 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background: linear-gradient(180deg, #ffffff, #f4f0e8);
-    border: 2px solid color-mix(in srgb, var(--pane-color) 72%, white);
+    background: #ffffff;
+    border: 2px solid var(--pane-color);
     cursor: ew-resize;
     box-shadow: var(--shadow-card);
     pointer-events: auto;
@@ -909,11 +936,15 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background: linear-gradient(180deg, #ffffff, #f4f0e8);
-    border: 2px solid color-mix(in srgb, var(--pane-color) 72%, white);
+    background: #ffffff;
+    border: 2px solid var(--pane-color);
     cursor: ew-resize;
     box-shadow: var(--shadow-card);
     pointer-events: auto;
+  }
+
+  .ts-scrubber--single {
+    --pane-color: rgba(34, 34, 34, 0.36);
   }
 
   .ts-scrubber::-webkit-slider-runnable-track {
