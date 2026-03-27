@@ -9,7 +9,7 @@
   export let massartItems: MassartItem[] = [];
   export let yearLeeway: number = 3;
   export let loadingLayers: Record<string, boolean> = {};
-  export let compareEnabled = false;
+  export let dualPaneEnabled = false;
   export let leftYear: number | undefined = undefined;
   export let rightYear: number | undefined = undefined;
 
@@ -89,8 +89,8 @@
   let localRightYear = defaultYear;
   let lastLeftYearProp: number | undefined = undefined;
   let lastRightYearProp: number | undefined = undefined;
-  let compareModePrev = compareEnabled;
-  let compareYearsInitialized = compareEnabled;
+  let dualPaneModePrev = dualPaneEnabled;
+  let dualPaneYearsInitialized = dualPaneEnabled;
 
   let enabledLayers: Record<string, boolean> = Object.fromEntries(
     SOURCES.map(s => [s.key, true])
@@ -164,7 +164,7 @@
   }
 
   function yearForPane(pane: PaneId): number {
-    if (!compareEnabled) return sliderYear;
+    if (!dualPaneEnabled) return sliderYear;
     return pane === 'left' ? localLeftYear : localRightYear;
   }
 
@@ -174,7 +174,7 @@
 
   function onSliderInput(pane: PaneId, e: Event) {
     const year = parseFloat((e.target as HTMLInputElement).value);
-    if (!compareEnabled) {
+    if (!dualPaneEnabled) {
       sliderYear = year;
       dispatch('year-change', { pane: 'left', year });
       return;
@@ -183,7 +183,7 @@
   }
 
   function isDotNear(yr: number): boolean {
-    if (!compareEnabled) return Math.abs(yr - sliderYear) <= yearLeeway;
+    if (!dualPaneEnabled) return Math.abs(yr - sliderYear) <= yearLeeway;
     return visiblePanes.some((pane) => Math.abs(yr - pane.year) <= yearLeeway);
   }
 
@@ -215,7 +215,7 @@
     enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
     const src = SOURCES.find(s => s.key === key)!;
     if (!wasEnabled) {
-      if (compareEnabled) {
+      if (dualPaneEnabled) {
         setPaneYear('left', src.repr);
       } else {
         sliderYear = src.repr;
@@ -233,7 +233,7 @@
     const leftVisible = enabledLayers[key] && leftVisibleSourceKeys.has(key);
     if (leftVisible) dispatch('sublayerChange', { subId, enabled: !cur });
     if (leftVisible) dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
-    if (compareEnabled) {
+    if (dualPaneEnabled) {
       const rightVisible = enabledLayers[key] && rightVisibleSourceKeys.has(key);
       if (rightVisible) dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
     }
@@ -266,7 +266,7 @@
           }
         }
       }
-      if (compareEnabled) {
+      if (dualPaneEnabled) {
         const rightVisible = enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
         prevPaneVisible.right[src.key] = rightVisible;
         dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightVisible });
@@ -285,7 +285,7 @@
 
   $: if (leftYear != null && leftYear !== lastLeftYearProp) {
     lastLeftYearProp = leftYear;
-    if (compareEnabled) {
+    if (dualPaneEnabled) {
       localLeftYear = leftYear;
     } else {
       sliderYear = leftYear;
@@ -297,20 +297,20 @@
     localRightYear = rightYear;
   }
 
-  $: if (compareEnabled !== compareModePrev) {
-    if (compareEnabled) {
-      if (!compareYearsInitialized) {
+  $: if (dualPaneEnabled !== dualPaneModePrev) {
+    if (dualPaneEnabled) {
+      if (!dualPaneYearsInitialized) {
         localLeftYear = sliderYear;
         localRightYear = rightYear ?? sliderYear;
-        compareYearsInitialized = true;
+        dualPaneYearsInitialized = true;
       }
     } else {
       sliderYear = localLeftYear;
     }
-    compareModePrev = compareEnabled;
+    dualPaneModePrev = dualPaneEnabled;
   }
 
-  $: visiblePanes = (compareEnabled
+  $: visiblePanes = (dualPaneEnabled
     ? [
         { id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color },
         { id: 'right', year: localRightYear, label: PANE_META.right.label, color: PANE_META.right.color },
@@ -318,10 +318,10 @@
     : []) as PaneState[];
 
   $: leftPanelSources = paneSourcesForYear(localLeftYear);
-  $: rightPanelSources = compareEnabled ? paneSourcesForYear(localRightYear) : [];
-  $: leftVisibleSourceKeys = new Set<SourceKey>((compareEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).map((s) => s.key));
+  $: rightPanelSources = dualPaneEnabled ? paneSourcesForYear(localRightYear) : [];
+  $: leftVisibleSourceKeys = new Set<SourceKey>((dualPaneEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).map((s) => s.key));
   $: rightVisibleSourceKeys = new Set<SourceKey>(rightPanelSources.map((s) => s.key));
-  $: activeSourceKeys = compareEnabled
+  $: activeSourceKeys = dualPaneEnabled
     ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
     : new Set<SourceKey>(paneSourcesForYear(sliderYear).map((s) => s.key));
 
@@ -331,10 +331,10 @@
 
   $: activePanesBySource = SOURCES.reduce<Record<SourceKey, PaneState[]>>((acc, src) => {
     const panes: PaneState[] = [];
-    if ((compareEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).some((s) => s.key === src.key)) {
+    if ((dualPaneEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).some((s) => s.key === src.key)) {
       panes.push({ id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color });
     }
-    if (compareEnabled && rightPanelSources.some((s) => s.key === src.key)) {
+    if (dualPaneEnabled && rightPanelSources.some((s) => s.key === src.key)) {
       panes.push({ id: 'right', year: localRightYear, label: PANE_META.right.label, color: PANE_META.right.color });
     }
     acc[src.key] = panes;
@@ -388,8 +388,8 @@
         prevPaneVisible.left[src.key] = leftPaneVisible;
       }
 
-      const rightPaneVisible = compareEnabled && enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
-      if (compareEnabled && prevPaneVisible.right[src.key] !== undefined && prevPaneVisible.right[src.key] !== rightPaneVisible) {
+      const rightPaneVisible = dualPaneEnabled && enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
+      if (dualPaneEnabled && prevPaneVisible.right[src.key] !== undefined && prevPaneVisible.right[src.key] !== rightPaneVisible) {
         dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightPaneVisible });
         if (!rightPaneVisible) {
           for (const sub of src.sublayers) {
@@ -406,14 +406,14 @@
         }
         prevPaneVisible.right[src.key] = rightPaneVisible;
       }
-      if (!compareEnabled) {
+      if (!dualPaneEnabled) {
         prevPaneVisible.right[src.key] = false;
       }
     }
   }
 </script>
 
-{#if compareEnabled}
+{#if dualPaneEnabled}
   {#if leftPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
       {#each leftPanelSources as src}
@@ -537,7 +537,7 @@
     </div>
 
     <div class="ts-axis-line">
-      {#if compareEnabled}
+      {#if dualPaneEnabled}
         {#each visiblePanes as pane}
           <span
             class="scrubber-label"
@@ -572,7 +572,7 @@
         ></button>
       {/each}
 
-      {#if compareEnabled}
+      {#if dualPaneEnabled}
         {#each visiblePanes as pane}
           <input
             class="ts-scrubber"

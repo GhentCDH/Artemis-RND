@@ -48,13 +48,18 @@
   // ─── Map ───────────────────────────────────────────────────────────────────
 
   type PaneId = 'left' | 'right';
+  type ViewMode = 'single' | 'compare' | 'swipe';
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
+  let mapStageEl: HTMLElement;
   let rightMapDiv: HTMLElement;
   let rightMap: maplibregl.Map | null = null;
   let rightMapReady = false;
   let rightMapInitInFlight = false;
   let suppressSyncPane: PaneId | null = null;
+  let viewMode: ViewMode = 'single';
+  let swipePosition = 50;
+  let swipeDragging = false;
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -117,12 +122,20 @@
     if (map?.isStyleLoaded()) updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
   }
 
-  function toggleCompareMode() {
-    compareEnabled = !compareEnabled;
+  function setViewMode(nextMode: ViewMode) {
+    viewMode = nextMode;
     void tick().then(() => {
       try { map?.resize(); } catch { /* ignore */ }
       try { rightMap?.resize(); } catch { /* ignore */ }
     });
+  }
+
+  function toggleCompareMode() {
+    setViewMode(viewMode === 'compare' ? 'single' : 'compare');
+  }
+
+  function toggleSwipeMode() {
+    setViewMode(viewMode === 'swipe' ? 'single' : 'swipe');
   }
 
   // ─── Logging ───────────────────────────────────────────────────────────────
@@ -187,12 +200,14 @@
   let imageCollectionBubbleLngLat: { lon: number; lat: number } | null = null;
   let imageCollectionBubblePane: PaneId = 'left';
   let imageCollectionBubblePlaceBelow = false;
-  let compareEnabled = false;
   let initialWarmupPending = FEATURE_FLAGS.startupPreloadScreen;
   let initialWarmupRunning = false;
   let initialWarmupDone = 0;
   let initialWarmupTotal = 0;
   let initialWarmupLabel = 'Preparing IIIF layers';
+  $: dualPaneEnabled = viewMode !== 'single';
+  $: isCompareLayout = viewMode === 'compare';
+  $: isSwipeLayout = viewMode === 'swipe';
 
   // ─── Layer helpers ─────────────────────────────────────────────────────────
 
@@ -743,7 +758,7 @@
         await toggleMainLayer(mainId, true);
       }
 
-      if (compareEnabled && rightMap) {
+      if (dualPaneEnabled && rightMap) {
         await syncRightPaneState();
       }
 
@@ -984,7 +999,7 @@
   }
 
   function syncCamera(from: PaneId) {
-    if (!compareEnabled || !map || !rightMap) return;
+    if (!dualPaneEnabled || !map || !rightMap) return;
     const source = from === 'left' ? map : rightMap;
     const target = from === 'left' ? rightMap : map;
     const targetPane: PaneId = from === 'left' ? 'right' : 'left';
@@ -997,6 +1012,52 @@
       pitch: source.getPitch(),
     });
     suppressSyncPane = null;
+  }
+
+  function updateSwipePosition(clientX: number) {
+    if (!mapStageEl) return;
+    const rect = mapStageEl.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const pct = ((clientX - rect.left) / rect.width) * 100;
+    swipePosition = Math.max(0, Math.min(100, pct));
+  }
+
+  $: visibleDividerPosition = isCompareLayout ? 50 : swipePosition;
+
+  function onSwipeHandlePointerDown(event: PointerEvent) {
+    if (!isSwipeLayout) return;
+    swipeDragging = true;
+    updateSwipePosition(event.clientX);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function onWindowPointerMove(event: PointerEvent) {
+    if (!swipeDragging) return;
+    updateSwipePosition(event.clientX);
+  }
+
+  function stopSwipeDrag() {
+    if (!swipeDragging) return;
+    swipeDragging = false;
+  }
+
+  function onSwipeHandleKeyDown(event: KeyboardEvent) {
+    if (!isSwipeLayout) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') {
+      return;
+    }
+    event.preventDefault();
+    if (event.key === 'Home') {
+      swipePosition = 0;
+      return;
+    }
+    if (event.key === 'End') {
+      swipePosition = 100;
+      return;
+    }
+    const delta = event.key === 'ArrowLeft' ? -2 : 2;
+    swipePosition = Math.max(0, Math.min(100, swipePosition + delta));
   }
 
   function attachRightMassartHandlers(targetMap: maplibregl.Map) {
@@ -1072,7 +1133,7 @@
   }
 
   async function ensureRightMap() {
-    if (!compareEnabled || !rightMapDiv || rightMap || rightMapInitInFlight) return;
+    if (!dualPaneEnabled || !rightMapDiv || rightMap || rightMapInitInFlight) return;
     rightMapInitInFlight = true;
     await tick();
     rightMap = createMapContext(rightMapDiv);
@@ -1107,11 +1168,11 @@
     rightIiifHoveredMaps = [];
   }
 
-  $: if (compareEnabled && rightMapDiv && !rightMap) {
+  $: if (dualPaneEnabled && rightMapDiv && !rightMap) {
     void ensureRightMap();
   }
 
-  $: if (!compareEnabled && rightMap) {
+  $: if (!dualPaneEnabled && rightMap) {
     teardownRightMap();
   }
 
@@ -1119,13 +1180,28 @@
     setMassartPins(rightMap, massartItems, rightTimelineYear, MASSART_LEEWAY);
   }
 
-  $: if (imageCollectionBubblePane === 'right' && !compareEnabled) {
+  $: if (isSwipeLayout && rightMap) {
+    swipePosition;
+    void tick().then(() => {
+      try { rightMap?.resize(); } catch { /* ignore */ }
+    });
+  }
+
+  $: if (!isSwipeLayout && swipeDragging) {
+    swipeDragging = false;
+  }
+
+  $: if (imageCollectionBubblePane === 'right' && !dualPaneEnabled) {
     closeImageCollectionBubble();
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   onMount(() => {
+    window.addEventListener('pointermove', onWindowPointerMove);
+    window.addEventListener('pointerup', stopSwipeDrag);
+    window.addEventListener('pointercancel', stopSwipeDrag);
+
     map = ensureMapContext(mapDiv);
     attachAllmapsDebugEvents(map, log);
     map.on('load', () => {
@@ -1230,6 +1306,9 @@
     void fetchIndex();
 
     return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', stopSwipeDrag);
+      window.removeEventListener('pointercancel', stopSwipeDrag);
       map.off('mousemove', onMouseMove);
       map.off('mouseout',  onMouseOut);
       map.off('click',     onClick);
@@ -1245,13 +1324,39 @@
 
 <div class="wrap">
   <main class="map-shell">
-    <div class="map-stage" class:is-compare={compareEnabled}>
+    <div
+      class="map-stage"
+      class:is-compare={isCompareLayout}
+      class:is-swipe={isSwipeLayout}
+      class:is-dual-pane={dualPaneEnabled}
+      class:is-swipe-dragging={swipeDragging}
+      style="--divider-position:{visibleDividerPosition}%"
+      bind:this={mapStageEl}
+    >
       <div class="map-pane map-pane--left">
         <div class="map-canvas" bind:this={mapDiv}></div>
       </div>
-      {#if compareEnabled}
-        <div class="map-pane map-pane--right">
+      {#if dualPaneEnabled}
+        <div class="map-pane map-pane--right" class:is-swipe-pane={isSwipeLayout}>
           <div class="map-canvas" bind:this={rightMapDiv}></div>
+        </div>
+      {/if}
+      {#if dualPaneEnabled}
+        <div class="swipe-divider" style="left:var(--divider-position)">
+          <button
+            class="swipe-handle"
+            class:is-static={!isSwipeLayout}
+            type="button"
+            role="slider"
+            aria-label="Adjust swipe divider"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={Math.round(visibleDividerPosition)}
+            on:pointerdown={onSwipeHandlePointerDown}
+            on:keydown={onSwipeHandleKeyDown}
+          >
+            <span></span>
+          </button>
         </div>
       {/if}
     </div>
@@ -1305,15 +1410,22 @@
       <div class="timeslider-toolbar">
         <button
           class="compare-toggle"
-          class:is-active={compareEnabled}
+          class:is-active={isCompareLayout}
           type="button"
-          aria-pressed={compareEnabled}
+          aria-pressed={isCompareLayout}
           on:click={toggleCompareMode}
-        >{compareEnabled ? 'Exit Compare' : 'Compare Views'}</button>
+        >{isCompareLayout ? 'Exit Compare' : 'Compare Views'}</button>
+        <button
+          class="compare-toggle compare-toggle--swipe"
+          class:is-active={isSwipeLayout}
+          type="button"
+          aria-pressed={isSwipeLayout}
+          on:click={toggleSwipeMode}
+        >{isSwipeLayout ? 'Exit Swipe' : 'Swipe Views'}</button>
       </div>
       <Timeslider
         {massartItems}
-        {compareEnabled}
+        dualPaneEnabled={dualPaneEnabled}
         leftYear={massartYear}
         rightYear={rightTimelineYear}
         yearLeeway={MASSART_LEEWAY}
@@ -1389,12 +1501,7 @@
     width: 100%;
     height: 100%;
     display: block;
-  }
-
-  .map-stage.is-compare {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0;
+    position: relative;
   }
 
   .map-pane {
@@ -1417,7 +1524,35 @@
       inset 2px 0 0 rgba(0, 0, 0, 0.28);
   }
 
-  .map-stage.is-compare::after {
+  .map-stage.is-dual-pane .map-pane--left {
+    position: absolute;
+    inset: 0;
+    box-shadow: none;
+  }
+
+  .map-stage.is-dual-pane .map-pane--right {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    box-shadow: none;
+    clip-path: inset(0 0 0 var(--divider-position));
+  }
+
+  .map-stage.is-dual-pane.is-swipe-dragging {
+    user-select: none;
+  }
+
+  .swipe-divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    transform: translateX(-50%);
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .swipe-divider::before {
     content: '';
     position: absolute;
     top: 0;
@@ -1426,13 +1561,46 @@
     width: 4px;
     transform: translateX(-50%);
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.4)),
       linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.18));
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.42),
-      0 0 14px rgba(0, 0, 0, 0.12);
-    pointer-events: none;
-    z-index: 2;
+      0 0 14px rgba(0, 0, 0, 0.18);
+  }
+
+  .swipe-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 34px;
+    height: 70px;
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: var(--shadow-card);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: ew-resize;
+    pointer-events: auto;
+  }
+
+  .swipe-handle.is-static {
+    cursor: default;
+  }
+
+  .swipe-handle span {
+    width: 6px;
+    height: 30px;
+    border-radius: 999px;
+    background:
+      linear-gradient(180deg, rgba(31, 111, 235, 0.95), rgba(217, 119, 6, 0.95));
+  }
+
+  .swipe-handle:focus-visible {
+    outline: 2px solid #1f6feb;
+    outline-offset: 2px;
   }
 
   .map-canvas {
@@ -1516,6 +1684,7 @@
   .timeslider-toolbar {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
     margin-bottom: 8px;
     pointer-events: none;
   }
@@ -1544,6 +1713,11 @@
     background: #1f6feb;
     border-color: #1f6feb;
     color: #ffffff;
+  }
+
+  .compare-toggle--swipe.is-active {
+    background: #d97706;
+    border-color: #d97706;
   }
 
 </style>
