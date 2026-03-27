@@ -225,15 +225,6 @@
   function handleBlockClick(key: SourceKey) {
     const wasEnabled = enabledLayers[key];
     enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
-    const src = SOURCES.find(s => s.key === key)!;
-    if (!wasEnabled) {
-      if (dualPaneEnabled) {
-        setPaneYear('left', src.repr);
-      } else {
-        sliderYear = src.repr;
-        dispatch('year-change', { pane: 'left', year: sliderYear });
-      }
-    }
   }
 
   function toggleSublayer(key: SourceKey, subId: string, localId: string) {

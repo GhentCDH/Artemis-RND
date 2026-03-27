@@ -79,3 +79,15 @@
   --viewer-topbar-bg:   var(--card-bg);
   --viewer-canvas-bg:   var(--panel-bg);
 }
+
+html {
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}

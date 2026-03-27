@@ -120,6 +120,10 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
 // ---------------------------------------------------------------------------
 
 let cachedIndex: CompiledIndex | null = null;
+// Annotation JSON cache — shared across all panes and layer groups for the page lifetime.
+// Keyed by absolute annotation URL. Prevents duplicate network fetches when the same
+// layer is loaded into two panes simultaneously.
+const annotationJsonCache = new Map<string, Promise<unknown>>();
 // Canvas info.json index: keyed by canvasId (IIIF canvas URL) → full info.json content.
 // Built by Artemis-RnD-Data pipeline; committed to build/iiif/info/index.json.
 // Values have @id = image service URL, so we build a serviceUrl lookup on load.
@@ -178,6 +182,10 @@ export function resetCompiledIndexCache() {
   cachedEntryByAbsoluteUrl = null;
   cachedEntryByRelativePath = null;
   cachedEntryMapsBaseUrl = null;
+  annotationJsonCache.clear();
+  iiifTileCache.clear();
+  iiifCacheHits = 0;
+  iiifCacheMisses = 0;
   activeLayersByGroup.clear();
   activeWarpedLayersByGroup.clear();
   mapIdToManifestInfo.clear();
@@ -563,12 +571,14 @@ export async function runLayerGroup(opts: {
   const results: RunResult[] = [];
   const mapMetaByMapId = new Map<string, { label: string; manifestAllmapsUrl?: string }>();
 
-  // Prefetch all annotation JSONs in parallel
-  const prefetch = new Map<string, Promise<unknown>>();
+  // Prefetch all annotation JSONs in parallel, reusing module-level cache so a second
+  // pane loading the same layer group shares in-flight and completed fetches.
   for (const entry of entries) {
     for (const req of getMirroredAnnotationRequests(entry)) {
       const url = joinUrl(cfg.datasetBaseUrl, req.path);
-      prefetch.set(url, fetchJson<unknown>(url, timeout).catch(() => null));
+      if (!annotationJsonCache.has(url)) {
+        annotationJsonCache.set(url, fetchJson<unknown>(url, timeout).catch(() => null));
+      }
     }
   }
 
@@ -582,7 +592,7 @@ export async function runLayerGroup(opts: {
   const layers: WarpedMapLayer[] = [];
   for (let i = 0; i < chunkCount; i++) {
     await removeMaplibreLayer(map, layerIds[i]);
-    const l = new WarpedMapLayer({ layerId: layerIds[i] } as any);
+    const l = new WarpedMapLayer({ layerId: layerIds[i], fetchFn: cachedFetch } as any);
     try {
       map.addLayer(l as any);
       layers.push(l);
@@ -811,7 +821,7 @@ export async function runLayerGroup(opts: {
           const url = joinUrl(cfg.datasetBaseUrl, req.path);
           const ts = nowMs();
           try {
-            const raw = await (prefetch.get(url) ?? fetchJson<unknown>(url, timeout));
+            const raw = await (annotationJsonCache.get(url) ?? fetchJson<unknown>(url, timeout));
             if (!raw) return { url, error: "fetch returned null" };
             return { url, raw, fetchMs: nowMs() - ts };
           } catch (e: any) {
