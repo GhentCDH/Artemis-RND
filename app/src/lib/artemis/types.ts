@@ -83,6 +83,16 @@ export type IiifMapInfo = {
   mainId?: string;
 };
 
+export type PreviewBubbleItem = {
+  title: string;
+  manifestUrl: string;
+  year?: string;
+  location?: string;
+  kicker?: string;
+  lat?: number;
+  lon?: number;
+};
+
 export type ParcelClickInfo = {
   parcelLabel: string;
   leafId: string;

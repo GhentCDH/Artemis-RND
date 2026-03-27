@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import type { MassartItem } from '$lib/artemis/types';
+  import type { PreviewBubbleItem } from '$lib/artemis/types';
   import { loadManifestPreview } from '$lib/artemis/viewer/manifestPreview';
 
-  export let item: MassartItem;
+  export let item: PreviewBubbleItem;
   export let x = 0;
   export let y = 0;
   export let placeBelow = false;
@@ -97,7 +97,7 @@
 >
   <div class="image-collection-bubble" class:is-below={placeBelow}>
     <button class="image-collection-bubble-close" type="button" on:click={() => dispatch('close')} aria-label="Close">×</button>
-    <div class="image-collection-bubble-kicker">Image Collection</div>
+    <div class="image-collection-bubble-kicker">{item.kicker || 'Image Collection'}</div>
     <div class="image-collection-bubble-title">{item.title}</div>
     <div class="image-collection-bubble-meta">
       {#if item.year}<span>{item.year}</span>{/if}
@@ -132,7 +132,7 @@
     width: 280px;
     background: rgba(255, 255, 255, 0.98);
     border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-md);
     box-shadow: var(--shadow-card);
     padding: 14px;
     display: flex;
@@ -241,7 +241,7 @@
 
   .image-collection-bubble-open {
     border: none;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-xs);
     padding: 9px 14px;
     background: #1f1f1f;
     color: #ffffff;

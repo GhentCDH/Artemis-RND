@@ -90,6 +90,7 @@
   let lastLeftYearProp: number | undefined = undefined;
   let lastRightYearProp: number | undefined = undefined;
   let compareModePrev = compareEnabled;
+  let compareYearsInitialized = compareEnabled;
 
   let enabledLayers: Record<string, boolean> = Object.fromEntries(
     SOURCES.map(s => [s.key, true])
@@ -284,8 +285,11 @@
 
   $: if (leftYear != null && leftYear !== lastLeftYearProp) {
     lastLeftYearProp = leftYear;
-    localLeftYear = leftYear;
-    if (!compareEnabled) sliderYear = leftYear;
+    if (compareEnabled) {
+      localLeftYear = leftYear;
+    } else {
+      sliderYear = leftYear;
+    }
   }
 
   $: if (rightYear != null && rightYear !== lastRightYearProp) {
@@ -295,8 +299,11 @@
 
   $: if (compareEnabled !== compareModePrev) {
     if (compareEnabled) {
-      localLeftYear = sliderYear;
-      if (rightYear != null) localRightYear = rightYear;
+      if (!compareYearsInitialized) {
+        localLeftYear = sliderYear;
+        localRightYear = rightYear ?? sliderYear;
+        compareYearsInitialized = true;
+      }
     } else {
       sliderYear = localLeftYear;
     }
@@ -318,9 +325,7 @@
     ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
     : new Set<SourceKey>(paneSourcesForYear(sliderYear).map((s) => s.key));
 
-  $: panelSources = compareEnabled
-    ? SOURCES.filter((s) => activeSourceKeys.has(s.key))
-    : paneSourcesForYear(sliderYear);
+  $: singlePanelSources = paneSourcesForYear(sliderYear);
   $: row1 = SOURCES.filter(s => s.row === 1);
   $: row2 = SOURCES.filter(s => s.row === 2);
 
@@ -408,9 +413,61 @@
   }
 </script>
 
-{#if panelSources.length > 0}
-  <div class="ts-sub-panel" transition:fade={{ duration: 140 }}>
-    {#each panelSources as src}
+{#if compareEnabled}
+  {#if leftPanelSources.length > 0}
+    <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
+      {#each leftPanelSources as src}
+        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
+          <div class="sub-menu-header">
+            <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+            <span class="sub-menu-title">{src.label}</span>
+          </div>
+          <div class="sub-menu-pills">
+            {#each src.sublayers as sub}
+              <button
+                class="sub-pill"
+                class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+                class:is-layer-disabled={!enabledLayers[src.key]}
+                style="--c:{src.color}"
+                type="button"
+                title="{src.label} — {sub.label}"
+                on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+              >{sub.label}</button>
+            {/each}
+          </div>
+        </section>
+      {/each}
+    </div>
+  {/if}
+
+  {#if rightPanelSources.length > 0}
+    <div class="ts-sub-panel ts-sub-panel--right" transition:fade={{ duration: 140 }}>
+      {#each rightPanelSources as src}
+        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
+          <div class="sub-menu-header">
+            <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+            <span class="sub-menu-title">{src.label}</span>
+          </div>
+          <div class="sub-menu-pills">
+            {#each src.sublayers as sub}
+              <button
+                class="sub-pill"
+                class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+                class:is-layer-disabled={!enabledLayers[src.key]}
+                style="--c:{src.color}"
+                type="button"
+                title="{src.label} — {sub.label}"
+                on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+              >{sub.label}</button>
+            {/each}
+          </div>
+        </section>
+      {/each}
+    </div>
+  {/if}
+{:else if singlePanelSources.length > 0}
+  <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
+    {#each singlePanelSources as src}
       <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
         <div class="sub-menu-header">
           <span class="sub-menu-swatch" style="--c:{src.color}"></span>
@@ -574,7 +631,6 @@
   .ts-sub-panel {
     position: fixed;
     top: 12px;
-    left: 12px;
     z-index: 50;
     display: flex;
     flex-direction: column;
@@ -588,6 +644,14 @@
     pointer-events: all;
   }
 
+  .ts-sub-panel--left {
+    left: 12px;
+  }
+
+  .ts-sub-panel--right {
+    right: 12px;
+  }
+
   .sub-menu {
     display: flex;
     flex-direction: column;
@@ -596,7 +660,7 @@
     padding: 10px;
     background: #ffffff;
     border: 1px solid rgba(0, 0, 0, 0.08);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);
   }
 

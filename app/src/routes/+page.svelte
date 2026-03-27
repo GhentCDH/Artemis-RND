@@ -19,7 +19,7 @@
   import {
     loadCompiledIndex, runLayerGroup, removeLayerGroup, parkLayerGroup,
     isLayerGroupParked, setLayerGroupOpacity, getLayerGroupLayerIds,
-    resetCompiledIndexCache, getIiifCacheStats, getLayerGroupId,
+    resetCompiledIndexCache, resetPaneRuntime, getIiifCacheStats, getLayerGroupId,
     getAllActiveWarpedMaps, getManifestInfoForMapId,
     type LayerInfo, type CompiledIndex, type CompiledRunnerConfig, type LayerRenderStats,
   } from '$lib/artemis/runner';
@@ -35,7 +35,7 @@
   } from '$lib/artemis/layerConfig';
   import type {
     ToponymIndexItem, RawToponymIndexItem, ManifestSearchItem,
-    IiifMapInfo, ParcelClickInfo, PinnedCard, IiifPanelGroup, UILog, MassartItem,
+    IiifMapInfo, ParcelClickInfo, PinnedCard, UILog, MassartItem, PreviewBubbleItem,
   } from '$lib/artemis/types';
 
   import ToponymSearch from '$lib/artemis/ui/ToponymSearch.svelte';
@@ -59,6 +59,10 @@
   // ─── Config ────────────────────────────────────────────────────────────────
 
   const DEFAULT_BASE_URL = 'https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/master/build';
+  const FEATURE_FLAGS: { startupPreloadScreen: boolean } = {
+    // Flip to false to bypass the startup preload/loading-screen concept.
+    startupPreloadScreen: false,
+  };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 
   function cfg(): CompiledRunnerConfig {
@@ -114,9 +118,6 @@
   }
 
   function toggleCompareMode() {
-    if (!compareEnabled) {
-      rightTimelineYear = MASSART_YEAR_MAX;
-    }
     compareEnabled = !compareEnabled;
     void tick().then(() => {
       try { map?.resize(); } catch { /* ignore */ }
@@ -175,18 +176,19 @@
 
   let primitiveHoveredFeature: any = null;
   let iiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
-  let iiifInfoPanel: IiifMapInfo[] | null = null;
+  let rightIiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
   let parcelClickInfo: ParcelClickInfo | null = null;
   let pinnedCards: PinnedCard[] = [];
   let viewerOpen = false;
   let viewerItem: IiifMapInfo | null = null;
-  let imageCollectionBubbleItem: MassartItem | null = null;
+  let imageCollectionBubbleItem: PreviewBubbleItem | null = null;
   let imageCollectionBubbleX = 0;
   let imageCollectionBubbleY = 0;
   let imageCollectionBubbleLngLat: { lon: number; lat: number } | null = null;
+  let imageCollectionBubblePane: PaneId = 'left';
   let imageCollectionBubblePlaceBelow = false;
   let compareEnabled = false;
-  let initialWarmupPending = true;
+  let initialWarmupPending = FEATURE_FLAGS.startupPreloadScreen;
   let initialWarmupRunning = false;
   let initialWarmupDone = 0;
   let initialWarmupTotal = 0;
@@ -226,13 +228,16 @@
   function closeImageCollectionBubble() {
     imageCollectionBubbleItem = null;
     imageCollectionBubbleLngLat = null;
+    imageCollectionBubblePane = 'left';
     imageCollectionBubblePlaceBelow = false;
   }
 
   function syncImageCollectionBubblePosition() {
-    if (!map || !imageCollectionBubbleLngLat) return;
-    const point = map.project([imageCollectionBubbleLngLat.lon, imageCollectionBubbleLngLat.lat]);
-    const canvas = map.getCanvas();
+    const targetMap = imageCollectionBubblePane === 'right' ? rightMap : map;
+    if (!targetMap || !imageCollectionBubbleLngLat) return;
+    const point = targetMap.project([imageCollectionBubbleLngLat.lon, imageCollectionBubbleLngLat.lat]);
+    const canvas = targetMap.getCanvas();
+    const rect = canvas.getBoundingClientRect();
     const viewportMargin = 16;
     const offscreen =
       point.x < -viewportMargin ||
@@ -245,17 +250,34 @@
       return;
     }
 
-    imageCollectionBubbleX = point.x;
-    imageCollectionBubbleY = point.y;
+    imageCollectionBubbleX = rect.left + point.x;
+    imageCollectionBubbleY = rect.top + point.y;
     imageCollectionBubblePlaceBelow = point.y < 260;
   }
 
-  function openImageCollectionBubble(item: MassartItem) {
+  function openImageCollectionBubble(item: PreviewBubbleItem, pane: PaneId = 'left') {
     imageCollectionBubbleItem = item;
+    imageCollectionBubblePane = pane;
     imageCollectionBubbleLngLat = item.lon != null && item.lat != null
       ? { lon: item.lon, lat: item.lat }
       : null;
     syncImageCollectionBubblePosition();
+  }
+
+  function openPreviewBubbleAt(item: PreviewBubbleItem, lon: number, lat: number, pane: PaneId = 'left') {
+    imageCollectionBubbleItem = item;
+    imageCollectionBubblePane = pane;
+    imageCollectionBubbleLngLat = { lon, lat };
+    syncImageCollectionBubblePosition();
+  }
+
+  function iiifBubbleItem(info: IiifMapInfo): PreviewBubbleItem {
+    return {
+      title: info.title,
+      manifestUrl: info.sourceManifestUrl,
+      location: info.layerLabel,
+      kicker: 'Map Sheet',
+    };
   }
 
   function normalizeSourceLayers(index: CompiledIndex): UILayerInfo[] {
@@ -386,7 +408,7 @@
   }
 
   async function warmInitialIiifLayers() {
-    if (!initialWarmupPending || initialWarmupRunning) return;
+    if (!FEATURE_FLAGS.startupPreloadScreen || !initialWarmupPending || initialWarmupRunning) return;
 
     const iiifMainIds = getIiifMainLayerIds();
     initialWarmupRunning = true;
@@ -775,9 +797,9 @@
     return inside;
   }
 
-  function hitTestAllWarpedMaps(lon: number, lat: number) {
+  function hitTestAllWarpedMaps(lon: number, lat: number, paneId: PaneId | 'main' = 'main') {
     const hits: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
-    for (const { mapId, warpedMap, groupId } of getAllActiveWarpedMaps()) {
+    for (const { mapId, warpedMap, groupId } of getAllActiveWarpedMaps(paneId)) {
       const mask: Array<[number, number]> = warpedMap.geoMask ?? [];
       if (mask.length < 3) continue;
       const bbox: [number, number, number, number] | undefined = warpedMap.geoMaskBbox;
@@ -849,37 +871,12 @@
     flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
     const mainId = findMainIdForMapName(result.mapName);
     if (mainId) await activateLayer(mainId);
-    iiifInfoPanel = [{
+    openPreviewBubbleAt({
       title: result.label,
-      sourceManifestUrl: result.sourceManifestUrl,
-      layerLabel: mainId ? MAIN_LAYER_LABELS[mainId] : result.mapName,
-      layerColor: mainId ? MAIN_LAYER_META[mainId]?.color : undefined,
-    }];
-  }
-
-  // ─── InfoCards event handlers ──────────────────────────────────────────────
-
-  function groupIiifPanel(items: IiifMapInfo[] | null): IiifPanelGroup[] {
-    if (!items) return [];
-    const groups = new Map<string, IiifPanelGroup>();
-    for (const item of items) {
-      const key = item.layerLabel ?? '';
-      if (!groups.has(key))
-        groups.set(key, { layerLabel: item.layerLabel ?? '', layerColor: item.layerColor ?? '#888888', items: [] });
-      groups.get(key)!.items.push(item);
-    }
-    return Array.from(groups.values());
-  }
-
-  function closeIiifGroup(layerLabel: string) {
-    if (!iiifInfoPanel) return;
-    const remaining = iiifInfoPanel.filter(item => (item.layerLabel ?? '') !== layerLabel);
-    iiifInfoPanel = remaining.length > 0 ? remaining : null;
-  }
-
-  function pinIiifGroup(group: IiifPanelGroup) {
-    pinnedCards = [...pinnedCards, { type: 'iiif', group }];
-    closeIiifGroup(group.layerLabel);
+      manifestUrl: result.sourceManifestUrl,
+      location: mainId ? MAIN_LAYER_LABELS[mainId] : result.mapName,
+      kicker: 'Map Sheet',
+    }, result.centerLon, result.centerLat);
   }
 
   function pinParcel() {
@@ -891,22 +888,38 @@
 
   function unpinCard(index: number) { pinnedCards = pinnedCards.filter((_, i) => i !== index); }
 
-  function focusIiifGroup(group: IiifPanelGroup) {
-    const first = group.items[0];
-    if (!first) return;
-    if (first.centerLon != null && first.centerLat != null)
-      flyToCoordinates(first.centerLon, first.centerLat, first.title);
-    if (first.mainId) activateLayer(first.mainId);
-  }
-
   function focusParcel(info: ParcelClickInfo) {
     flyToCoordinates(info.lon, info.lat, `Parcel ${info.parcelLabel}`);
   }
 
+  function buildIiifInfoPanelItems(
+    hits: Array<{ mapId: string; warpedMap: any; groupId: string }>,
+    paneId: PaneId | 'main' = 'main'
+  ): IiifMapInfo[] {
+    const items: IiifMapInfo[] = [];
+    for (const hit of hits) {
+      const info = getManifestInfoForMapId(hit.mapId, paneId);
+      if (!info) continue;
+      const mainId = groupIdToMainId.get(hit.groupId) ?? '';
+      const bbox: [number, number, number, number] | undefined = hit.warpedMap?.geoMaskBbox;
+      items.push({
+        title: info.label,
+        sourceManifestUrl: info.sourceManifestUrl,
+        imageServiceUrl: hit.warpedMap?.georeferencedMap?.resource?.id ?? undefined,
+        manifestAllmapsUrl: info.manifestAllmapsUrl,
+        layerLabel: MAIN_LAYER_LABELS[mainId] ?? '',
+        layerColor: colorForGroupId(hit.groupId),
+        mainId,
+        centerLon: bbox ? (bbox[0] + bbox[2]) / 2 : undefined,
+        centerLat: bbox ? (bbox[1] + bbox[3]) / 2 : undefined,
+      });
+    }
+    return items;
+  }
+
   // ─── Reactive derivations ──────────────────────────────────────────────────
 
-  $: iiifPanelGroups = groupIiifPanel(iiifInfoPanel);
-  $: panelOpen = iiifInfoPanel !== null || parcelClickInfo !== null || pinnedCards.length > 0;
+  $: panelOpen = parcelClickInfo !== null || pinnedCards.length > 0;
 
   // ─── Timeslider wiring ─────────────────────────────────────────────────────
 
@@ -994,11 +1007,48 @@
         const { manifestUrl } = feat.properties as { manifestUrl: string };
         const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
         if (!item) return;
-        openImageCollectionBubble(item);
+        openImageCollectionBubble(item, 'right');
       });
       targetMap.on('mouseenter', layerId, () => { targetMap.getCanvas().style.cursor = 'pointer'; });
       targetMap.on('mouseleave', layerId, () => { targetMap.getCanvas().style.cursor = ''; });
     }
+  }
+
+  function attachRightIiifHandlers(targetMap: maplibregl.Map) {
+    const onMouseMove = (e: any) => {
+      const lngLat = targetMap.unproject(e.point);
+      const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat, 'right');
+      const prevIds = rightIiifHoveredMaps.map((h) => h.mapId).join(',');
+      const nextIds = hits.map((h) => h.mapId).join(',');
+      if (prevIds !== nextIds) {
+        rightIiifHoveredMaps = hits;
+        setIiifHoverMasks(targetMap, hits.length === 0 ? null : hits.map((h) => {
+          const color = colorForGroupId(h.groupId);
+          return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
+        }));
+      }
+
+      targetMap.getCanvas().style.cursor = hits.length > 0 ? 'pointer' : '';
+    };
+
+    const onMouseOut = () => {
+      rightIiifHoveredMaps = [];
+      setIiifHoverMasks(targetMap, null);
+      targetMap.getCanvas().style.cursor = '';
+    };
+
+    const onClick = () => {
+      const item = buildIiifInfoPanelItems(rightIiifHoveredMaps, 'right')[0];
+      if (!item) return;
+      const centerLon = item.centerLon;
+      const centerLat = item.centerLat;
+      if (centerLon == null || centerLat == null) return;
+      openPreviewBubbleAt(iiifBubbleItem(item), centerLon, centerLat, 'right');
+    };
+
+    targetMap.on('mousemove', onMouseMove);
+    targetMap.on('mouseout', onMouseOut);
+    targetMap.on('click', onClick);
   }
 
   async function syncRightPaneState() {
@@ -1036,21 +1086,25 @@
         pitch: map.getPitch(),
       });
       attachRightMassartHandlers(rightMap!);
+      attachRightIiifHandlers(rightMap!);
       await syncRightPaneState();
     });
-    rightMap.on('move', () => syncCamera('right'));
+    rightMap.on('move', () => {
+      syncImageCollectionBubblePosition();
+      syncCamera('right');
+    });
     rightMapInitInFlight = false;
   }
 
   function teardownRightMap() {
     if (!rightMap) return;
     destroyMapContextInstance(rightMap);
+    resetPaneRuntime('right');
     rightMap = null;
     rightMapReady = false;
     rightMapInitInFlight = false;
-    rightMainLayerVisible = makeInitialMainLayerEnabled();
-    rightSubLayerVisible = makeInitialSubLayerEnabled();
     rightMainLayerLoading = {};
+    rightIiifHoveredMaps = [];
   }
 
   $: if (compareEnabled && rightMapDiv && !rightMap) {
@@ -1063,6 +1117,10 @@
 
   $: if (rightMapReady && rightMap && massartItems.length > 0) {
     setMassartPins(rightMap, massartItems, rightTimelineYear, MASSART_LEEWAY);
+  }
+
+  $: if (imageCollectionBubblePane === 'right' && !compareEnabled) {
+    closeImageCollectionBubble();
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
@@ -1086,7 +1144,7 @@
               const { manifestUrl } = feat.properties as { manifestUrl: string };
               const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
               if (!item) return;
-              openImageCollectionBubble(item);
+              openImageCollectionBubble(item, 'left');
             });
             map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
             map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -1152,29 +1210,12 @@
       }
 
       // IIIF click
-      if (iiifHoveredMaps.length === 0) {
-        iiifInfoPanel = null;
-      } else {
-        const items: IiifMapInfo[] = [];
-        for (const hit of iiifHoveredMaps) {
-          const info = getManifestInfoForMapId(hit.mapId);
-          if (!info) continue;
-          const mainId = groupIdToMainId.get(hit.groupId) ?? '';
-          const bbox: [number, number, number, number] | undefined = hit.warpedMap?.geoMaskBbox;
-          items.push({
-            title: info.label,
-            sourceManifestUrl: info.sourceManifestUrl,
-            imageServiceUrl: hit.warpedMap?.georeferencedMap?.resource?.id ?? undefined,
-            manifestAllmapsUrl: info.manifestAllmapsUrl,
-            layerLabel: MAIN_LAYER_LABELS[mainId] ?? '',
-            layerColor: colorForGroupId(hit.groupId),
-            mainId,
-            centerLon: bbox ? (bbox[0] + bbox[2]) / 2 : undefined,
-            centerLat: bbox ? (bbox[1] + bbox[3]) / 2 : undefined,
-          });
-        }
-        iiifInfoPanel = items.length > 0 ? items : null;
-      }
+      const item = buildIiifInfoPanelItems(iiifHoveredMaps)[0];
+      if (!item) return;
+      const centerLon = item.centerLon;
+      const centerLat = item.centerLat;
+      if (centerLon == null || centerLat == null) return;
+      openPreviewBubbleAt(iiifBubbleItem(item), centerLon, centerLat, 'left');
     };
 
     const onMapMove = () => {
@@ -1240,16 +1281,12 @@
     {#if panelOpen}
       <InfoCards
         {pinnedCards}
-        {iiifPanelGroups}
+        iiifPanelGroups={[]}
         {parcelClickInfo}
         on:unpin={(e) => unpinCard(e.detail)}
-        on:close-iiif={(e) => closeIiifGroup(e.detail)}
         on:close-parcel={() => { parcelClickInfo = null; setPrimitiveSelectFeature(map, null); }}
-        on:pin-iiif={(e) => pinIiifGroup(e.detail)}
         on:pin-parcel={() => pinParcel()}
-        on:focus-iiif={(e) => focusIiifGroup(e.detail)}
         on:focus-parcel={(e) => focusParcel(e.detail)}
-        on:open-viewer={(e) => { viewerItem = e.detail; viewerOpen = true; }}
       />
     {/if}
 
@@ -1486,7 +1523,7 @@
   .compare-toggle {
     padding: 9px 14px;
     border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-xs);
     background: rgba(255, 255, 255, 0.94);
     color: #161616;
     font-size: 12px;

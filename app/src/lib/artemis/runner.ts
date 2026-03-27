@@ -179,6 +179,18 @@ export function resetCompiledIndexCache() {
   paneRuntimes.clear();
 }
 
+export function resetPaneRuntime(paneId: PaneRuntimeId = "main") {
+  const runtime = getPaneRuntime(paneId);
+  runtime.activeLayersByGroup.clear();
+  runtime.activeWarpedLayersByGroup.clear();
+  runtime.mapIdToManifestInfo.clear();
+  runtime.activeLayerCleanup.clear();
+  runtime.parkedLayersByGroup.clear();
+  if (paneId !== "main") {
+    paneRuntimes.delete(paneId);
+  }
+}
+
 export function getManifestInfoForMapId(mapId: string, paneId: PaneRuntimeId = "main") {
   return getPaneRuntime(paneId).mapIdToManifestInfo.get(mapId) ?? null;
 }

@@ -89,9 +89,15 @@
           <span class="viewer-infobar-url" title={sourceManifestUrl}>{sourceManifestUrl}</span>
           <button
             type="button"
-            class="viewer-infobar-btn"
+            class="viewer-infobar-btn viewer-infobar-btn--primary"
             on:click={async () => { try { await navigator.clipboard.writeText(sourceManifestUrl); } catch { /* ignore */ } }}
-          >Copy URL</button>
+          >
+            <svg class="viewer-infobar-btn-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="5" y="3.5" width="8" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M6 2.5h3.5a1.5 1.5 0 0 1 1.5 1.5v0.5H6.5A1.5 1.5 0 0 0 5 6v5H4A1.5 1.5 0 0 1 2.5 9.5V4A1.5 1.5 0 0 1 4 2.5H6Z" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            <span>Manifest URL</span>
+          </button>
         {/if}
         {#if manifestAllmapsUrl}
           <button
@@ -197,8 +203,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 14px;
-    height: 36px;
+    padding: 10px 14px;
+    min-height: 56px;
     flex-shrink: 0;
     background: var(--viewer-bg);
     border-top: 0.5px solid var(--panel-border);
@@ -217,19 +223,34 @@
 
   .viewer-infobar-btn {
     flex-shrink: 0;
-    padding: 4px 9px;
-    font-size: 11px;
+    min-height: 42px;
+    padding: 10px 16px;
+    font-size: 12px;
+    font-weight: 700;
     border-radius: var(--radius-xs);
-    border: 0.5px solid var(--border-ui);
-    background: var(--result-bg);
-    color: var(--text-muted);
+    border: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
+    background: color-mix(in srgb, var(--viewer-topbar-bg) 72%, white);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .viewer-infobar-btn:hover {
-    background: var(--result-hover);
-    color: var(--text-primary);
+    background: color-mix(in srgb, var(--viewer-topbar-bg) 86%, white);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .viewer-infobar-btn--primary {
+    min-width: 136px;
+  }
+
+  .viewer-infobar-btn-icon {
+    flex: 0 0 auto;
   }
 
   /* Override OSD's default canvas background */
