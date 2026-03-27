@@ -48,7 +48,7 @@
   // ─── Map ───────────────────────────────────────────────────────────────────
 
   type PaneId = 'left' | 'right';
-  type ViewMode = 'single' | 'split' | 'swipe';
+  type ViewMode = 'single' | 'split';
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
   let mapStageEl: HTMLElement;
@@ -58,8 +58,6 @@
   let rightMapInitInFlight = false;
   let suppressSyncPane: PaneId | null = null;
   let viewMode: ViewMode = 'single';
-  let swipePosition = 50;
-  let swipeDragging = false;
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -136,9 +134,6 @@
     setViewMode(viewMode === 'split' ? 'single' : 'split');
   }
 
-  function toggleSwipeMode() {
-    setViewMode(viewMode === 'swipe' ? 'single' : 'swipe');
-  }
 
   // ─── Logging ───────────────────────────────────────────────────────────────
 
@@ -210,7 +205,6 @@
   let initialWarmupLabel = 'Preparing IIIF layers';
   $: dualPaneEnabled = viewMode !== 'single';
   $: isSplitLayout = viewMode === 'split';
-  $: isSwipeLayout = viewMode === 'swipe';
 
   // ─── Layer helpers ─────────────────────────────────────────────────────────
 
@@ -1018,49 +1012,6 @@
     suppressSyncPane = null;
   }
 
-  function updateSwipePosition(clientX: number) {
-    if (!mapStageEl) return;
-    const rect = mapStageEl.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const pct = ((clientX - rect.left) / rect.width) * 100;
-    swipePosition = Math.max(0, Math.min(100, pct));
-  }
-
-  function onSwipeHandlePointerDown(event: PointerEvent) {
-    if (!isSwipeLayout) return;
-    swipeDragging = true;
-    updateSwipePosition(event.clientX);
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function onWindowPointerMove(event: PointerEvent) {
-    if (!swipeDragging) return;
-    updateSwipePosition(event.clientX);
-  }
-
-  function stopSwipeDrag() {
-    if (!swipeDragging) return;
-    swipeDragging = false;
-  }
-
-  function onSwipeHandleKeyDown(event: KeyboardEvent) {
-    if (!isSwipeLayout) return;
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') {
-      return;
-    }
-    event.preventDefault();
-    if (event.key === 'Home') {
-      swipePosition = 0;
-      return;
-    }
-    if (event.key === 'End') {
-      swipePosition = 100;
-      return;
-    }
-    const delta = event.key === 'ArrowLeft' ? -2 : 2;
-    swipePosition = Math.max(0, Math.min(100, swipePosition + delta));
-  }
 
   function attachRightMassartHandlers(targetMap: maplibregl.Map) {
     for (const layerId of getMassartClickLayerIds()) {
@@ -1193,16 +1144,6 @@
     setMassartPins(rightMap, massartItems, rightTimelineYear, MASSART_LEEWAY);
   }
 
-  $: if (isSwipeLayout && rightMap) {
-    swipePosition;
-    void tick().then(() => {
-      try { rightMap?.resize(); } catch { /* ignore */ }
-    });
-  }
-
-  $: if (!isSwipeLayout && swipeDragging) {
-    swipeDragging = false;
-  }
 
   $: if (imageCollectionBubblePane === 'right' && !dualPaneEnabled) {
     closeImageCollectionBubble();
@@ -1211,10 +1152,6 @@
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   onMount(() => {
-    window.addEventListener('pointermove', onWindowPointerMove);
-    window.addEventListener('pointerup', stopSwipeDrag);
-    window.addEventListener('pointercancel', stopSwipeDrag);
-
     map = ensureMapContext(mapDiv);
     attachAllmapsDebugEvents(map, log);
     map.on('load', () => {
@@ -1352,9 +1289,6 @@
     void fetchIndex();
 
     return () => {
-      window.removeEventListener('pointermove', onWindowPointerMove);
-      window.removeEventListener('pointerup', stopSwipeDrag);
-      window.removeEventListener('pointercancel', stopSwipeDrag);
       map.off('mousemove', onMouseMove);
       map.off('mouseout',  onMouseOut);
       map.off('click',     onClick);
@@ -1373,46 +1307,19 @@
     <div
       class="map-stage"
       class:is-split={isSplitLayout}
-      class:is-swipe={isSwipeLayout}
       class:is-dual-pane={dualPaneEnabled}
-      class:is-swipe-dragging={swipeDragging}
-      style="--divider-position:{swipePosition}%"
       bind:this={mapStageEl}
     >
       <div class="map-pane map-pane--left">
-        {#if dualPaneEnabled}
-          <div
-            class="pane-year-pill pane-year-pill--left"
-            aria-live="polite"
-          ><strong>{Math.round(massartYear)}</strong></div>
-        {/if}
         <div class="map-canvas" bind:this={mapDiv}></div>
       </div>
       {#if dualPaneEnabled}
         <div class="map-pane map-pane--right">
-          <div
-            class="pane-year-pill pane-year-pill--right"
-            aria-live="polite"
-          ><strong>{Math.round(rightTimelineYear)}</strong></div>
           <div class="map-canvas" bind:this={rightMapDiv}></div>
         </div>
       {/if}
-      {#if isSwipeLayout}
-        <div class="swipe-divider" style="left:var(--divider-position)">
-          <button
-            class="swipe-handle"
-            type="button"
-            role="slider"
-            aria-label="Adjust swipe divider"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow={Math.round(swipePosition)}
-            on:pointerdown={onSwipeHandlePointerDown}
-            on:keydown={onSwipeHandleKeyDown}
-          >
-            <span></span>
-          </button>
-        </div>
+      {#if isSplitLayout}
+        <div class="split-divider" aria-hidden="true"></div>
       {/if}
     </div>
 
@@ -1471,14 +1378,7 @@
           type="button"
           aria-pressed={isSplitLayout}
           on:click={toggleSplitMode}
-        >{isSplitLayout ? 'Exit Split' : 'Split Views'}</button>
-        <button
-          class="compare-toggle compare-toggle--swipe"
-          class:is-active={isSwipeLayout}
-          type="button"
-          aria-pressed={isSwipeLayout}
-          on:click={toggleSwipeMode}
-        >{isSwipeLayout ? 'Exit Swipe' : 'Swipe Views'}</button>
+        >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
       </div>
       <Timeslider
         {massartItems}
@@ -1588,108 +1488,45 @@
     clip-path: none;
   }
 
-  .map-stage.is-swipe .map-pane--left {
-    position: absolute;
-    inset: 0;
-  }
-
-  .map-stage.is-swipe .map-pane--right {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    clip-path: inset(0 0 0 var(--divider-position));
-  }
-
-  .pane-year-pill {
-    position: absolute;
-    top: 12px;
-    z-index: 5;
-    padding: 8px 14px;
-    border-radius: var(--radius-pill);
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    background: rgba(255, 255, 255, 0.95);
-    color: #111111;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1;
-    box-shadow:
-      0 8px 20px rgba(0, 0, 0, 0.12),
-      0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-    backdrop-filter: blur(4px);
-    pointer-events: none;
-    left: 50%;
-    transform: translateX(-50%);
-  }
-
-  .map-stage.is-swipe .pane-year-pill--left {
-    left: calc(var(--divider-position) / 2);
-  }
-
-  .map-stage.is-swipe .pane-year-pill--right {
-    left: calc((100% + var(--divider-position)) / 2);
-  }
-
-  .map-stage.is-swipe.is-swipe-dragging {
-    user-select: none;
-  }
-
-  .swipe-divider {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 0;
-    transform: translateX(-50%);
-    z-index: 3;
-    pointer-events: none;
-  }
-
-  .swipe-divider::before {
+  .map-stage.is-split .map-pane--left::after,
+  .map-stage.is-split .map-pane--right::before {
     content: '';
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 50%;
-    width: 4px;
-    transform: translateX(-50%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.4)),
-      linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.18));
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.42),
-      0 0 14px rgba(0, 0, 0, 0.18);
+    width: 18px;
+    pointer-events: none;
+    z-index: 3;
   }
 
-  .swipe-handle {
+  .map-stage.is-split .map-pane--left::after {
+    right: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.16) 100%);
+  }
+
+  .map-stage.is-split .map-pane--right::before {
+    left: 0;
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0.16) 0%, transparent 100%);
+  }
+
+  .split-divider {
     position: absolute;
-    top: 50%;
+    top: 10px;
+    bottom: 10px;
     left: 50%;
-    width: 34px;
-    height: 70px;
-    transform: translate(-50%, -50%);
-    border: 1px solid rgba(0, 0, 0, 0.14);
+    width: 10px;
+    transform: translateX(-50%);
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.96);
-    box-shadow: var(--shadow-card);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: ew-resize;
-    pointer-events: auto;
-  }
-
-  .swipe-handle span {
-    width: 6px;
-    height: 30px;
-    border-radius: 999px;
+    pointer-events: none;
+    z-index: 4;
     background:
-      linear-gradient(180deg, #00a99a 0%, #00a99a 48%, #8a6ad6 52%, #8a6ad6 100%);
+      linear-gradient(90deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.78) 50%, rgba(255, 255, 255, 0.14) 100%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.12) 0%, rgba(0, 0, 0, 0.32) 50%, rgba(0, 0, 0, 0.12) 100%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.32),
+      0 0 20px rgba(0, 0, 0, 0.18);
   }
 
-  .swipe-handle:focus-visible {
-    outline: 2px solid rgba(0, 0, 0, 0.48);
-    outline-offset: 2px;
-  }
 
   .map-canvas {
     width: 100%;
@@ -1803,9 +1640,5 @@
     color: #ffffff;
   }
 
-  .compare-toggle--swipe.is-active {
-    background: #171717;
-    border-color: #171717;
-  }
 
 </style>

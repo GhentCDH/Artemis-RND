@@ -479,6 +479,67 @@ import type { MassartItem } from "$lib/artemis/types";
 const MASSART_SOURCE_ID = "massart-pins-source";
 const MASSART_LAYER_INACTIVE = "massart-pins-inactive";
 const MASSART_LAYER_ACTIVE   = "massart-pins-active";
+const MASSART_ICON_INACTIVE = "massart-photo-icon-inactive";
+const MASSART_ICON_ACTIVE = "massart-photo-icon-active";
+
+function makeMassartIcon(size: number, accent: string): ImageData | null {
+  if (typeof document === "undefined") return null;
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = size * scale;
+  canvas.height = size * scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.scale(scale, scale);
+  ctx.clearRect(0, 0, size, size);
+
+  const radius = 4;
+  const x = 1.5;
+  const y = 2;
+  const w = size - 3;
+  const h = size - 4;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "rgba(255,255,255,0.96)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.roundRect(x + 1.4, y + 1.3, w - 2.8, h - 2.8, radius - 1);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(x + 5.2, y + 4.8, 1.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(x + 3.2, y + h - 3.2);
+  ctx.lineTo(x + 7.1, y + 8.9);
+  ctx.lineTo(x + 9.8, y + 11.3);
+  ctx.lineTo(x + 12.7, y + 7.9);
+  ctx.lineTo(x + w - 2.6, y + h - 3.2);
+  ctx.closePath();
+  ctx.fill();
+
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function ensureMassartIcons(map: maplibregl.Map): void {
+  if (!map.hasImage(MASSART_ICON_INACTIVE)) {
+    const inactive = makeMassartIcon(18, "#D4A84B");
+    if (inactive) map.addImage(MASSART_ICON_INACTIVE, inactive, { pixelRatio: 2 });
+  }
+  if (!map.hasImage(MASSART_ICON_ACTIVE)) {
+    const active = makeMassartIcon(22, "#F59E0B");
+    if (active) map.addImage(MASSART_ICON_ACTIVE, active, { pixelRatio: 2 });
+  }
+}
 
 function massartGeoJSON(items: MassartItem[]): GeoJSON.FeatureCollection {
   return {
@@ -512,6 +573,7 @@ export function setMassartPins(
   year: number,
   leeway: number
 ): void {
+  ensureMassartIcons(map);
   const data = massartGeoJSON(items);
 
   if (map.getSource(MASSART_SOURCE_ID)) {
@@ -523,33 +585,34 @@ export function setMassartPins(
   if (!map.getLayer(MASSART_LAYER_INACTIVE)) {
     map.addLayer({
       id: MASSART_LAYER_INACTIVE,
-      type: "circle",
+      type: "symbol",
       source: MASSART_SOURCE_ID,
       filter: massartInactiveFilter(year, leeway),
-      paint: {
-        "circle-radius": 6,
-        "circle-color": "#D4A84B",
-        "circle-opacity": 0.28,
-        "circle-stroke-width": 1,
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-opacity": 0.3,
+      layout: {
+        "icon-image": MASSART_ICON_INACTIVE,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
+      paint: {
+        "icon-opacity": 0.42,
+      }
     });
   }
 
   if (!map.getLayer(MASSART_LAYER_ACTIVE)) {
     map.addLayer({
       id: MASSART_LAYER_ACTIVE,
-      type: "circle",
+      type: "symbol",
       source: MASSART_SOURCE_ID,
       filter: massartActiveFilter(year, leeway),
-      paint: {
-        "circle-radius": 9,
-        "circle-color": "#D4A84B",
-        "circle-opacity": 1,
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ffffff",
+      layout: {
+        "icon-image": MASSART_ICON_ACTIVE,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
+      paint: {
+        "icon-opacity": 1,
+      }
     });
   }
 
@@ -569,5 +632,6 @@ export function updateMassartActiveYear(
 }
 
 export function getMassartClickLayerIds(): string[] {
-  return [MASSART_LAYER_ACTIVE, MASSART_LAYER_INACTIVE];
+  // Only the active-year pin layer should be interactive.
+  return [MASSART_LAYER_ACTIVE];
 }

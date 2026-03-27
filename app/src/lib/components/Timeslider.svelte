@@ -44,7 +44,7 @@
       key: 'hand', mainId: 'handdrawn', label: 'Hand drawn',
       start: 1700, end: 1715, repr: 1707, color: '#888780', row: 1,
       sublayers: [
-        { id: 'iiif', subId: 'handdrawn-iiif', label: 'IIIF sheets', defaultOn: true },
+        { id: 'iiif', subId: 'handdrawn-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'handdrawn-parcels', label: 'Parcels', defaultOn: false },
         { id: 'water', subId: 'handdrawn-water', label: 'Water infrastructure', defaultOn: false },
       ],
@@ -53,7 +53,7 @@
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
       start: 1770, end: 1778, repr: 1774, color: '#6aaa5a', row: 1,
       sublayers: [
-        { id: 'wmts', subId: 'ferraris-wmts', label: 'Map tiles', defaultOn: true },
+        { id: 'wmts', subId: 'ferraris-wmts', label: 'Map', defaultOn: true },
         { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
       ],
     },
@@ -61,7 +61,7 @@
       key: 'primitief', mainId: 'primitief', label: 'Primitief Kadaster',
       start: 1808, end: 1834, repr: 1814, color: '#c97a2e', row: 2,
       sublayers: [
-        { id: 'iiif', subId: 'primitief-iiif', label: 'IIIF sheets', defaultOn: true },
+        { id: 'iiif', subId: 'primitief-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'primitief-parcels', label: 'Parcels', defaultOn: false },
         { id: 'landuse', subId: 'primitief-landusage', label: 'Land use', defaultOn: false },
       ],
@@ -70,7 +70,7 @@
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
       start: 1846, end: 1854, repr: 1850, color: '#c45000', row: 2,
       sublayers: [
-        { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map tiles', defaultOn: true },
+        { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map', defaultOn: true },
         { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
       ],
     },
@@ -78,7 +78,7 @@
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
       start: 1847, end: 1855, repr: 1851, color: '#a0b020', row: 1,
       sublayers: [
-        { id: 'iiif', subId: 'gereduceerd-iiif', label: 'IIIF sheets', defaultOn: true },
+        { id: 'iiif', subId: 'gereduceerd-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'gereduceerd-parcels', label: 'Parcels', defaultOn: false },
         { id: 'landuse', subId: 'gereduceerd-landusage', label: 'Land use', defaultOn: false },
       ],
@@ -90,10 +90,9 @@
   type PaneState = { id: PaneId; year: number; label: string; color: string };
   const TIMELINE_AXIS_START = 1690;
   const TIMELINE_AXIS_END = 1930;
+  const SCRUBBER_THUMB_SIZE = 28;
 
-  const defaultYear = Math.round(
-    (Math.min(...SOURCES.map(s => s.start)) + Math.max(...SOURCES.map(s => s.end))) / 2
-  );
+  const defaultYear = 1774;
 
   let sliderYear = defaultYear;
   let trackWidth = 0;
@@ -108,7 +107,14 @@
     SOURCES.map(s => [s.key, true])
   );
 
-  let sublayerState: Record<string, Record<string, boolean>> = Object.fromEntries(
+  let leftSublayerState: Record<string, Record<string, boolean>> = Object.fromEntries(
+    SOURCES.map(s => [
+      s.key,
+      Object.fromEntries(s.sublayers.map(sub => [sub.id, sub.defaultOn])),
+    ])
+  );
+
+  let rightSublayerState: Record<string, Record<string, boolean>> = Object.fromEntries(
     SOURCES.map(s => [
       s.key,
       Object.fromEntries(s.sublayers.map(sub => [sub.id, sub.defaultOn])),
@@ -184,6 +190,13 @@
     return ((yearForPane(pane) - axisStart) / axisSpan) * 100;
   }
 
+  function scrubberCenterPx(year: number): number {
+    if (trackWidth <= 0) return 0;
+    const ratio = Math.max(0, Math.min(1, (year - axisStart) / axisSpan));
+    const usableWidth = Math.max(0, trackWidth - SCRUBBER_THUMB_SIZE);
+    return ratio * usableWidth + SCRUBBER_THUMB_SIZE / 2;
+  }
+
   function onSliderInput(pane: PaneId, e: Event) {
     const year = parseFloat((e.target as HTMLInputElement).value);
     if (!dualPaneEnabled) {
@@ -227,23 +240,65 @@
     enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
   }
 
-  function toggleSublayer(key: SourceKey, subId: string, localId: string) {
-    const cur = sublayerState[key]?.[localId] ?? false;
-    sublayerState = {
-      ...sublayerState,
-      [key]: { ...sublayerState[key], [localId]: !cur },
+  function paneSublayerState(pane: PaneId): Record<string, Record<string, boolean>> {
+    return pane === 'right' ? rightSublayerState : leftSublayerState;
+  }
+
+  function isSublayerEnabled(pane: PaneId, key: SourceKey, localId: string): boolean {
+    return paneSublayerState(pane)[key]?.[localId] ?? false;
+  }
+
+  function toggleSublayer(pane: PaneId, key: SourceKey, subId: string, localId: string) {
+    const cur = isSublayerEnabled(pane, key, localId);
+    if (pane === 'right') {
+      rightSublayerState = {
+        ...rightSublayerState,
+        [key]: { ...rightSublayerState[key], [localId]: !cur },
+      };
+      const rightVisible = enabledLayers[key] && rightVisibleSourceKeys.has(key);
+      if (rightVisible) dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
+      return;
+    }
+
+    leftSublayerState = {
+      ...leftSublayerState,
+      [key]: { ...leftSublayerState[key], [localId]: !cur },
     };
     const leftVisible = enabledLayers[key] && leftVisibleSourceKeys.has(key);
     if (leftVisible) dispatch('sublayerChange', { subId, enabled: !cur });
     if (leftVisible) dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
-    if (dualPaneEnabled) {
-      const rightVisible = enabledLayers[key] && rightVisibleSourceKeys.has(key);
-      if (rightVisible) dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
+  }
+
+  function sourcePattern(key: SourceKey): string {
+    if (key === 'hand') {
+      return 'linear-gradient(135deg, rgba(255,255,255,0.22) 0 8%, transparent 8% 50%, rgba(255,255,255,0.18) 50% 58%, transparent 58% 100%)';
     }
+    if (key === 'ferraris') {
+      return 'repeating-linear-gradient(90deg, rgba(255,255,255,0.2) 0 2px, transparent 2px 14px), repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0 2px, transparent 2px 12px)';
+    }
+    if (key === 'primitief') {
+      return 'radial-gradient(circle at 25% 35%, rgba(255,255,255,0.2) 0 2px, transparent 2.5px), radial-gradient(circle at 72% 68%, rgba(255,255,255,0.16) 0 2px, transparent 2.5px), linear-gradient(145deg, transparent 0 44%, rgba(255,255,255,0.14) 44% 49%, transparent 49% 100%)';
+    }
+    if (key === 'vander') {
+      return 'repeating-linear-gradient(135deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 12px), repeating-linear-gradient(45deg, rgba(255,255,255,0.1) 0 1px, transparent 1px 16px)';
+    }
+    return 'radial-gradient(circle at center, rgba(255,255,255,0.18) 0 2px, transparent 2.5px), radial-gradient(circle at center, rgba(255,255,255,0.12) 0 1px, transparent 1.5px)';
+  }
+
+  function sourcePatternSize(key: SourceKey): string {
+    if (key === 'hand') return '22px 22px';
+    if (key === 'ferraris') return '18px 18px, 18px 18px';
+    if (key === 'primitief') return '28px 28px, 28px 28px, 24px 24px';
+    if (key === 'vander') return '16px 16px, 24px 24px';
+    return '18px 18px, 9px 9px';
   }
 
   function sourceBlockStyle(src: SourceDef): string {
-    return `left:${pct(src.start, axisStart, axisSpan)};width:${widthPct(src.start, src.end, axisSpan)};--c:${src.color};--accent:${sourceAccent[src.key]}`;
+    return `left:${pct(src.start, axisStart, axisSpan)};width:${widthPct(src.start, src.end, axisSpan)};--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)}`;
+  }
+
+  function sourceMenuStyle(src: SourceDef): string {
+    return `--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)}`;
   }
 
   function sourceIsCurrentForKey(key: SourceKey): boolean {
@@ -263,7 +318,7 @@
       dispatch('paneMainToggle', { pane: 'left', mainId: src.mainId, enabled: visible });
       if (visible) {
         for (const sub of src.sublayers) {
-          if (sublayerState[src.key]?.[sub.id]) {
+          if (leftSublayerState[src.key]?.[sub.id]) {
             dispatch('sublayerChange', { subId: sub.subId, enabled: true });
             dispatch('paneSublayerChange', { pane: 'left', subId: sub.subId, enabled: true });
           }
@@ -275,7 +330,7 @@
         dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightVisible });
         if (rightVisible) {
           for (const sub of src.sublayers) {
-            if (sublayerState[src.key]?.[sub.id]) {
+            if (rightSublayerState[src.key]?.[sub.id]) {
               dispatch('paneSublayerChange', { pane: 'right', subId: sub.subId, enabled: true });
             }
           }
@@ -344,14 +399,6 @@
     return acc;
   }, {} as Record<SourceKey, PaneState[]>);
 
-  $: sourceAccent = SOURCES.reduce<Record<SourceKey, string>>((acc, src) => {
-    const panes = activePanesBySource[src.key];
-    acc[src.key] = panes.length > 1
-      ? `linear-gradient(90deg, ${panes[0].color} 0%, ${panes[0].color} 48%, ${panes[1].color} 52%, ${panes[1].color} 100%)`
-      : panes[0]?.color ?? src.color;
-    return acc;
-  }, {} as Record<SourceKey, string>);
-
   $: {
     for (const src of SOURCES) {
       const nowVisible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
@@ -365,7 +412,7 @@
           for (const sub of src.sublayers) {
             dispatch('sublayerChange', {
               subId: sub.subId,
-              enabled: sublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
+              enabled: leftSublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
             });
           }
         }
@@ -384,7 +431,7 @@
             dispatch('paneSublayerChange', {
               pane: 'left',
               subId: sub.subId,
-              enabled: sublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
+              enabled: leftSublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
             });
           }
         }
@@ -403,7 +450,7 @@
             dispatch('paneSublayerChange', {
               pane: 'right',
               subId: sub.subId,
-              enabled: sublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
+              enabled: rightSublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
             });
           }
         }
@@ -420,21 +467,24 @@
   {#if leftPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
       {#each leftPanelSources as src}
-        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
+        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
           <div class="sub-menu-header">
             <span class="sub-menu-swatch" style="--c:{src.color}"></span>
             <span class="sub-menu-title">{src.label}</span>
           </div>
+          {#if !enabledLayers[src.key]}
+            <div class="sub-menu-disabled-note">Enable map for access to layers.</div>
+          {/if}
           <div class="sub-menu-pills">
             {#each src.sublayers as sub}
               <button
                 class="sub-pill"
-                class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+                class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
                 class:is-layer-disabled={!enabledLayers[src.key]}
                 style="--c:{src.color}"
                 type="button"
                 title="{src.label} — {sub.label}"
-                on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+                on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}
               >{sub.label}</button>
             {/each}
           </div>
@@ -446,21 +496,24 @@
   {#if rightPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--right" transition:fade={{ duration: 140 }}>
       {#each rightPanelSources as src}
-        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
+        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
           <div class="sub-menu-header">
             <span class="sub-menu-swatch" style="--c:{src.color}"></span>
             <span class="sub-menu-title">{src.label}</span>
           </div>
+          {#if !enabledLayers[src.key]}
+            <div class="sub-menu-disabled-note">Enable map for access to layers.</div>
+          {/if}
           <div class="sub-menu-pills">
             {#each src.sublayers as sub}
               <button
                 class="sub-pill"
-                class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+                class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)}
                 class:is-layer-disabled={!enabledLayers[src.key]}
                 style="--c:{src.color}"
                 type="button"
                 title="{src.label} — {sub.label}"
-                on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+                on:click={() => toggleSublayer('right', src.key, sub.subId, sub.id)}
               >{sub.label}</button>
             {/each}
           </div>
@@ -471,21 +524,24 @@
 {:else if singlePanelSources.length > 0}
   <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
     {#each singlePanelSources as src}
-      <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]}>
+      <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
         <div class="sub-menu-header">
           <span class="sub-menu-swatch" style="--c:{src.color}"></span>
           <span class="sub-menu-title">{src.label}</span>
         </div>
+        {#if !enabledLayers[src.key]}
+          <div class="sub-menu-disabled-note">Enable map for access to layers.</div>
+        {/if}
         <div class="sub-menu-pills">
           {#each src.sublayers as sub}
             <button
               class="sub-pill"
-              class:is-disabled={!(sublayerState[src.key]?.[sub.id] ?? false)}
+              class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
               class:is-layer-disabled={!enabledLayers[src.key]}
               style="--c:{src.color}"
               type="button"
               title="{src.label} — {sub.label}"
-              on:click={() => toggleSublayer(src.key, sub.subId, sub.id)}
+              on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}
             >{sub.label}</button>
           {/each}
         </div>
@@ -528,7 +584,7 @@
           style={sourceBlockStyle(src)}
           role="button"
           tabindex="0"
-          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable to access sublayers`}
+          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable map for access to layers`}
           aria-pressed={enabled}
           on:click={() => handleBlockClick(src.key)}
           on:keydown={(e) => e.key === 'Enter' && handleBlockClick(src.key)}
@@ -545,14 +601,14 @@
           <span
             class="scrubber-label"
             class:scrubber-label--right={pane.id === 'right'}
-            style="left:{scrubberPctForPane(pane.id)}%;--pane-color:{pane.color};--pane-badge-bg:{PANE_META[pane.id].badgeBg};--pane-badge-text:{PANE_META[pane.id].badgeText}"
+            style="left:{scrubberCenterPx(yearForPane(pane.id))}px;--pane-color:{pane.color};--pane-badge-bg:{PANE_META[pane.id].badgeBg};--pane-badge-text:{PANE_META[pane.id].badgeText}"
             aria-hidden="true"
           >{pane.label} · {Math.round(pane.year)}</span>
         {/each}
       {:else}
         <span
           class="scrubber-label scrubber-label--single"
-          style="left:{((sliderYear - axisStart) / axisSpan) * 100}%"
+          style="left:{scrubberCenterPx(sliderYear)}px"
           aria-hidden="true"
         >{Math.round(sliderYear)}</span>
       {/if}
@@ -616,7 +672,7 @@
           style={sourceBlockStyle(src)}
           role="button"
           tabindex="0"
-          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable to access sublayers`}
+          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable map for access to layers`}
           aria-pressed={enabled}
           on:click={() => handleBlockClick(src.key)}
           on:keydown={(e) => e.key === 'Enter' && handleBlockClick(src.key)}
@@ -676,6 +732,7 @@
   }
 
   .sub-menu-header {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -683,6 +740,26 @@
     padding: 10px;
     background: var(--pane-header-tint, transparent);
     border-radius: calc(var(--radius-md) - 2px) calc(var(--radius-md) - 2px) 0 0;
+    overflow: hidden;
+  }
+
+  .sub-menu-header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(115deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 42%, transparent 42%),
+      var(--pattern);
+    background-size: auto, var(--pattern-size);
+    background-position: center, center;
+    opacity: 0.9;
+    pointer-events: none;
+  }
+
+  .sub-menu-swatch,
+  .sub-menu-title {
+    position: relative;
+    z-index: 1;
   }
 
   .sub-menu-swatch {
@@ -708,7 +785,20 @@
     gap: 6px;
   }
 
+  .sub-menu-disabled-note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: var(--radius-xs);
+    background: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.68);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.35;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.38);
+  }
+
   .sub-pill {
+    position: relative;
     padding: 9px 18px;
     background: var(--c);
     color: #ffffff;
@@ -721,23 +811,42 @@
     white-space: nowrap;
     text-align: center;
     box-shadow: var(--shadow-sm);
+    overflow: hidden;
     transition: opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
   }
 
   .sub-pill.is-disabled {
-    opacity: 0.45;
-    filter: saturate(0.35);
-    box-shadow: none;
+    opacity: 0.7;
+    filter: saturate(0.72) brightness(0.96);
+    box-shadow:
+      0 0 0 1.5px rgba(0,0,0,0.25),
+      0 1px 4px rgba(0,0,0,0.12);
+    cursor: pointer;
   }
 
   .sub-pill.is-layer-disabled {
-    opacity: 0.4;
-    filter: saturate(0.5) brightness(0.94);
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    opacity: 0.72;
+    filter: saturate(0.76) brightness(0.96);
+    box-shadow:
+      0 0 0 1.5px rgba(0,0,0,0.25),
+      0 1px 4px rgba(0,0,0,0.12);
+    cursor: pointer;
   }
 
   .sub-pill:hover:not(.is-disabled):not(.is-layer-disabled) {
     filter: brightness(1.09);
+  }
+
+  .sub-pill.is-disabled:hover,
+  .sub-pill.is-layer-disabled:hover,
+  .sub-pill.is-disabled:focus-visible,
+  .sub-pill.is-layer-disabled:focus-visible {
+    opacity: 0.72;
+    filter: saturate(0.72) brightness(1.02);
+    box-shadow:
+      0 0 0 2px rgba(255,255,255,0.18) inset,
+      0 4px 10px rgba(0,0,0,0.12);
+    transform: translateY(-1px);
   }
 
   .timeslider {
@@ -782,9 +891,41 @@
     transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease, box-shadow 200ms ease;
   }
 
+  .source-block::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: calc(var(--radius-xs) - 1px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+    pointer-events: none;
+    z-index: 1;
+  }
+
   .source-block.is-disabled {
-    opacity: 0.28;
-    filter: saturate(0);
+    opacity: 0.66;
+    filter: saturate(0.72) brightness(0.95);
+    box-shadow:
+      0 0 0 2px rgba(0,0,0,0.25),
+      0 2px 8px rgba(0,0,0,0.12);
+  }
+
+  .source-block.is-disabled:hover,
+  .source-block.is-disabled:focus-visible {
+    opacity: 0.8;
+    filter: saturate(0.84) brightness(1);
+    box-shadow:
+      0 0 0 2px rgba(0,0,0,0.25),
+      0 6px 14px rgba(0,0,0,0.12),
+      0 0 0 2px rgba(255,255,255,0.22) inset;
+  }
+
+  .source-block.is-disabled .block-label {
+    color: rgba(255,255,255,0.96);
+    text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+  }
+
+  .source-block.is-disabled .block-date {
+    color: rgba(255,255,255,0.86);
   }
 
   .source-block.is-loading::after {
@@ -795,6 +936,7 @@
     background-size: 200% 100%;
     animation: pill-shimmer 1.3s ease-in-out infinite;
     pointer-events: none;
+    z-index: 1;
   }
 
   @keyframes pill-shimmer {
@@ -804,29 +946,42 @@
 
   .source-block:hover:not(.is-disabled) {
     filter: brightness(1.09);
+    box-shadow:
+      0 8px 18px rgba(0,0,0,0.16),
+      0 0 0 2px rgba(255,255,255,0.28) inset;
+  }
+
+  .source-block:focus-visible {
+    outline: 2px solid rgba(0, 0, 0, 0.55);
+    outline-offset: 2px;
+    box-shadow:
+      0 8px 18px rgba(0,0,0,0.18),
+      0 0 0 2px rgba(255,255,255,0.35) inset;
   }
 
   .source-block.is-current {
     z-index: 3;
   }
 
-  .source-block.is-compare-overlap {
-    background: var(--accent);
-  }
-
   .ts-row--above .source-block.is-current {
-    transform: scaleY(1.18);
+    transform: translateY(-3px) scale(1.06, 1.3);
     transform-origin: bottom center;
-    box-shadow: 0 -3px 10px rgba(0,0,0,0.18);
+    box-shadow:
+      0 -8px 22px rgba(0,0,0,0.24),
+      0 0 0 2px rgba(255,255,255,0.24) inset;
   }
 
   .ts-row--below .source-block.is-current {
-    transform: scaleY(1.18);
+    transform: translateY(3px) scale(1.06, 1.3);
     transform-origin: top center;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+    box-shadow:
+      0 8px 22px rgba(0,0,0,0.24),
+      0 0 0 2px rgba(255,255,255,0.24) inset;
   }
 
   .block-label {
+    position: relative;
+    z-index: 4;
     font-family: var(--font-ui);
     font-size: 12px;
     font-weight: 700;
@@ -841,6 +996,8 @@
   }
 
   .block-date {
+    position: relative;
+    z-index: 4;
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 400;
@@ -896,7 +1053,7 @@
     position: absolute;
     left: 0;
     top: 50%;
-    height: 28px;
+    height: 54px;
     transform: translateY(-50%);
     width: 100%;
     margin: 0;
@@ -904,8 +1061,12 @@
     z-index: 11;
     cursor: ew-resize;
     -webkit-appearance: none;
+    -moz-appearance: none;
     appearance: none;
     background: transparent;
+    border: none;
+    outline: none;
+    accent-color: transparent;
     pointer-events: none;
   }
 
@@ -916,28 +1077,50 @@
   .ts-scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: #ffffff;
-    border: 3px solid var(--pane-color);
+    height: 54px;
+    border-radius: 14px;
+    background-color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='54' viewBox='0 0 28 54'%3E%3Cpath d='M11 27 L7 23 M11 27 L7 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M17 27 L21 23 M17 27 L21 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    border: 2.5px solid var(--pane-color);
     cursor: ew-resize;
     box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.22),
       0 0 0 4px color-mix(in srgb, var(--pane-color) 18%, transparent),
-      var(--shadow-card);
+      0 0 0 1px rgba(255, 255, 255, 0.8) inset;
     pointer-events: auto;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+
+  .ts-scrubber::-webkit-slider-thumb:hover {
+    transform: scaleY(1.06);
+    box-shadow:
+      0 6px 22px rgba(0, 0, 0, 0.28),
+      0 0 0 6px color-mix(in srgb, var(--pane-color) 22%, transparent),
+      0 0 0 1px rgba(255, 255, 255, 0.8) inset;
   }
 
   .ts-scrubber::-moz-range-thumb {
+    -moz-appearance: none;
     width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: #ffffff;
-    border: 3px solid var(--pane-color);
+    height: 54px;
+    border-radius: 14px;
+    background-color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='54' viewBox='0 0 28 54'%3E%3Cpath d='M11 27 L7 23 M11 27 L7 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M17 27 L21 23 M17 27 L21 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    border: 2.5px solid var(--pane-color);
     cursor: ew-resize;
     box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.22),
       0 0 0 4px color-mix(in srgb, var(--pane-color) 18%, transparent),
-      var(--shadow-card);
+      0 0 0 1px rgba(255, 255, 255, 0.8) inset;
     pointer-events: auto;
+  }
+
+  .ts-scrubber::-moz-focus-outer {
+    border: 0;
   }
 
   .ts-scrubber--single {
@@ -945,12 +1128,17 @@
   }
 
   .ts-scrubber::-webkit-slider-runnable-track {
-    height: 28px;
+    height: 54px;
     background: transparent;
   }
 
   .ts-scrubber::-moz-range-track {
-    height: 28px;
+    height: 54px;
+    background: transparent;
+    border: none;
+  }
+
+  .ts-scrubber::-moz-range-progress {
     background: transparent;
     border: none;
   }
@@ -959,30 +1147,49 @@
     position: absolute;
     top: 50%;
     transform: translate(-50%, -50%) scale(1);
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #D4A84B;
-    border: 1.5px solid #ffffff;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    background-color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Crect x='2.25' y='3' width='13.5' height='12' rx='2' fill='%23d4a84b'/%3E%3Ccircle cx='6.2' cy='7.1' r='1.35' fill='white'/%3E%3Cpath d='M4.2 13l3.1-3.2 2.1 2 2.2-2.5 2.2 3.7H4.2z' fill='white'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    border: 1.5px solid rgba(255, 255, 255, 0.96);
     padding: 0;
     cursor: pointer;
     z-index: 9;
     pointer-events: auto;
-    transition: transform 150ms ease;
+    box-shadow:
+      0 0 0 2px rgba(212, 168, 75, 0.2),
+      0 2px 8px rgba(86, 54, 8, 0.26);
+    transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
   }
 
-  .img-dot:hover { transform: translate(-50%, -50%) scale(1.5); }
+  .img-dot:hover {
+    transform: translate(-50%, -50%) scale(1.35);
+    box-shadow:
+      0 0 0 3px rgba(212, 168, 75, 0.28),
+      0 4px 12px rgba(86, 54, 8, 0.3);
+  }
 
   .img-dot--multi {
-    width: 9px;
-    height: 9px;
-    box-shadow: 0 0 0 2px rgba(212, 168, 75, 0.4);
+    width: 20px;
+    height: 20px;
+    box-shadow:
+      0 0 0 3px rgba(212, 168, 75, 0.34),
+      0 4px 12px rgba(86, 54, 8, 0.28);
   }
 
   .img-dot--near {
-    background: #f59e0b;
-    transform: translate(-50%, -50%) scale(1.4);
-    box-shadow: 0 0 0 2.5px rgba(245, 158, 11, 0.35);
+    width: 22px;
+    height: 22px;
+    background-color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Crect x='2.5' y='3.25' width='17' height='15' rx='2.4' fill='%23f59e0b'/%3E%3Ccircle cx='7.7' cy='8.5' r='1.65' fill='white'/%3E%3Cpath d='M5.2 15.9l4-4.1 2.7 2.5 2.8-3.2 2.8 4.8H5.2z' fill='white'/%3E%3C/svg%3E");
+    transform: translate(-50%, -50%) scale(1.18);
+    box-shadow:
+      0 0 0 4px rgba(245, 158, 11, 0.32),
+      0 0 0 8px rgba(245, 158, 11, 0.14),
+      0 6px 16px rgba(124, 72, 1, 0.34);
   }
 
   .dot-popup {

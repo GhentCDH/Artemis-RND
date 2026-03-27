@@ -844,16 +844,7 @@ export async function runLayerGroup(opts: {
   let done = 0;
   let georefIdx = 0;
 
-  // Yield a macrotask every N entries so the browser can paint frames and
-  // process input during the annotation loop. Awaiting microtask-resolving
-  // promises (addGeoreferenceAnnotation) never yields a rendering frame; only
-  // a real macrotask (setTimeout) does.
-  const YIELD_EVERY_ENTRIES = 15;
-
   for (let idx = 0; idx < fetchedAll.length; idx++) {
-    if (idx > 0 && idx % YIELD_EVERY_ENTRIES === 0) {
-      await new Promise<void>((r) => setTimeout(r, 0));
-    }
     const item = fetchedAll[idx];
     // Assign layer before checking error so no-annotation entries don't consume a slot
     const targetLayer = "error" in item ? layers[0] : layers[georefIdx % layers.length];
