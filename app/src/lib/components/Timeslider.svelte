@@ -16,10 +16,10 @@
   const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
     left: {
       label: 'Left',
-      color: '#0e8aaa',
-      badgeBg: '#e0f4f9',
-      badgeText: '#0a5f78',
-      panelTint: 'rgba(14, 138, 170, 0.06)',
+      color: '#0a9688',
+      badgeBg: '#dff5f1',
+      badgeText: '#075c53',
+      panelTint: 'rgba(10, 150, 136, 0.08)',
     },
     right: {
       label: 'Right',
@@ -51,7 +51,7 @@
     },
     {
       key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
-      start: 1770, end: 1778, repr: 1774, color: '#4a9e5c', row: 1,
+      start: 1770, end: 1778, repr: 1774, color: '#6aaa5a', row: 1,
       sublayers: [
         { id: 'wmts', subId: 'ferraris-wmts', label: 'Map tiles', defaultOn: true },
         { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
@@ -68,7 +68,7 @@
     },
     {
       key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
-      start: 1846, end: 1854, repr: 1850, color: '#378ADD', row: 2,
+      start: 1846, end: 1854, repr: 1850, color: '#c45000', row: 2,
       sublayers: [
         { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map tiles', defaultOn: true },
         { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
@@ -76,7 +76,7 @@
     },
     {
       key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
-      start: 1847, end: 1855, repr: 1851, color: '#7b6fce', row: 1,
+      start: 1847, end: 1855, repr: 1851, color: '#a0b020', row: 1,
       sublayers: [
         { id: 'iiif', subId: 'gereduceerd-iiif', label: 'IIIF sheets', defaultOn: true },
         { id: 'parcels', subId: 'gereduceerd-parcels', label: 'Parcels', defaultOn: false },
@@ -657,8 +657,8 @@
 
   .ts-sub-panel--left {
     left: 12px;
-    --pane-border: #0e8aaa;
-    --pane-header-tint: rgba(14, 138, 170, 0.06);
+    --pane-border: #0a9688;
+    --pane-header-tint: rgba(10, 150, 136, 0.08);
   }
 
   .ts-sub-panel--right {
@@ -874,17 +874,19 @@
     bottom: calc(100% + 43px);
     transform: translateX(-50%);
     font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 700;
     color: var(--pane-badge-text);
     background: var(--pane-badge-bg);
-    border: 1px solid color-mix(in srgb, var(--pane-color) 22%, white);
+    border: 2px solid color-mix(in srgb, var(--pane-color) 52%, white);
     border-radius: 99px;
-    padding: 5px 10px;
+    padding: 6px 11px;
     white-space: nowrap;
     pointer-events: none;
     z-index: 12;
-    box-shadow: var(--shadow-md);
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--pane-color) 14%, transparent),
+      var(--shadow-md);
   }
 
   .scrubber-label--single {
@@ -922,24 +924,28 @@
 
   .ts-scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: #ffffff;
-    border: 2px solid var(--pane-color);
+    border: 3px solid var(--pane-color);
     cursor: ew-resize;
-    box-shadow: var(--shadow-card);
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--pane-color) 18%, transparent),
+      var(--shadow-card);
     pointer-events: auto;
   }
 
   .ts-scrubber::-moz-range-thumb {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: #ffffff;
-    border: 2px solid var(--pane-color);
+    border: 3px solid var(--pane-color);
     cursor: ew-resize;
-    box-shadow: var(--shadow-card);
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--pane-color) 18%, transparent),
+      var(--shadow-card);
     pointer-events: auto;
   }
 

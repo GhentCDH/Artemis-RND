@@ -18,10 +18,10 @@ export const MAIN_LAYER_LABELS: Record<string, string> = {
 };
 
 export const MAIN_LAYER_META: Record<string, { date: string; color: string }> = {
-  ferraris:     { date: '1771',      color: '#4a9e5c' },
-  vandermaelen: { date: '1846',      color: '#378ADD' },
+  ferraris:     { date: '1771',      color: '#6aaa5a' },
+  vandermaelen: { date: '1846',      color: '#c45000' },
   primitief:    { date: '1808–1834', color: '#c97a2e' },
-  gereduceerd:  { date: '1847–1855', color: '#7b6fce' },
+  gereduceerd:  { date: '1847–1855', color: '#a0b020' },
   handdrawn:    { date: '19th c.',   color: '#888780' },
 };
 

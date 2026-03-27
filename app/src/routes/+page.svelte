@@ -1529,7 +1529,7 @@
   }
 
   .map-stage.is-split .map-pane--left {
-    box-shadow: inset 0 0 0 3px #0e8aaa;
+    box-shadow: inset 0 0 0 3px #0a9688;
   }
 
   .map-stage.is-split .map-pane--right {
@@ -1539,7 +1539,7 @@
   .map-stage.is-swipe .map-pane--left {
     position: absolute;
     inset: 0;
-    box-shadow: inset 0 0 0 3px #0e8aaa;
+    box-shadow: inset 0 0 0 3px #0a9688;
   }
 
   .map-stage.is-swipe .map-pane--right {
@@ -1603,7 +1603,7 @@
     height: 30px;
     border-radius: 999px;
     background:
-      linear-gradient(180deg, #0e8aaa 0%, #0e8aaa 48%, #c2426e 52%, #c2426e 100%);
+      linear-gradient(180deg, #0a9688 0%, #0a9688 48%, #c2426e 52%, #c2426e 100%);
   }
 
   .swipe-handle:focus-visible {
