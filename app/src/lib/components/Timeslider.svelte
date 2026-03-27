@@ -16,17 +16,17 @@
   const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
     left: {
       label: 'Left',
-      color: '#00897b',
-      badgeBg: '#c8f0ea',
-      badgeText: '#00584f',
-      panelTint: 'rgba(0, 137, 123, 0.12)',
+      color: '#00a99a',
+      badgeBg: '#bff5ee',
+      badgeText: '#005f55',
+      panelTint: 'rgba(0, 169, 154, 0.14)',
     },
     right: {
       label: 'Right',
-      color: '#7c3aed',
-      badgeBg: '#e8dcff',
-      badgeText: '#5521b5',
-      panelTint: 'rgba(124, 58, 237, 0.12)',
+      color: '#8a6ad6',
+      badgeBg: '#eee6fb',
+      badgeText: '#5c4697',
+      panelTint: 'rgba(138, 106, 214, 0.12)',
     },
   };
 
@@ -329,21 +329,21 @@
       ]
     : []) as PaneState[];
 
+  $: singlePanelSources = paneSourcesForYear(sliderYear);
   $: leftPanelSources = paneSourcesForYear(localLeftYear);
   $: rightPanelSources = dualPaneEnabled ? paneSourcesForYear(localRightYear) : [];
-  $: leftVisibleSourceKeys = new Set<SourceKey>((dualPaneEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).map((s) => s.key));
+  $: leftVisibleSourceKeys = new Set<SourceKey>((dualPaneEnabled ? leftPanelSources : singlePanelSources).map((s) => s.key));
   $: rightVisibleSourceKeys = new Set<SourceKey>(rightPanelSources.map((s) => s.key));
   $: activeSourceKeys = dualPaneEnabled
     ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
-    : new Set<SourceKey>(paneSourcesForYear(sliderYear).map((s) => s.key));
+    : new Set<SourceKey>(singlePanelSources.map((s) => s.key));
 
-  $: singlePanelSources = paneSourcesForYear(sliderYear);
   $: row1 = SOURCES.filter(s => s.row === 1);
   $: row2 = SOURCES.filter(s => s.row === 2);
 
   $: activePanesBySource = SOURCES.reduce<Record<SourceKey, PaneState[]>>((acc, src) => {
     const panes: PaneState[] = [];
-    if ((dualPaneEnabled ? leftPanelSources : paneSourcesForYear(sliderYear)).some((s) => s.key === src.key)) {
+    if ((dualPaneEnabled ? leftPanelSources : singlePanelSources).some((s) => s.key === src.key)) {
       panes.push({ id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color });
     }
     if (dualPaneEnabled && rightPanelSources.some((s) => s.key === src.key)) {
@@ -657,14 +657,14 @@
 
   .ts-sub-panel--left {
     left: 12px;
-    --pane-border: #00897b;
-    --pane-header-tint: rgba(0, 137, 123, 0.12);
+    --pane-border: #00a99a;
+    --pane-header-tint: rgba(0, 169, 154, 0.14);
   }
 
   .ts-sub-panel--right {
     right: 12px;
-    --pane-border: #7c3aed;
-    --pane-header-tint: rgba(124, 58, 237, 0.12);
+    --pane-border: #8a6ad6;
+    --pane-header-tint: rgba(138, 106, 214, 0.12);
   }
 
   .sub-menu {

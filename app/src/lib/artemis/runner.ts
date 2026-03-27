@@ -125,6 +125,10 @@ let cachedIndex: CompiledIndex | null = null;
 // Values have @id = image service URL, so we build a serviceUrl lookup on load.
 // serviceUrl → infoJson, keyed by the exact image service base URL.
 let cachedInfoByServiceUrl: Map<string, any> | null = null;
+// Entry lookup maps derived from cachedIndex — cached to avoid O(n) rebuild per runLayerGroup call.
+let cachedEntryByAbsoluteUrl: Map<string, CompiledIndexEntry> | null = null;
+let cachedEntryByRelativePath: Map<string, CompiledIndexEntry> | null = null;
+let cachedEntryMapsBaseUrl: string | null = null;
 type ManifestInfo = {
   sourceManifestUrl: string;
   label: string;
@@ -171,6 +175,9 @@ function getPaneRuntime(paneId: PaneRuntimeId = "main"): PaneRuntime {
 export function resetCompiledIndexCache() {
   cachedIndex = null;
   cachedInfoByServiceUrl = null;
+  cachedEntryByAbsoluteUrl = null;
+  cachedEntryByRelativePath = null;
+  cachedEntryMapsBaseUrl = null;
   activeLayersByGroup.clear();
   activeWarpedLayersByGroup.clear();
   mapIdToManifestInfo.clear();
@@ -459,10 +466,11 @@ export async function runLayerGroup(opts: {
   layerInfo: LayerInfo;
   paneId?: PaneRuntimeId;
   log?: RunnerLog;
+  debug?: boolean; // gates expensive diagnostic work (annotation strategy, viewport diff analysis)
   onProgress?: (done: number, total: number, latest: RunResult) => void;
   onRenderStats?: (stats: LayerRenderStats) => void;
 }): Promise<RunResult[]> {
-  const { map, cfg, layerInfo, log, paneId = "main" } = opts;
+  const { map, cfg, layerInfo, log, debug = false, paneId = "main" } = opts;
   const runtime = getPaneRuntime(paneId);
   const layerLabel = layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel;
   log?.("INFO", `[runLayerGroup] start pane=${paneId} label="${layerLabel}" path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? "all"}`);
@@ -501,13 +509,19 @@ export async function runLayerGroup(opts: {
   );
   log?.("INFO", `[runLayerGroup] compiled collection fetched label="${layerLabel}" manifests=${compiledCollection.manifests?.length ?? 0}`);
 
-  const entryByAbsoluteManifestUrl = new Map<string, CompiledIndexEntry>();
-  const entryByRelativeManifestPath = new Map<string, CompiledIndexEntry>();
-  for (const entry of index.index) {
-    const absoluteUrl = toAbsoluteUrl(cfg.datasetBaseUrl, entry.compiledManifestPath);
-    entryByAbsoluteManifestUrl.set(absoluteUrl, entry);
-    entryByRelativeManifestPath.set(normalizePath(entry.compiledManifestPath), entry);
+  // Build (or reuse) entry lookup maps — O(n) over the full index, cached per base URL.
+  if (!cachedEntryByAbsoluteUrl || cachedEntryMapsBaseUrl !== cfg.datasetBaseUrl) {
+    cachedEntryByAbsoluteUrl = new Map<string, CompiledIndexEntry>();
+    cachedEntryByRelativePath = new Map<string, CompiledIndexEntry>();
+    cachedEntryMapsBaseUrl = cfg.datasetBaseUrl;
+    for (const entry of index.index) {
+      const absoluteUrl = toAbsoluteUrl(cfg.datasetBaseUrl, entry.compiledManifestPath);
+      cachedEntryByAbsoluteUrl.set(absoluteUrl, entry);
+      cachedEntryByRelativePath.set(normalizePath(entry.compiledManifestPath), entry);
+    }
   }
+  const entryByAbsoluteManifestUrl = cachedEntryByAbsoluteUrl;
+  const entryByRelativeManifestPath = cachedEntryByRelativePath!;
 
   const entriesUnfiltered: CompiledIndexEntry[] = [];
   for (const m of compiledCollection.manifests ?? []) {
@@ -533,7 +547,7 @@ export async function runLayerGroup(opts: {
   log?.("INFO", `Layer "${layerLabel}": ${entries.length} entries`);
 
   // Log annotation source strategy for debug visibility
-  {
+  if (debug) {
     const georefEntries = entries.filter((e) => e.annotSource !== undefined);
     const nonGeorefEntries = entries.filter((e) => e.annotSource === undefined);
     if (georefEntries.length > 0) {
@@ -820,7 +834,16 @@ export async function runLayerGroup(opts: {
   let done = 0;
   let georefIdx = 0;
 
+  // Yield a macrotask every N entries so the browser can paint frames and
+  // process input during the annotation loop. Awaiting microtask-resolving
+  // promises (addGeoreferenceAnnotation) never yields a rendering frame; only
+  // a real macrotask (setTimeout) does.
+  const YIELD_EVERY_ENTRIES = 15;
+
   for (let idx = 0; idx < fetchedAll.length; idx++) {
+    if (idx > 0 && idx % YIELD_EVERY_ENTRIES === 0) {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
     const item = fetchedAll[idx];
     // Assign layer before checking error so no-annotation entries don't consume a slot
     const targetLayer = "error" in item ? layers[0] : layers[georefIdx % layers.length];
@@ -1117,8 +1140,10 @@ export async function runLayerGroup(opts: {
     }
 
     if (firstTilesLoaded >= expectedMaps && expectedMaps > 0) {
-      logViewportVsFetchable("viewport-diff(full)");
-      logVisibleNotFetchableReasons("viewport-reasons(full)");
+      if (debug) {
+        logViewportVsFetchable("viewport-diff(full)");
+        logVisibleNotFetchableReasons("viewport-reasons(full)");
+      }
       log?.("INFO", `[${label}] keepalive done(full) — firstTiles:${firstTilesLoaded}/${expectedMaps} inViewport:${mapsInViewport} peakViewport:${peakMapsInViewport} active:${tilesLoaded - tilesDeleted}`);
       clearInterval(repaintHandle);
       return;
@@ -1126,8 +1151,10 @@ export async function runLayerGroup(opts: {
 
     if (firstTilesLoaded >= expectedVisibleMaps && idleMs >= KEEPALIVE_IDLE_STOP_MS && elapsed >= 1500) {
       const likelyViewportLimited = expectedMaps > peakMapsInViewport;
-      logViewportVsFetchable("viewport-diff(viewport)");
-      logVisibleNotFetchableReasons("viewport-reasons(viewport)");
+      if (debug) {
+        logViewportVsFetchable("viewport-diff(viewport)");
+        logVisibleNotFetchableReasons("viewport-reasons(viewport)");
+      }
       log?.("INFO", `[${label}] keepalive done(viewport) — firstTiles:${firstTilesLoaded}/${expectedMaps} expectedVisible:${expectedVisibleMaps} peakViewport:${peakMapsInViewport} likelyViewportLimited:${likelyViewportLimited}`);
       clearInterval(repaintHandle);
       return;
@@ -1135,8 +1162,10 @@ export async function runLayerGroup(opts: {
 
     if (elapsed >= keepaliveBudgetMs) {
       const likelyViewportLimited = expectedMaps > peakMapsInViewport;
-      logViewportVsFetchable("viewport-diff(timeout)");
-      logVisibleNotFetchableReasons("viewport-reasons(timeout)");
+      if (debug) {
+        logViewportVsFetchable("viewport-diff(timeout)");
+        logVisibleNotFetchableReasons("viewport-reasons(timeout)");
+      }
       log?.("WARN", `[${label}] keepalive timeout — firstTiles:${firstTilesLoaded}/${expectedMaps} imgInfos:${imageInfosAdded} inViewport:${mapsInViewport} peakViewport:${peakMapsInViewport} idleMs:${Math.round(idleMs)} likelyViewportLimited:${likelyViewportLimited}`);
       clearInterval(repaintHandle);
       return;
@@ -1146,9 +1175,10 @@ export async function runLayerGroup(opts: {
   }, KEEPALIVE_TICK_MS);
 
   emitRenderStats(true);
-  // Always print final diagnostic snapshot; this can otherwise get hidden by noisy event logs.
-  logViewportVsFetchable("viewport-diff(final)");
-  logVisibleNotFetchableReasons("viewport-reasons(final)");
+  if (debug) {
+    logViewportVsFetchable("viewport-diff(final)");
+    logVisibleNotFetchableReasons("viewport-reasons(final)");
+  }
   const ok = results.filter((r) => r.ok).length;
   const failed = results.filter((r) => !r.ok).length;
   log?.("INFO", `Layer "${label}" done: ${ok} ok, ${failed} failed | registered:${mapsAdded} imgInfos:${imageInfosAdded} firstTiles:${firstTilesLoaded} activeTiles:${tilesLoaded - tilesDeleted} tileErrs:${tileFetchErrors} annotationErrs:${annotationErrorCount} manifestsWithAnnotationErrs:${manifestsWithAnnotationErrors}`);

@@ -5,8 +5,12 @@ export type MainLayerId = 'gereduceerd' | 'primitief' | 'vandermaelen' | 'ferrar
 export type SubLayerKind = 'iiif' | 'geojson' | 'wmts' | 'wms' | 'searchable';
 export type HistCartLayerKey = 'ferraris' | 'vandermaelen';
 
+// Order is bottom-to-top: index 0 ends up rendered on top (applyZOrder moves each
+// layer to the stack top in reverse order, so the first entry is moved last = stays on top).
+// gereduceerd (row 1 in timeline) must come before vandermaelen (row 2) so it renders above
+// it in the 1847–1855 overlap zone.
 export const MAIN_LAYER_ORDER: MainLayerId[] = [
-  'ferraris', 'vandermaelen', 'primitief', 'gereduceerd', 'handdrawn',
+  'ferraris', 'gereduceerd', 'vandermaelen', 'primitief', 'handdrawn',
 ];
 
 export const MAIN_LAYER_LABELS: Record<string, string> = {

@@ -146,6 +146,7 @@
   const MAX_LOGS = 2000;
 
   function log(level: UILog['level'], msg: string) {
+    if (!FEATURE_FLAGS.debugMenu) return;
     logs = [{ atISO: new Date().toISOString(), level, msg }, ...logs].slice(0, MAX_LOGS);
   }
 
@@ -404,7 +405,7 @@
     startBulkRun('mirror');
     try {
       await runLayerGroup({
-        map, cfg: cfg(), layerInfo, log,
+        map, cfg: cfg(), layerInfo, log, debug: FEATURE_FLAGS.debugMenu,
         onRenderStats: (stats) => { layerRenderStats = { ...layerRenderStats, [gid]: stats }; },
         onProgress: (done, total, result) => {
           layerProgress = { ...layerProgress, [gid]: { done, total } };
@@ -530,6 +531,7 @@
         cfg: cfg(),
         layerInfo,
         log,
+        debug: FEATURE_FLAGS.debugMenu,
       });
     } finally {
       log('INFO', `[loadIiif:right] done gid=${gid}`);
@@ -1076,20 +1078,31 @@
   }
 
   function attachRightIiifHandlers(targetMap: maplibregl.Map) {
-    const onMouseMove = (e: any) => {
-      const lngLat = targetMap.unproject(e.point);
-      const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat, 'right');
-      const prevIds = rightIiifHoveredMaps.map((h) => h.mapId).join(',');
-      const nextIds = hits.map((h) => h.mapId).join(',');
-      if (prevIds !== nextIds) {
-        rightIiifHoveredMaps = hits;
-        setIiifHoverMasks(targetMap, hits.length === 0 ? null : hits.map((h) => {
-          const color = colorForGroupId(h.groupId);
-          return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
-        }));
-      }
+    let rightHoverRafId: number | null = null;
+    let rightHoverPendingPoint: { x: number; y: number } | null = null;
 
-      targetMap.getCanvas().style.cursor = hits.length > 0 ? 'pointer' : '';
+    const onMouseMove = (e: any) => {
+      rightHoverPendingPoint = { x: e.point.x, y: e.point.y };
+      if (rightHoverRafId !== null) return;
+      rightHoverRafId = requestAnimationFrame(() => {
+        rightHoverRafId = null;
+        const point = rightHoverPendingPoint;
+        if (!point) return;
+
+        const lngLat = targetMap.unproject([point.x, point.y] as [number, number]);
+        const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat, 'right');
+        const prevIds = rightIiifHoveredMaps.map((h) => h.mapId).join(',');
+        const nextIds = hits.map((h) => h.mapId).join(',');
+        if (prevIds !== nextIds) {
+          rightIiifHoveredMaps = hits;
+          setIiifHoverMasks(targetMap, hits.length === 0 ? null : hits.map((h) => {
+            const color = colorForGroupId(h.groupId);
+            return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
+          }));
+        }
+
+        targetMap.getCanvas().style.cursor = hits.length > 0 ? 'pointer' : '';
+      });
     };
 
     const onMouseOut = () => {
@@ -1205,6 +1218,27 @@
     map = ensureMapContext(mapDiv);
     attachAllmapsDebugEvents(map, log);
     map.on('load', () => {
+      // Re-apply WMTS/WMS visibility that may have been set before the style finished loading.
+      // setHistCartLayerVisible / setLandUsageLayerVisible call map.addSource + map.addLayer,
+      // which throw if the style isn't ready. The Timeslider onMount fires before load, so any
+      // sublayer toggle that arrived early is silently lost. Re-applying here closes that gap.
+      for (const mainId of mainLayerOrder) {
+        for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
+          if (!subLayerEnabled[subId]) continue;
+          const subDef = SUB_LAYER_DEFS[subId];
+          const opacity = mainLayerOpacity[mainId] ?? 1;
+          if (subDef?.kind === 'wmts') {
+            const wmtsKey = getMainWmtsKey(mainId);
+            if (wmtsKey) {
+              setHistCartLayerVisible(map, wmtsKey, true);
+              setHistCartLayerOpacity(map, wmtsKey, opacity);
+            }
+          } else if (subDef?.kind === 'wms') {
+            setLandUsageLayerVisible(map, mainId as HistCartLayerKey, true);
+            setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+          }
+        }
+      }
       applyZOrder();
 
       // Load Massart data then add pins to the map.
@@ -1229,39 +1263,51 @@
       });
     });
 
+    let hoverRafId: number | null = null;
+    let hoverPendingPoint: { x: number; y: number } | null = null;
+
     const onMouseMove = (e: any) => {
-      // Primitive parcel hover
-      let parcelHit = false;
-      if (subLayerEnabled['primitief-parcels'] && map.getLayer('primitive-parcels-layer')) {
-        const feature = map.queryRenderedFeatures(e.point, { layers: getPrimitiveLayerIds() })[0];
-        const details = parcelHoverDetailsFromFeature(feature);
-        if (details) {
-          parcelHit = true;
-          setPrimitiveHoverFeature(map, feature);
-          primitiveHoveredFeature = feature;
+      hoverPendingPoint = { x: e.point.x, y: e.point.y };
+      if (hoverRafId !== null) return;
+      hoverRafId = requestAnimationFrame(() => {
+        hoverRafId = null;
+        const point = hoverPendingPoint;
+        if (!point) return;
+
+        // Primitive parcel hover
+        let parcelHit = false;
+        if (subLayerEnabled['primitief-parcels'] && map.getLayer('primitive-parcels-layer')) {
+          const pt: [number, number] = [point.x, point.y];
+          const feature = map.queryRenderedFeatures(pt, { layers: getPrimitiveLayerIds() })[0];
+          const details = parcelHoverDetailsFromFeature(feature);
+          if (details) {
+            parcelHit = true;
+            setPrimitiveHoverFeature(map, feature);
+            primitiveHoveredFeature = feature;
+          } else {
+            primitiveHoveredFeature = null;
+            setPrimitiveHoverFeature(map, null);
+          }
         } else {
           primitiveHoveredFeature = null;
           setPrimitiveHoverFeature(map, null);
         }
-      } else {
-        primitiveHoveredFeature = null;
-        setPrimitiveHoverFeature(map, null);
-      }
 
-      // IIIF warped map hover
-      const lngLat = map.unproject(e.point);
-      const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat);
-      const prevIds = iiifHoveredMaps.map(h => h.mapId).join(',');
-      const nextIds = hits.map(h => h.mapId).join(',');
-      if (prevIds !== nextIds) {
-        iiifHoveredMaps = hits;
-        setIiifHoverMasks(map, hits.length === 0 ? null : hits.map(h => {
-          const color = colorForGroupId(h.groupId);
-          return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
-        }));
-      }
+        // IIIF warped map hover
+        const lngLat = map.unproject([point.x, point.y] as [number, number]);
+        const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat);
+        const prevIds = iiifHoveredMaps.map(h => h.mapId).join(',');
+        const nextIds = hits.map(h => h.mapId).join(',');
+        if (prevIds !== nextIds) {
+          iiifHoveredMaps = hits;
+          setIiifHoverMasks(map, hits.length === 0 ? null : hits.map(h => {
+            const color = colorForGroupId(h.groupId);
+            return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
+          }));
+        }
 
-      map.getCanvas().style.cursor = (parcelHit || hits.length > 0) ? 'pointer' : '';
+        map.getCanvas().style.cursor = (parcelHit || hits.length > 0) ? 'pointer' : '';
+      });
     };
 
     const onMouseOut = () => {
@@ -1334,10 +1380,20 @@
       bind:this={mapStageEl}
     >
       <div class="map-pane map-pane--left">
+        {#if dualPaneEnabled}
+          <div
+            class="pane-year-pill pane-year-pill--left"
+            aria-live="polite"
+          ><strong>{Math.round(massartYear)}</strong></div>
+        {/if}
         <div class="map-canvas" bind:this={mapDiv}></div>
       </div>
       {#if dualPaneEnabled}
         <div class="map-pane map-pane--right">
+          <div
+            class="pane-year-pill pane-year-pill--right"
+            aria-live="polite"
+          ><strong>{Math.round(rightTimelineYear)}</strong></div>
           <div class="map-canvas" bind:this={rightMapDiv}></div>
         </div>
       {/if}
@@ -1532,26 +1588,46 @@
     clip-path: none;
   }
 
-  .map-stage.is-split .map-pane--left {
-    box-shadow: inset 0 0 0 3px #00897b;
-  }
-
-  .map-stage.is-split .map-pane--right {
-    box-shadow: inset 0 0 0 3px #7c3aed;
-  }
-
   .map-stage.is-swipe .map-pane--left {
     position: absolute;
     inset: 0;
-    box-shadow: inset 0 0 0 3px #00897b;
   }
 
   .map-stage.is-swipe .map-pane--right {
     position: absolute;
     inset: 0;
     z-index: 2;
-    box-shadow: inset 0 0 0 3px #7c3aed;
     clip-path: inset(0 0 0 var(--divider-position));
+  }
+
+  .pane-year-pill {
+    position: absolute;
+    top: 12px;
+    z-index: 5;
+    padding: 8px 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.95);
+    color: #111111;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+    box-shadow:
+      0 8px 20px rgba(0, 0, 0, 0.12),
+      0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .map-stage.is-swipe .pane-year-pill--left {
+    left: calc(var(--divider-position) / 2);
+  }
+
+  .map-stage.is-swipe .pane-year-pill--right {
+    left: calc((100% + var(--divider-position)) / 2);
   }
 
   .map-stage.is-swipe.is-swipe-dragging {
@@ -1607,7 +1683,7 @@
     height: 30px;
     border-radius: 999px;
     background:
-      linear-gradient(180deg, #00897b 0%, #00897b 48%, #7c3aed 52%, #7c3aed 100%);
+      linear-gradient(180deg, #00a99a 0%, #00a99a 48%, #8a6ad6 52%, #8a6ad6 100%);
   }
 
   .swipe-handle:focus-visible {
