@@ -125,8 +125,23 @@
     if (map?.isStyleLoaded()) updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
   }
 
-  function onTimelineImageFocus(e: CustomEvent<{ title: string; lon: number; lat: number }>) {
-    flyToCoordinates(e.detail.lon, e.detail.lat, `Photo "${e.detail.title}"`);
+  function onTimelineImageFocus(e: CustomEvent<{ pane: PaneId; title: string; lon: number; lat: number }>) {
+    const label = `Photo "${e.detail.title}"`;
+    if (e.detail.pane === 'right' && rightMap) {
+      try {
+        const nextZoom = Math.max(rightMap.getZoom(), 14);
+        const center = [e.detail.lon, e.detail.lat] as [number, number];
+        const cur = rightMap.getCenter();
+        if (Math.abs(cur.lng - e.detail.lon) >= 1e-9 || Math.abs(cur.lat - e.detail.lat) >= 1e-9 || Math.abs(rightMap.getZoom() - nextZoom) >= 0.01) {
+          rightMap.stop();
+          rightMap.easeTo({ center, zoom: nextZoom, essential: true, duration: 900 });
+        }
+      } catch (err: any) {
+        log('ERROR', `Fly-to failed: ${err?.message ?? String(err)}`);
+      }
+      return;
+    }
+    flyToCoordinates(e.detail.lon, e.detail.lat, label);
   }
 
   function setViewMode(nextMode: ViewMode) {

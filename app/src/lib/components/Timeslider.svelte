@@ -39,7 +39,7 @@
     paneMainToggle: { pane: PaneId; mainId: string; enabled: boolean };
     paneSublayerChange: { pane: PaneId; subId: string; enabled: boolean };
     'open-viewer':  { title: string; sourceManifestUrl: string; imageServiceUrl: string };
-    'focus-image':  { title: string; lon: number; lat: number };
+    'focus-image':  { pane: PaneId; title: string; lon: number; lat: number };
     'year-change':  { pane: PaneId; year: number };
   }>();
 
@@ -107,7 +107,11 @@
   let dualPaneModePrev = dualPaneEnabled;
   let dualPaneYearsInitialized = dualPaneEnabled;
 
-  let enabledLayers: Record<string, boolean> = Object.fromEntries(
+  let leftEnabledLayers: Record<string, boolean> = Object.fromEntries(
+    SOURCES.map(s => [s.key, true])
+  );
+
+  let rightEnabledLayers: Record<string, boolean> = Object.fromEntries(
     SOURCES.map(s => [s.key, true])
   );
 
@@ -206,15 +210,63 @@
     setPaneYear(pane, year);
   }
 
+  function setSingleYear(year: number) {
+    sliderYear = year;
+    dispatch('year-change', { pane: 'left', year });
+  }
+
+  function yearFromTrackClientX(clientX: number, rect: DOMRect): number {
+    const usableWidth = Math.max(1, rect.width - SCRUBBER_THUMB_SIZE);
+    const offsetX = Math.max(0, Math.min(usableWidth, clientX - rect.left - SCRUBBER_THUMB_SIZE / 2));
+    const ratio = offsetX / usableWidth;
+    return Math.round(axisStart + ratio * axisSpan);
+  }
+
+  function closestPaneForTrackYear(year: number): PaneId {
+    const candidates: PaneId[] = dualPaneEnabled
+      ? (['left', 'right'] as PaneId[]).filter((pane) => disabledPane !== pane)
+      : ['left'];
+
+    if (candidates.length === 0) return 'left';
+    if (candidates.length === 1) return candidates[0];
+
+    const leftDistance = Math.abs(yearForPane('left') - year);
+    const rightDistance = Math.abs(yearForPane('right') - year);
+    return rightDistance <= leftDistance ? 'right' : 'left';
+  }
+
+  function jumpToYear(year: number): PaneId {
+    if (!dualPaneEnabled) {
+      setSingleYear(year);
+      return 'left';
+    }
+
+    const pane = closestPaneForTrackYear(year);
+    setPaneYear(pane, year);
+    return pane;
+  }
+
+  function onTrackClick(e: MouseEvent) {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('.img-dot, .ts-scrubber, .sub-menu, .sub-menu-header--toggle, .sub-pill, .sub-menu-checkbox-input')) return;
+
+    const trackEl = (e.currentTarget as HTMLElement).closest('.ts-track') as HTMLElement | null;
+    if (!trackEl) return;
+    const rect = trackEl.getBoundingClientRect();
+    const nextYear = yearFromTrackClientX(e.clientX, rect);
+    jumpToYear(nextYear);
+  }
+
   function isDotNear(yr: number): boolean {
     if (!dualPaneEnabled) return Math.abs(yr - sliderYear) <= yearLeeway;
     return visiblePanes.some((pane) => Math.abs(yr - pane.year) <= yearLeeway);
   }
 
-  function focusDot(items: MassartItem[]) {
+  function focusDot(items: MassartItem[], pane: PaneId = 'left') {
     const firstItem = items[0];
     if (firstItem && Number.isFinite(firstItem.lon) && Number.isFinite(firstItem.lat)) {
       dispatch('focus-image', {
+        pane,
         title: firstItem.title,
         lon: Number(firstItem.lon),
         lat: Number(firstItem.lat),
@@ -222,9 +274,19 @@
     }
   }
 
-  function handleBlockClick(key: SourceKey) {
-    const wasEnabled = enabledLayers[key];
-    enabledLayers = { ...enabledLayers, [key]: !wasEnabled };
+  function onPhotoDotClick(year: number, items: MassartItem[]) {
+    const pane = jumpToYear(year);
+    focusDot(items, pane);
+  }
+
+  function toggleLayerEnabled(pane: PaneId, key: SourceKey) {
+    if (pane === 'right') {
+      const wasEnabled = rightEnabledLayers[key];
+      rightEnabledLayers = { ...rightEnabledLayers, [key]: !wasEnabled };
+      return;
+    }
+    const wasEnabled = leftEnabledLayers[key];
+    leftEnabledLayers = { ...leftEnabledLayers, [key]: !wasEnabled };
   }
 
   function paneSublayerState(pane: PaneId): Record<string, Record<string, boolean>> {
@@ -242,7 +304,7 @@
         ...rightSublayerState,
         [key]: { ...rightSublayerState[key], [localId]: !cur },
       };
-      const rightVisible = enabledLayers[key] && rightVisibleSourceKeys.has(key);
+      const rightVisible = rightEnabledLayers[key] && rightVisibleSourceKeys.has(key);
       if (rightVisible) dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
       return;
     }
@@ -251,7 +313,7 @@
       ...leftSublayerState,
       [key]: { ...leftSublayerState[key], [localId]: !cur },
     };
-    const leftVisible = enabledLayers[key] && leftVisibleSourceKeys.has(key);
+    const leftVisible = leftEnabledLayers[key] && leftVisibleSourceKeys.has(key);
     if (leftVisible) dispatch('sublayerChange', { subId, enabled: !cur });
     if (leftVisible) dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
   }
@@ -289,7 +351,9 @@
   }
 
   function sourceIsCurrentForKey(key: SourceKey): boolean {
-    return enabledLayers[key] && activeSourceKeys.has(key);
+    if (!activeSourceKeys.has(key)) return false;
+    if (!dualPaneEnabled) return leftEnabledLayers[key];
+    return leftEnabledLayers[key] || rightEnabledLayers[key];
   }
 
   function sourceHasOverlap(key: SourceKey): boolean {
@@ -298,7 +362,7 @@
 
   onMount(() => {
     for (const src of SOURCES) {
-      const visible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
+      const visible = leftEnabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
       prevVisible[src.key] = visible;
       dispatch('mainToggle', { mainId: src.mainId, enabled: visible });
       prevPaneVisible.left[src.key] = visible;
@@ -312,7 +376,7 @@
         }
       }
       if (dualPaneEnabled) {
-        const rightVisible = enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
+        const rightVisible = rightEnabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
         prevPaneVisible.right[src.key] = rightVisible;
         dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightVisible });
         if (rightVisible) {
@@ -370,6 +434,14 @@
   $: activeSourceKeys = dualPaneEnabled
     ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
     : new Set<SourceKey>(singlePanelSources.map((s) => s.key));
+  $: leftActiveVisibility = SOURCES.reduce<Record<SourceKey, boolean>>((acc, src) => {
+    acc[src.key] = Boolean(leftEnabledLayers[src.key] && leftVisibleSourceKeys.has(src.key));
+    return acc;
+  }, {} as Record<SourceKey, boolean>);
+  $: rightActiveVisibility = SOURCES.reduce<Record<SourceKey, boolean>>((acc, src) => {
+    acc[src.key] = Boolean(dualPaneEnabled && rightEnabledLayers[src.key] && rightVisibleSourceKeys.has(src.key));
+    return acc;
+  }, {} as Record<SourceKey, boolean>);
 
   $: row1 = SOURCES.filter(s => s.row === 1);
   $: row2 = SOURCES.filter(s => s.row === 2);
@@ -388,7 +460,7 @@
 
   $: {
     for (const src of SOURCES) {
-      const nowVisible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
+      const nowVisible = leftActiveVisibility[src.key];
       if (prevVisible[src.key] !== undefined && prevVisible[src.key] !== nowVisible) {
         dispatch('mainToggle', { mainId: src.mainId, enabled: nowVisible });
         if (!nowVisible) {
@@ -406,7 +478,7 @@
         prevVisible[src.key] = nowVisible;
       }
 
-      const leftPaneVisible = enabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
+      const leftPaneVisible = leftActiveVisibility[src.key];
       if (prevPaneVisible.left[src.key] !== undefined && prevPaneVisible.left[src.key] !== leftPaneVisible) {
         dispatch('paneMainToggle', { pane: 'left', mainId: src.mainId, enabled: leftPaneVisible });
         if (!leftPaneVisible) {
@@ -425,7 +497,7 @@
         prevPaneVisible.left[src.key] = leftPaneVisible;
       }
 
-      const rightPaneVisible = dualPaneEnabled && enabledLayers[src.key] && rightVisibleSourceKeys.has(src.key);
+      const rightPaneVisible = rightActiveVisibility[src.key];
       if (dualPaneEnabled && prevPaneVisible.right[src.key] !== undefined && prevPaneVisible.right[src.key] !== rightPaneVisible) {
         dispatch('paneMainToggle', { pane: 'right', mainId: src.mainId, enabled: rightPaneVisible });
         if (!rightPaneVisible) {
@@ -454,20 +526,28 @@
   {#if showLeftPaneControls && leftPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
       {#each leftPanelSources as src}
-        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
-          <div class="sub-menu-header">
+        <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src)}>
+          <label
+            class="sub-menu-header sub-menu-header--toggle"
+            class:is-disabled={!leftEnabledLayers[src.key]}
+            title="{src.label} — global visibility"
+          >
             <span class="sub-menu-swatch" style="--c:{src.color}"></span>
             <span class="sub-menu-title">{src.label}</span>
-          </div>
-          {#if !enabledLayers[src.key]}
-            <div class="sub-menu-disabled-note">Enable map for access to layers.</div>
-          {/if}
+            <input
+              class="sub-menu-checkbox-input"
+              type="checkbox"
+              checked={leftEnabledLayers[src.key]}
+              aria-label="{src.label} layer visible in left pane"
+              on:change={() => toggleLayerEnabled('left', src.key)}
+            />
+          </label>
           <div class="sub-menu-pills">
             {#each src.sublayers as sub}
               <button
                 class="sub-pill"
                 class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
-                class:is-layer-disabled={!enabledLayers[src.key]}
+                class:is-layer-disabled={!leftEnabledLayers[src.key]}
                 style="--c:{src.color}"
                 type="button"
                 title="{src.label} — {sub.label}"
@@ -483,20 +563,28 @@
   {#if showRightPaneControls && rightPanelSources.length > 0}
     <div class="ts-sub-panel ts-sub-panel--right" transition:fade={{ duration: 140 }}>
       {#each rightPanelSources as src}
-        <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
-          <div class="sub-menu-header">
+        <section class="sub-menu" class:is-layer-disabled={!rightEnabledLayers[src.key]} style={sourceMenuStyle(src)}>
+          <label
+            class="sub-menu-header sub-menu-header--toggle"
+            class:is-disabled={!rightEnabledLayers[src.key]}
+            title="{src.label} — global visibility"
+          >
             <span class="sub-menu-swatch" style="--c:{src.color}"></span>
             <span class="sub-menu-title">{src.label}</span>
-          </div>
-          {#if !enabledLayers[src.key]}
-            <div class="sub-menu-disabled-note">Enable map for access to layers.</div>
-          {/if}
+            <input
+              class="sub-menu-checkbox-input"
+              type="checkbox"
+              checked={rightEnabledLayers[src.key]}
+              aria-label="{src.label} layer visible in right pane"
+              on:change={() => toggleLayerEnabled('right', src.key)}
+            />
+          </label>
           <div class="sub-menu-pills">
             {#each src.sublayers as sub}
               <button
                 class="sub-pill"
                 class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)}
-                class:is-layer-disabled={!enabledLayers[src.key]}
+                class:is-layer-disabled={!rightEnabledLayers[src.key]}
                 style="--c:{src.color}"
                 type="button"
                 title="{src.label} — {sub.label}"
@@ -511,20 +599,28 @@
 {:else if showLeftPaneControls && singlePanelSources.length > 0}
   <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
     {#each singlePanelSources as src}
-      <section class="sub-menu" class:is-layer-disabled={!enabledLayers[src.key]} style={sourceMenuStyle(src)}>
-        <div class="sub-menu-header">
+      <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src)}>
+        <label
+          class="sub-menu-header sub-menu-header--toggle"
+          class:is-disabled={!leftEnabledLayers[src.key]}
+          title="{src.label} — global visibility"
+        >
           <span class="sub-menu-swatch" style="--c:{src.color}"></span>
           <span class="sub-menu-title">{src.label}</span>
-        </div>
-        {#if !enabledLayers[src.key]}
-          <div class="sub-menu-disabled-note">Enable map for access to layers.</div>
-        {/if}
+          <input
+            class="sub-menu-checkbox-input"
+            type="checkbox"
+            checked={leftEnabledLayers[src.key]}
+            aria-label="{src.label} layer visible"
+            on:change={() => toggleLayerEnabled('left', src.key)}
+          />
+        </label>
         <div class="sub-menu-pills">
           {#each src.sublayers as sub}
             <button
               class="sub-pill"
               class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
-              class:is-layer-disabled={!enabledLayers[src.key]}
+              class:is-layer-disabled={!leftEnabledLayers[src.key]}
               style="--c:{src.color}"
               type="button"
               title="{src.label} — {sub.label}"
@@ -539,9 +635,15 @@
 
 <div class="timeslider">
   <div class="ts-track" bind:clientWidth={trackWidth}>
+    <button
+      class="ts-track-hitarea"
+      type="button"
+      aria-label={dualPaneEnabled ? 'Jump nearest compare timeline thumb' : 'Jump timeline thumb'}
+      on:click={onTrackClick}
+    ></button>
     <div class="ts-row ts-row--above">
       {#each row1 as src}
-        {@const enabled = enabledLayers[src.key]}
+        {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
         <div
           class="source-block"
           class:is-disabled={!enabled}
@@ -549,12 +651,7 @@
           class:is-compare-overlap={sourceHasOverlap(src.key)}
           class:is-loading={loadingLayers[src.mainId]}
           style={sourceBlockStyle(src)}
-          role="button"
-          tabindex="0"
-          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable map for access to layers`}
-          aria-pressed={enabled}
-          on:click={() => handleBlockClick(src.key)}
-          on:keydown={(e) => e.key === 'Enter' && handleBlockClick(src.key)}
+          title={`${src.label} (${src.start}–${src.end})`}
         >
           <span class="block-label">{src.label}</span>
           <span class="block-date">{src.start}–{src.end}</span>
@@ -595,7 +692,7 @@
           style="left:{pct(yr,axisStart,axisSpan)}"
           title="{yr} · {items.length} photo{items.length > 1 ? 's' : ''}"
           aria-label="Massart photos {yr}"
-          on:click={() => focusDot(items)}
+          on:click={() => onPhotoDotClick(yr, items)}
         ></button>
       {/each}
 
@@ -632,7 +729,7 @@
 
     <div class="ts-row ts-row--below">
       {#each row2 as src}
-        {@const enabled = enabledLayers[src.key]}
+        {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
         <div
           class="source-block"
           class:is-disabled={!enabled}
@@ -640,12 +737,7 @@
           class:is-compare-overlap={sourceHasOverlap(src.key)}
           class:is-loading={loadingLayers[src.mainId]}
           style={sourceBlockStyle(src)}
-          role="button"
-          tabindex="0"
-          title={enabled ? `${src.label} (${src.start}–${src.end})` : `${src.label} (${src.start}–${src.end}) — Enable map for access to layers`}
-          aria-pressed={enabled}
-          on:click={() => handleBlockClick(src.key)}
-          on:keydown={(e) => e.key === 'Enter' && handleBlockClick(src.key)}
+          title={`${src.label} (${src.start}–${src.end})`}
         >
           <span class="block-label">{src.label}</span>
           <span class="block-date">{src.start}–{src.end}</span>
@@ -713,6 +805,32 @@
     overflow: hidden;
   }
 
+  .sub-menu-header--toggle {
+    width: calc(100% + 20px);
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--sub-menu-border) 80%, transparent);
+    transition: filter 160ms ease, box-shadow 160ms ease;
+  }
+
+  .sub-menu-header--toggle:hover,
+  .sub-menu-header--toggle:focus-visible {
+    filter: brightness(1.03);
+    box-shadow:
+      inset 0 -1px 0 color-mix(in srgb, var(--sub-menu-border) 80%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 80%, transparent);
+  }
+
+  .sub-menu-header--toggle:focus-visible {
+    outline: 2px solid var(--surface-focus);
+    outline-offset: 2px;
+  }
+
+  .sub-menu-header--toggle.is-disabled {
+    filter: saturate(0.78) brightness(0.95);
+  }
+
   .sub-menu-header::after {
     content: '';
     position: absolute;
@@ -727,7 +845,8 @@
   }
 
   .sub-menu-swatch,
-  .sub-menu-title {
+  .sub-menu-title,
+  .sub-menu-checkbox-input {
     position: relative;
     z-index: 1;
   }
@@ -747,6 +866,51 @@
     font-weight: 700;
     color: var(--text-secondary);
     line-height: 1.2;
+    flex: 1 1 auto;
+  }
+
+  .sub-menu-checkbox-input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    border: 1.5px solid color-mix(in srgb, var(--text-secondary) 36%, transparent);
+    background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--surface-inset-strong) 70%, transparent),
+      0 1px 2px rgba(0, 0, 0, 0.08);
+    flex: 0 0 auto;
+    cursor: pointer;
+  }
+
+  .sub-menu-checkbox-input:checked {
+    border-color: color-mix(in srgb, var(--c) 72%, white);
+    background: var(--c);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 32%, transparent),
+      0 2px 6px rgba(0, 0, 0, 0.12);
+  }
+
+  .sub-menu-checkbox-input:checked::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 2px;
+    width: 5px;
+    height: 9px;
+    border-right: 2px solid var(--text-on-accent);
+    border-bottom: 2px solid var(--text-on-accent);
+    transform: rotate(45deg);
+  }
+
+  .sub-menu-checkbox-input:focus-visible {
+    outline: 2px solid var(--surface-focus);
+    outline-offset: 2px;
+  }
+
+  .sub-menu-header--toggle.is-disabled .sub-menu-checkbox-input {
+    opacity: 0.9;
   }
 
   .sub-menu-pills {
@@ -769,18 +933,20 @@
 
   .sub-pill {
     position: relative;
-    padding: 9px 18px;
+    padding: 8px 16px;
     background: var(--c);
     color: var(--text-on-accent);
     border: none;
     border-radius: var(--radius-xs);
     font-family: var(--font-ui);
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 650;
     cursor: pointer;
     white-space: nowrap;
     text-align: center;
-    box-shadow: var(--shadow-sm);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 80%, transparent) inset,
+      0 4px 10px rgba(0, 0, 0, 0.10);
     overflow: hidden;
     transition: opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
   }
@@ -804,7 +970,7 @@
   }
 
   .sub-pill:hover:not(.is-disabled):not(.is-layer-disabled) {
-    filter: brightness(1.09);
+    filter: brightness(1.04);
   }
 
   .sub-pill.is-disabled:hover,
@@ -816,11 +982,10 @@
     box-shadow:
       0 0 0 2px var(--pill-disabled-hover-inset) inset,
       var(--shadow-md);
-    transform: translateY(-1px);
   }
 
   .timeslider {
-    background: var(--surface-raised);
+    background: var(--timeline-panel-bg);
     border: 0.5px solid var(--panel-border);
     border-radius: var(--radius-md);
     padding: 12px 16px;
@@ -831,8 +996,26 @@
   }
 
   .ts-track {
+    position: relative;
     display: flex;
     flex-direction: column;
+  }
+
+  .ts-track-hitarea {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .ts-track-hitarea:focus-visible {
+    outline: 2px solid var(--surface-focus);
+    outline-offset: 4px;
+    border-radius: var(--radius-md);
   }
 
   .ts-row {
@@ -857,8 +1040,11 @@
     cursor: pointer;
     z-index: 2;
     overflow: hidden;
-    padding: 0 10px;
+    padding: 0 9px;
     transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset,
+      0 5px 12px rgba(0, 0, 0, 0.10);
   }
 
   .source-block::after {
@@ -877,16 +1063,6 @@
     box-shadow:
       0 0 0 2px var(--surface-outline),
       var(--shadow-sm);
-  }
-
-  .source-block.is-disabled:hover,
-  .source-block.is-disabled:focus-visible {
-    opacity: 0.8;
-    filter: saturate(0.84) brightness(1);
-    box-shadow:
-      0 0 0 2px var(--surface-outline),
-      var(--shadow-md),
-      0 0 0 2px var(--source-disabled-hover-inset) inset;
   }
 
   .source-block.is-disabled .block-label {
@@ -914,47 +1090,34 @@
     100% { transform: translateX(100%); }
   }
 
-  .source-block:hover:not(.is-disabled) {
-    filter: brightness(1.09);
-    box-shadow:
-      var(--shadow-floating-ui),
-      0 0 0 2px var(--pill-inset-soft) inset;
-  }
-
-  .source-block:focus-visible {
-    outline: 2px solid var(--surface-focus);
-    outline-offset: 2px;
-    box-shadow:
-      var(--shadow-floating-ui),
-      0 0 0 2px var(--source-focus-inset) inset;
-  }
-
   .source-block.is-current {
     z-index: 3;
   }
 
   .ts-row--above .source-block.is-current {
-    transform: translateY(-3px) scale(1.06, 1.3);
+    transform: translateY(-2px) scale(1.03, 1.18);
     transform-origin: bottom center;
     box-shadow:
-      var(--shadow-lg),
-      0 0 0 2px var(--pill-inset-active) inset;
+      0 10px 22px rgba(0, 0, 0, 0.16),
+      0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset,
+      0 0 0 1px var(--pill-inset-active) inset;
   }
 
   .ts-row--below .source-block.is-current {
-    transform: translateY(3px) scale(1.06, 1.3);
+    transform: translateY(2px) scale(1.03, 1.18);
     transform-origin: top center;
     box-shadow:
-      var(--shadow-lg),
-      0 0 0 2px var(--pill-inset-active) inset;
+      0 10px 22px rgba(0, 0, 0, 0.16),
+      0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset,
+      0 0 0 1px var(--pill-inset-active) inset;
   }
 
   .block-label {
     position: relative;
     z-index: 4;
     font-family: var(--font-ui);
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 650;
     color: var(--text-on-accent);
     white-space: nowrap;
     overflow: hidden;
@@ -969,7 +1132,7 @@
     position: relative;
     z-index: 4;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 400;
     color: var(--text-on-accent-muted);
     white-space: nowrap;
@@ -979,13 +1142,17 @@
 
   .ts-axis-line {
     position: relative;
-    height: 6px;
+    height: 8px;
     background: var(--timeline-track-bg);
     border-radius: var(--radius-pill);
     z-index: 8;
     overflow: visible;
-    pointer-events: none;
+    pointer-events: auto;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--surface-inset-strong) 80%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--surface-outline-soft) 90%, transparent);
   }
+
 
   .scrubber-label {
     position: absolute;
@@ -1028,7 +1195,7 @@
     position: absolute;
     left: 0;
     top: 50%;
-    height: 54px;
+    height: 64px;
     transform: translateY(-50%);
     width: 100%;
     margin: 0;
@@ -1056,21 +1223,21 @@
 
   .ts-scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 28px;
-    height: 54px;
-    border-radius: 14px;
+    width: 36px;
+    height: 64px;
+    border-radius: 18px;
     background-color: var(--scrubber-thumb-bg);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='54' viewBox='0 0 28 54'%3E%3Cpath d='M11 27 L7 23 M11 27 L7 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M17 27 L21 23 M17 27 L21 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='64' viewBox='0 0 36 64'%3E%3Cpath d='M13 32 L8 27 M13 32 L8 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M23 32 L28 27 M23 32 L28 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
-    border: 2.5px solid var(--pane-color);
+    border: 3.5px solid var(--pane-color);
     cursor: ew-resize;
     box-shadow:
-      0 4px 16px rgba(0, 0, 0, 0.22),
-      0 0 0 4px var(--scrubber-thumb-ring),
-      0 0 0 1px var(--surface-inset-strong) inset;
+      0 14px 28px rgba(0, 0, 0, 0.26),
+      0 0 0 6px var(--scrubber-thumb-ring),
+      0 0 0 1px var(--surface-inset-strong) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.7);
     pointer-events: auto;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
   }
 
   .ts-scrubber.is-disabled::-webkit-slider-thumb {
@@ -1081,28 +1248,29 @@
   }
 
   .ts-scrubber::-webkit-slider-thumb:hover {
-    transform: scaleY(1.06);
     box-shadow:
-      0 6px 22px rgba(0, 0, 0, 0.28),
-      0 0 0 6px var(--scrubber-thumb-ring-hover),
-      0 0 0 1px var(--surface-inset-strong) inset;
+      0 16px 32px rgba(0, 0, 0, 0.30),
+      0 0 0 7px var(--scrubber-thumb-ring-hover),
+      0 0 0 1px var(--surface-inset-strong) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.78);
   }
 
   .ts-scrubber::-moz-range-thumb {
     -moz-appearance: none;
-    width: 28px;
-    height: 54px;
-    border-radius: 14px;
+    width: 36px;
+    height: 64px;
+    border-radius: 18px;
     background-color: var(--scrubber-thumb-bg);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='54' viewBox='0 0 28 54'%3E%3Cpath d='M11 27 L7 23 M11 27 L7 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M17 27 L21 23 M17 27 L21 31' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='64' viewBox='0 0 36 64'%3E%3Cpath d='M13 32 L8 27 M13 32 L8 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M23 32 L28 27 M23 32 L28 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
-    border: 2.5px solid var(--pane-color);
+    border: 3.5px solid var(--pane-color);
     cursor: ew-resize;
     box-shadow:
-      0 4px 16px rgba(0, 0, 0, 0.22),
-      0 0 0 4px var(--scrubber-thumb-ring),
-      0 0 0 1px var(--surface-inset-strong) inset;
+      0 14px 28px rgba(0, 0, 0, 0.26),
+      0 0 0 6px var(--scrubber-thumb-ring),
+      0 0 0 1px var(--surface-inset-strong) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.7);
     pointer-events: auto;
   }
 
@@ -1122,12 +1290,12 @@
   }
 
   .ts-scrubber::-webkit-slider-runnable-track {
-    height: 54px;
+    height: 64px;
     background: transparent;
   }
 
   .ts-scrubber::-moz-range-track {
-    height: 54px;
+    height: 64px;
     background: transparent;
     border: none;
   }
