@@ -5,21 +5,58 @@ let map: maplibregl.Map | null = null;
 type BaseMapTheme = "light" | "dark";
 const mapThemeByInstance = new WeakMap<maplibregl.Map, BaseMapTheme>();
 
-type HistCartLayerKey = "ferraris" | "vandermaelen";
+type HistCartLayerKey =
+  | "ngi1904"
+  | "ngi1873"
+  | "popp"
+  | "ferraris"
+  | "villaret"
+  | "frickx"
+  | "vandermaelen";
+type LandUsageLayerKey = "ferraris" | "vandermaelen";
 
 const HISTCART_LAYERS: Record<
   HistCartLayerKey,
-  { sourceId: string; layerId: string; layerName: string }
+  { sourceId: string; layerId: string; tiles: string[] }
 > = {
+  ngi1904: {
+    sourceId: "histcart-ngi1904-source",
+    layerId: "histcart-ngi1904-layer",
+    tiles: [
+      "https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__450/MapServer/tile/{z}/{y}/{x}"
+    ]
+  },
+  ngi1873: {
+    sourceId: "histcart-ngi1873-source",
+    layerId: "histcart-ngi1873-layer",
+    tiles: [
+      "https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__140/MapServer/tile/{z}/{y}/{x}"
+    ]
+  },
+  popp: {
+    sourceId: "histcart-popp-source",
+    layerId: "histcart-popp-layer",
+    tiles: wmtsTiles("popp")
+  },
   ferraris: {
     sourceId: "histcart-ferraris-source",
     layerId: "histcart-ferraris-layer",
-    layerName: "ferraris"
+    tiles: wmtsTiles("ferraris")
+  },
+  villaret: {
+    sourceId: "histcart-villaret-source",
+    layerId: "histcart-villaret-layer",
+    tiles: wmsRasterTiles("https://geo.api.vlaanderen.be/HISTCART/wms", "Villaret")
+  },
+  frickx: {
+    sourceId: "histcart-frickx-source",
+    layerId: "histcart-frickx-layer",
+    tiles: wmtsTiles("frickx")
   },
   vandermaelen: {
     sourceId: "histcart-vandermaelen-source",
     layerId: "histcart-vandermaelen-layer",
-    layerName: "vandermaelen"
+    tiles: wmtsTiles("vandermaelen")
   }
 };
 
@@ -44,7 +81,7 @@ function wmsRasterTiles(baseUrl: string, layers: string): string[] {
 }
 
 const LAND_USAGE_LAYERS: Record<
-  HistCartLayerKey,
+  LandUsageLayerKey,
   { sourceId: string; layerId: string; tiles: string[] }
 > = {
   ferraris: {
@@ -145,7 +182,7 @@ export function setHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerK
     if (!hasSource) {
       map.addSource(cfg.sourceId, {
         type: "raster",
-        tiles: wmtsTiles(cfg.layerName),
+        tiles: cfg.tiles,
         tileSize: 256,
         bounds: BELGIUM_BOUNDS
       });
@@ -191,7 +228,7 @@ export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKe
 // Land usage WMS overlay layers (on top of HISTCART WMTS base)
 // ---------------------------------------------------------------------------
 
-export function setLandUsageLayerVisible(map: maplibregl.Map, key: HistCartLayerKey, visible: boolean): void {
+export function setLandUsageLayerVisible(map: maplibregl.Map, key: LandUsageLayerKey, visible: boolean): void {
   const cfg = LAND_USAGE_LAYERS[key];
   if (!cfg) return;
   const hasSource = !!map.getSource(cfg.sourceId);
@@ -214,13 +251,13 @@ export function setLandUsageLayerVisible(map: maplibregl.Map, key: HistCartLayer
   if (hasSource) map.removeSource(cfg.sourceId);
 }
 
-export function setLandUsageLayerOpacity(map: maplibregl.Map, key: HistCartLayerKey, opacity: number): void {
+export function setLandUsageLayerOpacity(map: maplibregl.Map, key: LandUsageLayerKey, opacity: number): void {
   const cfg = LAND_USAGE_LAYERS[key];
   if (!cfg || !map.getLayer(cfg.layerId)) return;
   map.setPaintProperty(cfg.layerId, "raster-opacity", Math.max(0, Math.min(1, opacity)));
 }
 
-export function getLandUsageLayerId(key: HistCartLayerKey): string {
+export function getLandUsageLayerId(key: LandUsageLayerKey): string {
   return LAND_USAGE_LAYERS[key].layerId;
 }
 

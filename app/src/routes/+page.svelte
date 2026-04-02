@@ -202,8 +202,11 @@
             setHistCartLayerOpacity(targetMap, wmtsKey, opacity);
           }
         } else if (subDef?.kind === 'wms') {
-          setLandUsageLayerVisible(targetMap, mainId as HistCartLayerKey, true);
-          setLandUsageLayerOpacity(targetMap, mainId as HistCartLayerKey, opacity);
+          const landUsageKey = getLandUsageKey(mainId);
+          if (landUsageKey) {
+            setLandUsageLayerVisible(targetMap, landUsageKey, true);
+            setLandUsageLayerOpacity(targetMap, landUsageKey, opacity);
+          }
         } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
           setPrimitiveLayerVisible(targetMap, true, primitiveGeojsonUrl());
           setPrimitiveLayerOpacity(targetMap, opacity);
@@ -258,7 +261,18 @@
   let mainLayerOrder: MainLayerId[] = [...MAIN_LAYER_ORDER];
   let mainLayerEnabled  = makeInitialMainLayerEnabled();
   let mainLayerLoading: Record<string, boolean> = {};
-  let mainLayerOpacity: Record<string, number>  = { gereduceerd: 1, primitief: 1, vandermaelen: 1, ferraris: 1, handdrawn: 1 };
+  let mainLayerOpacity: Record<string, number>  = {
+    ngi1904: 1,
+    ngi1873: 1,
+    gereduceerd: 1,
+    popp: 1,
+    vandermaelen: 1,
+    primitief: 1,
+    ferraris: 1,
+    villaret: 1,
+    frickx: 1,
+    handdrawn: 1,
+  };
   let subLayerEnabled   = makeInitialSubLayerEnabled();
   let subLayerLoading: Record<string, boolean>  = {};
   const iiifSyncByMain = new Map<string, Promise<void>>();
@@ -338,7 +352,18 @@
   }
 
   function getMainWmtsKey(mainId: string): HistCartLayerKey | undefined {
-    if (mainId === 'ferraris')    return 'ferraris';
+    if (mainId === 'ngi1904')      return 'ngi1904';
+    if (mainId === 'ngi1873')      return 'ngi1873';
+    if (mainId === 'popp')         return 'popp';
+    if (mainId === 'ferraris')     return 'ferraris';
+    if (mainId === 'villaret')     return 'villaret';
+    if (mainId === 'frickx')       return 'frickx';
+    if (mainId === 'vandermaelen') return 'vandermaelen';
+    return undefined;
+  }
+
+  function getLandUsageKey(mainId: string): 'ferraris' | 'vandermaelen' | undefined {
+    if (mainId === 'ferraris') return 'ferraris';
     if (mainId === 'vandermaelen') return 'vandermaelen';
     return undefined;
   }
@@ -457,8 +482,11 @@
       for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
         const subDef = SUB_LAYER_DEFS[subId];
         if (subDef?.kind === 'wms') {
-          const lid = getLandUsageLayerId(mainId as HistCartLayerKey);
-          try { if (map.getLayer(lid)) map.moveLayer(lid); } catch { /* ignore */ }
+          const landUsageKey = getLandUsageKey(mainId);
+          if (landUsageKey) {
+            const lid = getLandUsageLayerId(landUsageKey);
+            try { if (map.getLayer(lid)) map.moveLayer(lid); } catch { /* ignore */ }
+          }
         } else if (subDef?.kind === 'iiif') {
           const info = getIiifInfoForSub(subId);
           if (info) {
@@ -487,8 +515,11 @@
       for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
         const subDef = SUB_LAYER_DEFS[subId];
         if (subDef?.kind === 'wms') {
-          const lid = getLandUsageLayerId(mainId as HistCartLayerKey);
-          try { if (targetMap.getLayer(lid)) targetMap.moveLayer(lid); } catch { /* ignore */ }
+          const landUsageKey = getLandUsageKey(mainId);
+          if (landUsageKey) {
+            const lid = getLandUsageLayerId(landUsageKey);
+            try { if (targetMap.getLayer(lid)) targetMap.moveLayer(lid); } catch { /* ignore */ }
+          }
         } else if (subDef?.kind === 'iiif') {
           const info = getIiifInfoForSub(subId);
           if (info) {
@@ -520,7 +551,8 @@
       } else {
         if (!subLayerEnabled[subId]) continue;
         if (subDef?.kind === 'wms') {
-          setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+          const landUsageKey = getLandUsageKey(mainId);
+          if (landUsageKey) setLandUsageLayerOpacity(map, landUsageKey, opacity);
         } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
           setPrimitiveLayerOpacity(map, opacity);
         }
@@ -763,8 +795,11 @@
       return;
     }
     if (subDef.kind === 'wms') {
-      setLandUsageLayerVisible(map, mainId as HistCartLayerKey, enabled);
-      if (enabled) setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+      const landUsageKey = getLandUsageKey(mainId);
+      if (landUsageKey) {
+        setLandUsageLayerVisible(map, landUsageKey, enabled);
+        if (enabled) setLandUsageLayerOpacity(map, landUsageKey, opacity);
+      }
       applyZOrder();
       return;
     }
@@ -1117,8 +1152,11 @@
       return;
     }
     if (subDef.kind === 'wms') {
-      setLandUsageLayerVisible(rightMap, mainId as HistCartLayerKey, e.detail.enabled);
-      if (e.detail.enabled) setLandUsageLayerOpacity(rightMap, mainId as HistCartLayerKey, opacity);
+      const landUsageKey = getLandUsageKey(mainId);
+      if (landUsageKey) {
+        setLandUsageLayerVisible(rightMap, landUsageKey, e.detail.enabled);
+        if (e.detail.enabled) setLandUsageLayerOpacity(rightMap, landUsageKey, opacity);
+      }
       applyZOrderForPane(rightMap, 'right');
       return;
     }
@@ -1318,8 +1356,11 @@
               setHistCartLayerOpacity(map, wmtsKey, opacity);
             }
           } else if (subDef?.kind === 'wms') {
-            setLandUsageLayerVisible(map, mainId as HistCartLayerKey, true);
-            setLandUsageLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+            const landUsageKey = getLandUsageKey(mainId);
+            if (landUsageKey) {
+              setLandUsageLayerVisible(map, landUsageKey, true);
+              setLandUsageLayerOpacity(map, landUsageKey, opacity);
+            }
           }
         }
       }

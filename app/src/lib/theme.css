@@ -153,10 +153,15 @@
   --pane-right-badge-text:    #5c4697;
   --pane-right-panel-tint:    rgba(138, 106, 214, 0.12);
   --layer-hand-color:         #888780;
+  --layer-frickx-color:       #9d7a43;
+  --layer-villaret-color:     #3f7c85;
   --layer-ferraris-color:     #6aaa5a;
   --layer-primitief-color:    #c97a2e;
   --layer-vander-color:       #c45000;
   --layer-gereduceerd-color:  #a0b020;
+  --layer-popp-color:         #7a5c9e;
+  --layer-ngi1873-color:      #4f7b66;
+  --layer-ngi1904-color:      #506b8f;
 
   /* --- Timeline / chrome controls ------------------------- */
   --toolbar-button-bg:          rgba(255, 255, 255, 0.94);
