@@ -48,6 +48,33 @@
 - Re-verify lane assignment and small-pill readability after the interaction bugs are fixed.
 - Re-test smallest pills for hitbox, visual width, and abbreviation legibility.
 
+## 6.1 Timeline Sublayer Menu Refactor
+
+- Goal: move the sublayer menu off the top-of-window controls and attach it directly to each timeline pill.
+- Intended behavior: each pill should have a small upward tab/arrow so it reads like a file folder.
+- Clicking that tab should expand the pill's attached sublayer menu.
+- Only one pill menu should be open at a time.
+- Clicking a different pill tab should collapse the previously open one and open the new one.
+- The visual styling of the sublayer menu itself should stay close to the previous implementation.
+
+What is already implemented:
+
+- The old top-of-window sublayer menu block has been removed from `app/src/lib/components/Timeslider.svelte`.
+- Each pill now renders a dedicated folder-tab button and a per-pill popover container.
+- Menu state is modeled with a single `openMenuKey`, so the state shape already supports “only one open at a time”.
+- The per-pill menu content reuses the existing sublayer controls and main-layer info/source content.
+- The click-guard logic for the track has been updated so interacting with pill/menu UI should not jump the timeline.
+
+What is still unresolved:
+
+- The menu may now open correctly after the reactivity fix below, but this has not yet been verified in the live browser. Re-test before marking as done.
+
+Reactivity fix applied (2026-04-03):
+
+- Root cause investigated: all 16 template uses of `openMenuKey` were routed through a `isMenuOpen(key)` wrapper function rather than referencing `openMenuKey` directly. In Svelte 5 (this project uses ^5.51.0), the compiler may not register a reactive dependency on `openMenuKey` when it is only read inside a called function, so assigning to it did not trigger template re-renders.
+- Fix: removed `isMenuOpen`, replaced all `isMenuOpen(src.key)` occurrences in the template with `openMenuKey === src.key` directly. This ensures Svelte tracks `openMenuKey` as an explicit template dependency across all four lane `{#each}` blocks.
+- Compile check passes: 0 errors, 0 warnings after the change.
+
 ## 7. Bugs
 
 - `Main-layer info bubble still broken`
@@ -58,18 +85,25 @@
   The custom pill hover display has changed multiple times; native `title` is the current fallback, but custom hover behavior should be rechecked in-browser.
 - `Timeline full-label switch still broken`
   Timeline pills are still showing short labels/initials even after multiple attempts to restore full labels when a pill is wide enough. The current issue should be treated as unresolved runtime behavior in `app/src/lib/components/Timeslider.svelte`, not as a settled implementation.
+- `Timeline pill expand tab — fix applied, needs browser verification`
+  Root cause was Svelte 5 not tracking `openMenuKey` as a template dependency when it was only read through the `isMenuOpen` wrapper function. Fixed by removing the wrapper and using `openMenuKey === src.key` directly in all template locations. Needs live browser test to confirm the menu now opens correctly.
 
 ## 8. Verification
 
 - Last verified command: `pnpm -s run check`
 - Current TypeScript/Svelte status at last edit: `0 errors, 0 warnings`
-- Important: compile status is clean, but runtime behavior is not fully reliable. The main known example is the broken info bubble.
+- Important: compile status is clean, but runtime behavior is not fully verified. The pill expand tab fix needs a live browser test. The info bubble is still broken at runtime.
 
-## 9. Next Actions
+## 9. SSR / Server-Side Notes
 
-1. Hand off the main-layer info bubble bug to another agent and debug it in the live app, not only via static code inspection.
-2. Re-test pill click isolation in-browser and either fix or remove the current partial implementation.
-3. Once interaction bugs are stable, simplify `Timeslider.svelte` and remove dead experimental code paths.
+- `app/src/lib/artemis/ui/ToponymSearch.svelte` had a `document is not defined` crash on the server (SSR). The `onDestroy` callback was calling `document.removeEventListener` unconditionally. Fixed by guarding with `if (typeof document !== 'undefined')`. `onDestroy` runs during SSR in SvelteKit; `onMount` does not. Any future use of browser globals in `onDestroy` must use the same guard.
+
+## 10. Next Actions
+
+1. Verify pill expand tab works in the live browser after the reactivity fix.
+2. Hand off the main-layer info bubble bug to an agent and debug it in the live app, not only via static code inspection.
+3. Re-test pill click isolation in-browser and either fix or remove the current partial implementation.
+4. Once interaction bugs are stable, simplify `Timeslider.svelte` and remove dead experimental code paths.
 
 ## 10. UI Token Strategy
 

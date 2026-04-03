@@ -62,6 +62,12 @@
   let viewMode: ViewMode = 'single';
   let themeMode: ThemeMode = 'light';
   const THEME_STORAGE_KEY = 'artemis-theme-mode';
+  let scaleWidthPx = 0;
+  let scaleLabel = '';
+  const SCALE_MAX_WIDTH_PX = 120;
+  let searchFocusMainId: MainLayerId | null = null;
+  let searchFocusYear: number | null = null;
+  let searchFocusNonce = 0;
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -101,6 +107,18 @@
   const MASSART_LEEWAY = 3; // years each side of the scrubber that count as "active"
   const MASSART_YEAR_MIN = 1904;
   const MASSART_YEAR_MAX = 1912;
+  const MAIN_LAYER_TIMELINE_YEAR: Partial<Record<MainLayerId, number>> = {
+    handdrawn: 1707,
+    frickx: 1712,
+    villaret: 1746,
+    ferraris: 1774,
+    primitief: 1814,
+    vandermaelen: 1850,
+    gereduceerd: 1851,
+    popp: 1860,
+    ngi1873: 1873,
+    ngi1904: 1904,
+  };
   let massartItems: MassartItem[] = [];
   let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
   let rightTimelineYear = MASSART_YEAR_MAX;
@@ -170,6 +188,42 @@
     } catch {
       /* ignore persistence failures */
     }
+  }
+
+  function formatScaleDistance(distanceMeters: number): string {
+    if (distanceMeters >= 1000) {
+      const km = distanceMeters / 1000;
+      return Number.isInteger(km) ? `${km} km` : `${km.toFixed(1)} km`;
+    }
+    return `${Math.round(distanceMeters)} m`;
+  }
+
+  function chooseNiceScaleDistance(maxMeters: number): number {
+    if (!Number.isFinite(maxMeters) || maxMeters <= 0) return 0;
+    const exponent = Math.floor(Math.log10(maxMeters));
+    const base = 10 ** exponent;
+    for (const step of [5, 2, 1]) {
+      const candidate = step * base;
+      if (candidate <= maxMeters) return candidate;
+    }
+    return base / 2;
+  }
+
+  function updateScaleIndicator(targetMap?: maplibregl.Map | null) {
+    const activeMap = targetMap ?? map ?? rightMap;
+    if (!activeMap) return;
+    const center = activeMap.getCenter();
+    const zoom = activeMap.getZoom();
+    const metersPerPixel = (156543.03392 * Math.cos((center.lat * Math.PI) / 180)) / (2 ** zoom);
+    const maxMeters = metersPerPixel * SCALE_MAX_WIDTH_PX;
+    const niceDistance = chooseNiceScaleDistance(maxMeters);
+    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0 || niceDistance <= 0) {
+      scaleWidthPx = 0;
+      scaleLabel = '';
+      return;
+    }
+    scaleWidthPx = Math.max(24, Math.min(SCALE_MAX_WIDTH_PX, niceDistance / metersPerPixel));
+    scaleLabel = formatScaleDistance(niceDistance);
   }
 
   async function rehydratePaneMap(targetMap: maplibregl.Map, paneId: PaneId | 'main') {
@@ -1046,18 +1100,39 @@
     }
   }
 
+  async function focusTimelineForMainLayer(mainId: MainLayerId) {
+    const targetYear = MAIN_LAYER_TIMELINE_YEAR[mainId];
+    if (targetYear == null || massartYear === targetYear) return;
+    massartYear = targetYear;
+    await tick();
+  }
+
+  function applySearchLayerFocus(mainId: MainLayerId) {
+    searchFocusMainId = mainId;
+    searchFocusYear = MAIN_LAYER_TIMELINE_YEAR[mainId] ?? null;
+    searchFocusNonce += 1;
+  }
+
   // ─── ToponymSearch event handlers ─────────────────────────────────────────
 
   async function onFlyToToponym(item: ToponymIndexItem) {
-    flyToCoordinates(item.lon, item.lat, `Toponym "${item.text}"`);
     const mainId = findMainIdForMapName(item.mapName);
-    if (mainId) await activateLayer(mainId);
+    if (mainId) {
+      await focusTimelineForMainLayer(mainId as MainLayerId);
+      applySearchLayerFocus(mainId as MainLayerId);
+      await activateLayer(mainId);
+    }
+    flyToCoordinates(item.lon, item.lat, `Toponym "${item.text}"`);
   }
 
   async function onManifestClick(result: ManifestSearchItem) {
-    flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
     const mainId = findMainIdForMapName(result.mapName);
-    if (mainId) await activateLayer(mainId);
+    if (mainId) {
+      await focusTimelineForMainLayer(mainId as MainLayerId);
+      applySearchLayerFocus(mainId as MainLayerId);
+      await activateLayer(mainId);
+    }
+    flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
     openPreviewBubbleAt({
       title: result.label,
       manifestUrl: result.sourceManifestUrl,
@@ -1289,6 +1364,7 @@
         bearing: map.getBearing(),
         pitch: map.getPitch(),
       });
+      updateScaleIndicator(rightMap);
       attachRightMassartHandlers(rightMap!);
       attachRightIiifHandlers(rightMap!);
       await syncRightPaneState();
@@ -1296,6 +1372,7 @@
     rightMap.on('move', () => {
       if (imageCollectionBubbleItem) closeImageCollectionBubble();
       syncCamera('right');
+      updateScaleIndicator(rightMap);
     });
     rightMapInitInFlight = false;
   }
@@ -1341,6 +1418,7 @@
     map = ensureMapContext(mapDiv, themeMode);
     attachAllmapsDebugEvents(map, log);
     map.on('load', () => {
+      updateScaleIndicator(map);
       // Re-apply WMTS/WMS visibility that may have been set before the style finished loading.
       // setHistCartLayerVisible / setLandUsageLayerVisible call map.addSource + map.addLayer,
       // which throw if the style isn't ready. The Timeslider onMount fires before load, so any
@@ -1471,6 +1549,7 @@
     const onMapMove = () => {
       if (imageCollectionBubbleItem) closeImageCollectionBubble();
       syncCamera('left');
+      updateScaleIndicator(map);
     };
 
     map.on('mousemove', onMouseMove);
@@ -1603,35 +1682,44 @@
 
     <div class="timeslider-wrap">
       <div class="timeslider-toolbar">
-        <button
-          class="compare-toggle"
-          class:is-active={isSplitLayout}
-          type="button"
-          aria-pressed={isSplitLayout}
-          on:click={toggleSplitMode}
-        >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
-        <button
-          class="theme-toggle"
-          class:is-dark={themeMode === 'dark'}
-          type="button"
-          aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          on:click={toggleThemeMode}
-        >
-          <span class="theme-toggle-glyph" aria-hidden="true">
-            <span class="theme-toggle-sun">☀</span>
-            <span class="theme-toggle-moon">☾</span>
-          </span>
-        </button>
+        <div class="timeslider-toolbar-left">
+          <button
+            class="compare-toggle"
+            class:is-active={isSplitLayout}
+            type="button"
+            aria-pressed={isSplitLayout}
+            on:click={toggleSplitMode}
+          >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
+          <button
+            class="theme-toggle"
+            class:is-dark={themeMode === 'dark'}
+            type="button"
+            aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            on:click={toggleThemeMode}
+          >
+            <span class="theme-toggle-glyph" aria-hidden="true">
+              <span class="theme-toggle-sun">☀</span>
+              <span class="theme-toggle-moon">☾</span>
+            </span>
+          </button>
+        </div>
+        {#if scaleLabel}
+          <div class="map-scale" aria-label={`Map scale indicator: ${scaleLabel} in the real world`}>
+            <span class="map-scale-label">{scaleLabel}</span>
+            <div class="map-scale-bar" style={`width:${scaleWidthPx}px;`}></div>
+          </div>
+        {/if}
       </div>
       <Timeslider
         {massartItems}
         dualPaneEnabled={dualPaneEnabled}
-        showLeftPaneControls={!hasViewerPane || viewerPane !== 'left'}
-        showRightPaneControls={!hasViewerPane || viewerPane !== 'right'}
         disabledPane={hasViewerPane && isSplitLayout ? viewerPane : null}
         leftYear={massartYear}
         rightYear={rightTimelineYear}
+        {searchFocusMainId}
+        {searchFocusYear}
+        {searchFocusNonce}
         yearLeeway={MASSART_LEEWAY}
         loadingLayers={combinedMainLayerLoading}
         on:mainToggle={onTimesliderMainToggle}
@@ -1843,11 +1931,62 @@
 
   .timeslider-toolbar {
     display: flex;
-    justify-content: flex-start;
-    gap: 8px;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
     margin-bottom: 8px;
     pointer-events: none;
   }
+
+  .timeslider-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .map-scale {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    min-width: 0;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .map-scale-label {
+    padding: 4px 8px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--surface-floating) 90%, transparent);
+    border: 1px solid var(--surface-outline-soft);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+  }
+
+  .map-scale-bar {
+    position: relative;
+    height: 8px;
+    border-bottom: 2px solid var(--text-secondary);
+  }
+
+  .map-scale-bar::before,
+  .map-scale-bar::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    width: 2px;
+    height: 8px;
+    background: var(--text-secondary);
+  }
+
+  .map-scale-bar::before { left: 0; }
+  .map-scale-bar::after { right: 0; }
 
   .compare-toggle {
     padding: 11px 18px;
@@ -1932,6 +2071,17 @@
   .theme-toggle.is-dark .theme-toggle-moon {
     opacity: 1;
     transform: scale(1) rotate(0deg);
+  }
+
+  @media (max-width: 700px) {
+    .timeslider-toolbar {
+      gap: 8px;
+    }
+
+    .map-scale-label {
+      font-size: 10px;
+      padding: 4px 7px;
+    }
   }
 
 
