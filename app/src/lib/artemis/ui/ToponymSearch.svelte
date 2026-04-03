@@ -96,10 +96,10 @@
 </script>
 
 <section class="toponym-search-panel">
-  <div class="toponym-search-row">
+  <div class="ui-panel toponym-search-row">
     <input
       type="search"
-      class="toponym-search-input"
+      class="ui-input"
       placeholder="Search manifests and toponyms..."
       bind:value={query}
       on:input={() => (locked = false)}
@@ -112,20 +112,20 @@
   </div>
 
   {#if error}
-    <div class="toponym-search-error">{error}</div>
+    <div class="ui-panel toponym-feedback toponym-search-error">{error}</div>
   {/if}
 
   {#if firstFocusSeen && query.trim() === '' && suggestions.length > 0}
-    <div class="toponym-suggestions">
-      <div class="toponym-suggestions-title">Try one of these</div>
+    <div class="ui-panel toponym-suggestions">
+      <div class="ui-label">Try one of these</div>
       <div class="toponym-suggestion-list">
         {#each suggestions as s (s.id)}
           {@const mainId = findMainId(s.mapName)}
           {@const color = mainId ? MAIN_LAYER_META[mainId]?.color : undefined}
-          <button type="button" class="toponym-suggestion" on:click={() => (query = s.text)}>
+          <button type="button" class="ui-list-item toponym-suggestion" on:click={() => (query = s.text)}>
             {#if color}<span class="result-color-dot" style="background:{color}"></span>{/if}
             <span class="toponym-text">{s.text}</span>
-            <span class="toponym-meta">{s.mapName}</span>
+            <span class="ui-meta">{s.mapName}</span>
           </button>
         {/each}
       </div>
@@ -133,34 +133,34 @@
   {/if}
 
   {#if !locked && query.trim() && (manifestResults.length > 0 || toponymResults.length > 0)}
-    <div class="toponym-results" role="listbox" aria-label="Search results">
+    <div class="ui-panel toponym-results" role="listbox" aria-label="Search results">
       {#if manifestResults.length > 0}
-        <div class="result-group-title">IIIF manifests</div>
+        <div class="ui-label result-group-title">IIIF manifests</div>
         {#each manifestResults as result (result.id)}
           {@const mainId = findMainId(result.mapName)}
           {@const color = mainId ? MAIN_LAYER_META[mainId]?.color : undefined}
-          <button type="button" class="toponym-result" on:click={() => selectManifest(result)}>
+          <button type="button" class="ui-list-item" on:click={() => selectManifest(result)}>
             {#if color}<span class="result-color-dot" style="background:{color}"></span>{/if}
             <span class="toponym-text">{result.text}</span>
-            <span class="toponym-meta">IIIF · {result.mapName}</span>
+            <span class="ui-meta">IIIF · {result.mapName}</span>
           </button>
         {/each}
       {/if}
       {#if toponymResults.length > 0}
-        <div class="result-group-title">Toponyms</div>
+        <div class="ui-label result-group-title">Toponyms</div>
         {#each toponymResults as result (result.id)}
           {@const mainId = findMainId(result.mapName)}
           {@const color = mainId ? MAIN_LAYER_META[mainId]?.color : undefined}
-          <button type="button" class="toponym-result" on:click={() => selectToponym(result)}>
+          <button type="button" class="ui-list-item" on:click={() => selectToponym(result)}>
             {#if color}<span class="result-color-dot" style="background:{color}"></span>{/if}
             <span class="toponym-text">{result.text}</span>
-            <span class="toponym-meta">{result.mapName}</span>
+            <span class="ui-meta">{result.mapName}</span>
           </button>
         {/each}
       {/if}
     </div>
   {:else if !locked && query.trim() && !loading && !error}
-    <div class="toponym-search-empty">No matching manifests or toponyms.</div>
+    <div class="ui-panel toponym-feedback">No matching manifests or toponyms.</div>
   {/if}
 </section>
 
@@ -182,24 +182,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
-    border: 0.5px solid var(--panel-border);
-    border-radius: var(--radius-sm);
-    background: var(--panel-bg);
-    box-shadow: var(--shadow-floating-ui);
   }
-
-  .toponym-search-input {
-    border: 0;
-    outline: 0;
-    background: transparent;
-    padding: 0;
-    font-size: 14px;
-    color: var(--text-primary);
-    flex: 1;
-    font-family: var(--font-ui);
-  }
-
-  .toponym-search-input::placeholder { color: var(--text-muted); }
 
   .toponym-search-status {
     font-size: 11px;
@@ -207,62 +190,33 @@
     white-space: nowrap;
   }
 
-  .toponym-results,
-  .toponym-suggestions {
+  .toponym-results {
     display: flex;
     flex-direction: column;
     gap: 2px;
     padding: 6px;
-    border: 0.5px solid var(--panel-border);
-    border-radius: var(--radius-sm);
-    background: var(--panel-bg);
-    box-shadow: var(--shadow-floating-ui);
   }
 
-  .toponym-suggestions { gap: 6px; padding: 8px; }
-
-  .toponym-suggestions-title {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-weight: 700;
+  .toponym-suggestions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
   }
 
   .toponym-suggestion-list { display: grid; gap: 4px; }
 
-  .result-group-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text-muted);
-    padding: 4px 6px 2px;
-  }
-
-  .toponym-suggestion,
-  .toponym-result {
-    border: 0;
-    background: var(--result-bg);
-    border-radius: var(--radius-xs);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 8px 10px;
-    cursor: pointer;
-  }
-
+  /* padding differs from the base ui-list-item */
   .toponym-suggestion { padding: 7px 9px; }
-  .toponym-suggestion:hover, .toponym-result:hover { background: var(--result-hover); }
+
+  /* left padding for the group label */
+  .result-group-title { padding: 4px 6px 2px; }
 
   .toponym-text {
     font-size: 13px;
     font-weight: 600;
     text-align: left;
     color: var(--text-primary);
-  }
-
-  .toponym-meta {
-    font-size: 11px;
-    color: var(--text-muted);
-    white-space: nowrap;
   }
 
   .result-color-dot {
@@ -272,15 +226,10 @@
     border-radius: 50%;
   }
 
-  .toponym-search-error,
-  .toponym-search-empty {
+  .toponym-feedback {
     padding: 6px 8px;
-    border-radius: var(--radius-xs);
-    background: var(--panel-bg);
-    border: 0.5px solid var(--panel-border);
     font-size: 11px;
     color: var(--text-muted);
-    box-shadow: var(--shadow-md);
   }
 
   .toponym-search-error { color: var(--text-error); }

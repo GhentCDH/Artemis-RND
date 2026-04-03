@@ -68,3 +68,67 @@
 1. Hand off the main-layer info bubble bug to another agent and debug it in the live app, not only via static code inspection.
 2. Re-test pill click isolation in-browser and either fix or remove the current partial implementation.
 3. Once interaction bugs are stable, simplify `Timeslider.svelte` and remove dead experimental code paths.
+
+## 10. UI Token Strategy
+
+- Goal: make the UI respond consistently from a small number of central style files rather than from many component-local hardcoded values.
+- The preferred direction is not a full DaisyUI migration.
+- The preferred direction is a DaisyUI-inspired internal design system built on CSS variables and shared primitives.
+- The current `app/src/lib/theme.css` already acts as the main styling control surface, but it mixes base tokens, semantic tokens, and feature-specific tokens in one place.
+
+## 11. Proposed Style Structure
+
+- `app/src/lib/tokens.css`
+  Holds foundation and semantic design tokens.
+- `app/src/lib/ui.css`
+  Holds shared primitive/component styles that consume those tokens.
+- Existing feature components should then consume those shared primitives instead of defining one-off visual values locally wherever possible.
+
+## 12. Token Model
+
+- Foundation tokens
+  Raw scales and base values such as spacing, radii, shadows, font stacks, motion timings, and base color ramps.
+- Semantic tokens
+  Named UI meanings such as page background, panel background, card background, text strengths, borders, focus rings, and overlays.
+- Component tokens
+  Reusable values for repeated UI patterns such as button height, panel padding, input background, toolbar chrome, and card shadow.
+
+Examples of the intended token categories:
+
+- Spacing: `--space-1`, `--space-2`, `--space-3`
+- Radius: `--radius-sm`, `--radius-md`, `--radius-lg`
+- Surface: `--surface-page`, `--surface-panel`, `--surface-card`
+- Text: `--text-primary`, `--text-secondary`, `--text-muted`
+- Border/shadow: `--border-subtle`, `--border-strong`, `--shadow-sm`, `--shadow-panel`
+- Motion: `--duration-fast`, `--duration-normal`
+- Component-level: `--panel-padding`, `--btn-height`, `--input-height`
+
+## 13. Shared UI Primitives
+
+- `ui.css` should define a small set of reusable classes or patterns for the recurring non-map UI:
+- panel
+- card
+- button
+- input
+- badge/chip
+- toggle
+- toolbar control
+- overlay shell
+
+These primitives should be applied first to:
+
+- `app/src/lib/artemis/ui/ToponymSearch.svelte`
+- `app/src/lib/artemis/ui/InfoCards.svelte`
+- `app/src/lib/artemis/ui/DebugMenu.svelte`
+- the metadata/action surfaces in `app/src/lib/artemis/viewer/IiifViewer.svelte`
+
+The map stage and timeline should remain custom surfaces:
+
+- `app/src/routes/+page.svelte`
+- `app/src/lib/components/Timeslider.svelte`
+
+## 14. Practical Outcome
+
+- Changing a few token values should update the whole UI consistently.
+- The app should become easier to restyle without editing many separate components.
+- This should improve clarity and consistency without forcing the map/timeline UI into generic framework patterns.

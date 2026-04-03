@@ -97,6 +97,7 @@ const LAND_USAGE_LAYERS: Record<
 };
 
 const BELGIUM_BOUNDS: [number, number, number, number] = [2.53, 50.685, 5.92, 51.52];
+const WORLD_GRID_BOUNDS: [number, number, number, number] = [-180, -85, 180, 85];
 
 const IIIF_HOVER_SOURCE_ID = "iiif-hover-mask-source";
 const IIIF_HOVER_LINE_LAYER_ID = "iiif-hover-mask-line";
@@ -110,6 +111,10 @@ const PRIMITIVE_SELECT_SOURCE_ID = "primitive-parcels-select-source";
 const PRIMITIVE_SELECT_FILL_LAYER_ID = "primitive-parcels-select-fill";
 const PRIMITIVE_SELECT_LINE_LAYER_ID = "primitive-parcels-select-line";
 const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
+const BASE_GRID_SOURCE_ID = "artemis-base-grid-source";
+const BASE_GRID_MINOR_LAYER_ID = "artemis-base-grid-minor";
+const BASE_GRID_MAJOR_LAYER_ID = "artemis-base-grid-major";
+const BASE_BACKGROUND_LAYER_ID = "artemis-base-background";
 
 function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
   const style = map.getStyle();
@@ -121,16 +126,116 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
   return createMapContextWithTheme(container, "light");
 }
 
-export function getBaseMapStyleUrl(theme: BaseMapTheme): string {
-  return theme === "dark"
-    ? "https://tiles.openfreemap.org/styles/dark"
-    : "https://tiles.openfreemap.org/styles/positron";
+function buildGridGeoJSON(): GeoJSON.FeatureCollection {
+  const [minLng, minLat, maxLng, maxLat] = WORLD_GRID_BOUNDS;
+  const features: GeoJSON.Feature[] = [];
+
+  function roundCoord(value: number): number {
+    return Math.round(value * 1000) / 1000;
+  }
+
+  function addVerticalLines(step: number, major = false) {
+    const start = Math.ceil(minLng / step) * step;
+    for (let lng = start; lng <= maxLng + 1e-9; lng += step) {
+      features.push({
+        type: "Feature",
+        properties: { major },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [roundCoord(lng), minLat],
+            [roundCoord(lng), maxLat]
+          ]
+        }
+      });
+    }
+  }
+
+  function addHorizontalLines(step: number, major = false) {
+    const start = Math.ceil(minLat / step) * step;
+    for (let lat = start; lat <= maxLat + 1e-9; lat += step) {
+      features.push({
+        type: "Feature",
+        properties: { major },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [minLng, roundCoord(lat)],
+            [maxLng, roundCoord(lat)]
+          ]
+        }
+      });
+    }
+  }
+
+  addVerticalLines(0.25, false);
+  addHorizontalLines(0.25, false);
+  addVerticalLines(1, true);
+  addHorizontalLines(1, true);
+
+  return { type: "FeatureCollection", features };
+}
+
+function getBaseMapStyle(theme: BaseMapTheme): maplibregl.StyleSpecification {
+  const isDark = theme === "dark";
+  const backgroundColor = isDark ? "#1a150f" : "#f4efe4";
+  const minorGridColor = isDark ? "rgba(207, 176, 109, 0.08)" : "rgba(168, 144, 79, 0.10)";
+  const majorGridColor = isDark ? "rgba(207, 176, 109, 0.16)" : "rgba(168, 144, 79, 0.18)";
+
+  return {
+    version: 8,
+    sources: {
+      [BASE_GRID_SOURCE_ID]: {
+        type: "geojson",
+        data: buildGridGeoJSON()
+      }
+    },
+    layers: [
+      {
+        id: BASE_BACKGROUND_LAYER_ID,
+        type: "background",
+        paint: {
+          "background-color": backgroundColor
+        }
+      },
+      {
+        id: BASE_GRID_MINOR_LAYER_ID,
+        type: "line",
+        source: BASE_GRID_SOURCE_ID,
+        filter: ["==", ["get", "major"], false],
+        paint: {
+          "line-color": minorGridColor,
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            6, 0.4,
+            10, 0.7,
+            14, 1
+          ]
+        }
+      },
+      {
+        id: BASE_GRID_MAJOR_LAYER_ID,
+        type: "line",
+        source: BASE_GRID_SOURCE_ID,
+        filter: ["==", ["get", "major"], true],
+        paint: {
+          "line-color": majorGridColor,
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            6, 0.6,
+            10, 0.9,
+            14, 1.3
+          ]
+        }
+      }
+    ]
+  };
 }
 
 export function createMapContextWithTheme(container: HTMLElement, theme: BaseMapTheme = "light"): maplibregl.Map {
   const nextMap = new maplibregl.Map({
     container,
-    style: getBaseMapStyleUrl(theme),
+    style: getBaseMapStyle(theme),
     center: [4.23, 51.10], // Bornem, Scheldt valley
     zoom: 10,
     attributionControl: false
@@ -152,7 +257,7 @@ export function createMapContextWithTheme(container: HTMLElement, theme: BaseMap
 
 export function setBaseMapTheme(targetMap: maplibregl.Map, theme: BaseMapTheme): boolean {
   if (mapThemeByInstance.get(targetMap) === theme) return false;
-  targetMap.setStyle(getBaseMapStyleUrl(theme));
+  targetMap.setStyle(getBaseMapStyle(theme));
   mapThemeByInstance.set(targetMap, theme);
   return true;
 }

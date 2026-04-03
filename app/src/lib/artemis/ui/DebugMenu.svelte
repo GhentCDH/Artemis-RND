@@ -18,15 +18,15 @@
   let open = false;
 </script>
 
-<button class="debug-toggle" type="button" on:click={() => (open = !open)}>
+<button class="ui-btn debug-toggle" type="button" on:click={() => (open = !open)}>
   {open ? 'Hide Debug Menu' : 'Show Debug Menu'}
 </button>
 
 {#if open}
-  <aside class="debug-menu">
+  <aside class="ui-panel-overlay debug-menu">
     <div class="debug-menu-head">
       <h2>Debug Menu</h2>
-      <button type="button" class="debug-close" on:click={() => (open = false)}>Close</button>
+      <button type="button" class="ui-btn" on:click={() => (open = false)}>Close</button>
     </div>
 
     <div class="field">
@@ -62,9 +62,9 @@
           <div class="step-title">Problem manifests ({$bulkSummary.problematicCount})</div>
           <div class="problem-list">
             {#each $bulkSummary.problematicManifests as p}
-              <div class="problem-item">
+              <div class="ui-alert problem-item">
                 <div class="problem-head">
-                  <span class="mono">{p.annotationErrorCount}x</span>
+                  <span class="ui-mono">{p.annotationErrorCount}x</span>
                   <span>{p.manifestLabel}</span>
                 </div>
                 <a href={p.sourceManifestUrl} target="_blank" rel="noreferrer">source manifest</a>
@@ -85,8 +85,8 @@
           <tbody>
             {#each $bulkSummary.steps as s}
               <tr>
-                <td class="mono">{s.step}</td>
-                <td class="mono">{fmtMs(s.avgMs)}</td>
+                <td class="ui-mono">{s.step}</td>
+                <td class="ui-mono">{fmtMs(s.avgMs)}</td>
                 <td>{s.count}</td>
                 <td>{s.okCount}/{s.count}</td>
               </tr>
@@ -103,8 +103,8 @@
             <tbody>
               {#each $bulkSummary.stepsApplied as s}
                 <tr>
-                  <td class="mono">{s.step}</td>
-                  <td class="mono">{fmtMs(s.avgMs)}</td>
+                  <td class="ui-mono">{s.step}</td>
+                  <td class="ui-mono">{fmtMs(s.avgMs)}</td>
                   <td>{s.count}</td>
                   <td>{s.okCount}/{s.count}</td>
                 </tr>
@@ -154,21 +154,19 @@
 {/if}
 
 <style>
+  /* Override ui-btn: floating position, stronger visual weight */
   .debug-toggle {
     position: absolute;
     top: 14px;
     right: 14px;
     z-index: 3;
-    border: 1px solid var(--border-ui);
-    border-radius: var(--radius-xs);
     background: var(--overlay-bg);
     padding: 8px 10px;
-    font-size: 12px;
     font-weight: 600;
-    cursor: pointer;
     box-shadow: var(--shadow-debug);
   }
 
+  /* Override ui-panel-overlay: positioned, scrollable, column layout */
   .debug-menu {
     position: absolute;
     top: 52px;
@@ -181,11 +179,6 @@
     flex-direction: column;
     gap: 10px;
     padding: 12px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-ui);
-    background: var(--overlay-bg);
-    backdrop-filter: blur(4px);
-    box-shadow: var(--shadow-lg);
   }
 
   .debug-menu-head {
@@ -196,15 +189,6 @@
   }
 
   h2 { margin: 0; font-size: 16px; font-weight: 600; }
-
-  .debug-close {
-    border: 1px solid var(--border-ui);
-    border-radius: var(--radius-xs);
-    background: var(--card-bg);
-    padding: 5px 8px;
-    font-size: 11px;
-    cursor: pointer;
-  }
 
   .field { display: flex; flex-direction: column; gap: 4px; }
 
@@ -258,14 +242,8 @@
 
   .problem-list { display: grid; gap: 6px; margin-bottom: 6px; }
 
-  .problem-item {
-    border: 1px solid var(--problem-border);
-    border-radius: var(--radius-xs);
-    padding: 6px 8px;
-    background: var(--problem-bg);
-    display: grid;
-    gap: 2px;
-  }
+  /* Override ui-alert: grid layout for head + detail rows */
+  .problem-item { display: grid; gap: 2px; }
 
   .problem-head { display: flex; gap: 8px; align-items: baseline; }
   .problem-error { color: var(--problem-error-color); font-size: 12px; }
@@ -312,10 +290,6 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-  }
-
-  .mono {
-    font-family: var(--font-mono);
   }
 
   @media (max-width: 900px) {

@@ -193,8 +193,8 @@
   style="left:{clampedX}px;top:{clampedY}px;transform:{bubbleTransform}"
 >
   <div class="image-collection-bubble" class:is-below={placeBelow} style={`width:${bubbleWidth}px;`}>
-    <button class="image-collection-bubble-close" type="button" on:click={() => dispatch('close')} aria-label="Close">×</button>
-    <div class="image-collection-bubble-kicker">{currentItem?.kicker || item.kicker || 'Image Collection'}</div>
+    <button class="ui-icon-btn image-collection-bubble-close" type="button" on:click={() => dispatch('close')} aria-label="Close">×</button>
+    <div class="ui-mono image-collection-bubble-kicker">{currentItem?.kicker || item.kicker || 'Image Collection'}</div>
     {#if bubbleItems.length > 1}
       <div class="image-collection-bubble-group-title">{bubbleItems.length} map sheets at this location</div>
     {/if}
@@ -217,7 +217,7 @@
             {/if}
           </div>
           <div class="image-collection-bubble-actions">
-            <button class="image-collection-bubble-open" type="button" on:click={() => openViewer(bubbleItem)}>Open in viewer</button>
+            <button class="ui-btn-primary" type="button" on:click={() => openViewer(bubbleItem)}>Open in viewer</button>
           </div>
         </section>
       {/each}
@@ -310,20 +310,18 @@
     transform: translate(-50%, 9px) rotate(45deg);
   }
 
+  /* Override ui-icon-btn: absolute position, bubble close color */
   .image-collection-bubble-close {
     position: absolute;
     top: 8px;
     right: 9px;
-    border: none;
-    background: transparent;
     color: var(--bubble-close);
     font-size: 18px;
     line-height: 1;
-    cursor: pointer;
   }
 
+  /* Override ui-mono: kicker-specific color and treatment */
   .image-collection-bubble-kicker {
-    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--bubble-kicker);
     text-transform: uppercase;
@@ -399,18 +397,4 @@
     justify-content: flex-end;
   }
 
-  .image-collection-bubble-open {
-    border: none;
-    border-radius: var(--radius-xs);
-    padding: 9px 14px;
-    background: var(--bubble-action-bg);
-    color: var(--bubble-action-text);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .image-collection-bubble-open:hover {
-    background: var(--bubble-action-bg-hover);
-  }
 </style>

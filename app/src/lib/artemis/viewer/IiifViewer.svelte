@@ -111,7 +111,7 @@
     {#if !inline}
       <div class="viewer-topbar">
         <span class="viewer-title">{title}</span>
-        <button class="viewer-close" type="button" on:click={() => dispatch("close")} aria-label="Close">
+        <button class="ui-icon-btn viewer-close" type="button" on:click={() => dispatch("close")} aria-label="Close">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
           </svg>
@@ -129,7 +129,7 @@
       <aside class="viewer-meta">
         {#if inline}
           <div class="viewer-meta-topbar">
-            <button class="viewer-close viewer-close--meta" type="button" on:click={() => dispatch("close")} aria-label="Close">
+            <button class="ui-icon-btn viewer-close viewer-close--meta" type="button" on:click={() => dispatch("close")} aria-label="Close">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
               </svg>
@@ -138,7 +138,7 @@
         {/if}
         {#if inline && historyItems.length > 1}
           <div class="viewer-history viewer-history--sidebar">
-            <div class="viewer-history-label">Recent manifests</div>
+            <div class="ui-label">Recent manifests</div>
             <div class="viewer-history-list">
               {#each historyItems as item}
                 <button
@@ -153,7 +153,7 @@
         {/if}
         <div class="viewer-meta-scroll">
           <div class="viewer-meta-block">
-            <div class="viewer-meta-label">Manifest</div>
+            <div class="ui-label">Manifest</div>
             <div class="viewer-meta-heading">{manifestDetails?.title || title || 'Untitled document'}</div>
             {#if manifestDetails?.summary}
               <p class="viewer-meta-summary">{manifestDetails.summary}</p>
@@ -161,7 +161,7 @@
           </div>
 
           {#if loadingMetadata}
-            <div class="viewer-meta-status">Loading metadata…</div>
+            <div class="ui-meta viewer-meta-status">Loading metadata…</div>
           {:else if metadataError}
             <div class="viewer-meta-status viewer-meta-status-error">{metadataError}</div>
           {:else if manifestDetails}
@@ -193,19 +193,19 @@
               <div class="viewer-meta-block">
                 {#if manifestDetails.provider}
                   <div class="viewer-meta-row">
-                    <span class="viewer-meta-key">Provider</span>
+                    <span class="ui-label">Provider</span>
                     <span class="viewer-meta-value">{manifestDetails.provider}</span>
                   </div>
                 {/if}
                 {#if manifestDetails.rights}
                   <div class="viewer-meta-row">
-                    <span class="viewer-meta-key">Rights</span>
+                    <span class="ui-label">Rights</span>
                     <span class="viewer-meta-value">{manifestDetails.rights}</span>
                   </div>
                 {/if}
                 {#if manifestDetails.homepageUrl}
                   <div class="viewer-meta-row">
-                    <span class="viewer-meta-key">Homepage</span>
+                    <span class="ui-label">Homepage</span>
                     <a class="viewer-meta-link" href={manifestDetails.homepageUrl} target="_blank" rel="noopener noreferrer">
                       Open source page
                     </a>
@@ -216,18 +216,18 @@
 
             {#if manifestDetails.requiredStatement}
               <div class="viewer-meta-block">
-                <div class="viewer-meta-label">{manifestDetails.requiredStatement.label}</div>
+                <div class="ui-label">{manifestDetails.requiredStatement.label}</div>
                 <div class="viewer-meta-copy">{manifestDetails.requiredStatement.value}</div>
               </div>
             {/if}
 
             {#if manifestDetails.metadata.length > 0}
               <div class="viewer-meta-block">
-                <div class="viewer-meta-label">Metadata</div>
+                <div class="ui-label">Metadata</div>
                 <dl class="viewer-meta-list">
                   {#each manifestDetails.metadata as field}
                     <div class="viewer-meta-entry">
-                      <dt>{field.label}</dt>
+                      <dt class="ui-label">{field.label}</dt>
                       <dd>{field.value}</dd>
                     </div>
                   {/each}
@@ -305,17 +305,10 @@
     white-space: nowrap;
   }
 
+  /* Override ui-icon-btn: viewer-specific padding and transition */
   .viewer-close {
     flex-shrink: 0;
-    background: none;
-    border: none;
     padding: 6px;
-    cursor: pointer;
-    color: var(--text-muted);
-    border-radius: var(--radius-xs);
-    display: flex;
-    align-items: center;
-    justify-content: center;
     transition: background 0.15s, color 0.15s;
   }
 
@@ -327,11 +320,6 @@
   .viewer-window--inline .viewer-close svg {
     width: 18px;
     height: 18px;
-  }
-
-  .viewer-close:hover {
-    background: var(--surface-muted);
-    color: var(--text-primary);
   }
 
   .viewer-body {
@@ -398,14 +386,6 @@
     gap: 8px;
   }
 
-  .viewer-meta-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-  }
-
   .viewer-meta-heading {
     font-size: 18px;
     font-weight: 700;
@@ -430,15 +410,6 @@
     gap: 3px;
   }
 
-  .viewer-meta-key,
-  .viewer-meta-entry dt {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-  }
-
   .viewer-meta-link {
     font-size: 13px;
     font-weight: 600;
@@ -458,11 +429,6 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-  }
-
-  .viewer-meta-status {
-    font-size: 12px;
-    color: var(--text-muted);
   }
 
   .viewer-meta-status-error {
@@ -489,14 +455,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-  }
-
-  .viewer-history-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
   }
 
   .viewer-history-list {

@@ -1,5 +1,5 @@
 /* ============================================================
-   Artemis UI theme — edit here to restyle the entire viewer
+   Artemis UI theme — Warm Ochre
    ============================================================ */
 
 :root {
@@ -8,54 +8,54 @@
   --font-mono:     "DM Mono", "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
 
   /* --- Surfaces -------------------------------------------- */
-  --panel-bg:      #fdfdfd;          /* floating panels (sidebar, search, debug) */
-  --panel-border:  rgba(0, 0, 0, 0.1);
-  --card-bg:       #ffffff;          /* cards / rows inside panels */
-  --card-border:   rgba(0, 0, 0, 0.09);
-  --sublayer-bg:   rgba(0, 0, 0, 0.04);
-  --overlay-bg:    rgba(238, 240, 244, 0.95); /* glass/frosted panels */
-  --backdrop-color: rgba(178, 207, 255, 0.22);       /* modal backdrop */
+  --panel-bg:      #fdfcf9;
+  --panel-border:  rgba(120, 100, 60, 0.14);
+  --card-bg:       #ffffff;
+  --card-border:   rgba(120, 100, 60, 0.12);
+  --sublayer-bg:   rgba(168, 144, 79, 0.07);
+  --overlay-bg:    rgba(28, 22, 10, 0.94);
+  --backdrop-color: rgba(168, 144, 79, 0.18);
 
   /* --- Text ------------------------------------------------ */
-  --text-primary:   #1a1a1a;
-  --text-secondary: #303030;
-  --text-muted:     rgba(0, 0, 0, 0.42);
-  --text-muted-log: #666;
-  --text-ok:        #2a7a2a;
-  --text-error:     #c0392b;
-  --text-warn:      #b7800a;
+  --text-primary:   #1a1814;
+  --text-secondary: #3e3424;
+  --text-muted:     rgba(80, 68, 44, 0.45);
+  --text-muted-log: rgba(80, 68, 44, 0.55);
+  --text-ok:        #4a7a4a;
+  --text-error:     #8b3a2a;
+  --text-warn:      #8a6820;
 
   /* --- Input / search results ------------------------------ */
-  --input-bg:    #e6e8ec;
-  --result-bg:   #e6e8ec;
-  --result-hover: #d8dade;
+  --input-bg:    #eae6de;
+  --result-bg:   #eae6de;
+  --result-hover: #e0dbd0;
 
   /* --- Toggles --------------------------------------------- */
-  --toggle-off:   rgba(0, 0, 0, 0.14);
-  --toggle-on:    #22c55e;    /* overridden per card via --layer-color */
+  --toggle-off:   rgba(120, 100, 60, 0.2);
+  --toggle-on:    #a8904f;
   --toggle-thumb: #ffffff;
 
   /* --- Borders --------------------------------------------- */
-  --border-light:  #e2e3e6;   /* table rows, log lines, metrics */
-  --border-subtle: #ececee;   /* very faint separators (log rows) */
-  --border-ui:     #c8c9cc;   /* chrome borders (debug button, modal) */
+  --border-light:  rgba(120, 100, 60, 0.14);
+  --border-subtle: rgba(120, 100, 60, 0.09);
+  --border-ui:     rgba(120, 100, 60, 0.28);
 
   /* --- Sublayer type badges --------------------------------- */
-  --badge-iiif-bg:     #e8f0fe;
-  --badge-iiif-color:  #1a73e8;
-  --badge-geo-bg:      #e6f4ea;
-  --badge-geo-color:   #137333;
-  --badge-search-bg:   #fef7e0;
-  --badge-search-color: #b45309;
+  --badge-iiif-bg:     #f0ebe0;
+  --badge-iiif-color:  #7a6430;
+  --badge-geo-bg:      #eaebdf;
+  --badge-geo-color:   #5a6030;
+  --badge-search-bg:   #f5eedf;
+  --badge-search-color: #8a6820;
 
   /* --- Problem / error blocks ------------------------------ */
-  --problem-border:       #e8d6d6;
-  --problem-bg:           #fff7f7;
-  --problem-error-color:  #8b1f1f;
+  --problem-border:       rgba(168, 80, 40, 0.22);
+  --problem-bg:           #fdf6f0;
+  --problem-error-color:  #7a3020;
 
   /* --- Progress / spinners --------------------------------- */
-  --progress-bg:    #d8d9dc;
-  --spinner-color:  #4a90d9;
+  --progress-bg:    rgba(120, 100, 60, 0.18);
+  --spinner-color:  #a8904f;
 
   /* --- Radii ----------------------------------------------- */
   --radius-xs:      6px;
@@ -65,37 +65,37 @@
   --radius-pill:    999px;
 
   /* --- Shadows --------------------------------------------- */
-  --shadow-sm:           0 1px 3px rgba(0, 0, 0, 0.18);
-  --shadow-md:           0 4px 20px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
-  --shadow-lg:           0 6px 24px rgba(0, 0, 0, 0.12);
-  --shadow-debug:        0 3px 14px rgba(0, 0, 0, 0.12);
-  --shadow-modal:        0 10px 30px rgba(0, 0, 0, 0.22);
-  --shadow-panel-right:  -4px 0 20px rgba(0, 0, 0, 0.12);
-  --shadow-viewer:       0 24px 80px rgba(0, 0, 0, 0.35);
-  --shadow-card:         0 12px 30px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-sm:           0 1px 3px rgba(40, 30, 10, 0.16);
+  --shadow-md:           0 4px 20px rgba(40, 30, 10, 0.09), 0 1px 4px rgba(40, 30, 10, 0.05);
+  --shadow-lg:           0 6px 24px rgba(40, 30, 10, 0.11);
+  --shadow-debug:        0 3px 14px rgba(40, 30, 10, 0.1);
+  --shadow-modal:        0 10px 30px rgba(40, 30, 10, 0.2);
+  --shadow-panel-right:  -4px 0 20px rgba(40, 30, 10, 0.1);
+  --shadow-viewer:       0 24px 80px rgba(40, 30, 10, 0.28);
+  --shadow-card:         0 12px 30px rgba(40, 30, 10, 0.13), 0 2px 8px rgba(40, 30, 10, 0.06);
 
   /* --- Shared chrome -------------------------------------- */
-  --surface-floating:     rgba(255, 255, 255, 0.96);
+  --surface-floating:     rgba(253, 252, 249, 0.96);
   --surface-raised:       #ffffff;
-  --timeline-panel-bg:    #f2f2f0;
-  --surface-disabled:     rgba(248, 248, 248, 0.98);
-  --surface-muted:        rgba(0, 0, 0, 0.06);
-  --surface-outline:      rgba(0, 0, 0, 0.25);
-  --surface-outline-soft: rgba(0, 0, 0, 0.12);
-  --surface-focus:        rgba(0, 0, 0, 0.55);
+  --timeline-panel-bg:    #f3eee4;
+  --surface-disabled:     rgba(244, 239, 230, 0.98);
+  --surface-muted:        rgba(120, 100, 60, 0.08);
+  --surface-outline:      rgba(120, 100, 60, 0.3);
+  --surface-outline-soft: rgba(120, 100, 60, 0.16);
+  --surface-focus:        rgba(120, 100, 60, 0.5);
   --surface-inset:        rgba(255, 255, 255, 0.5);
-  --surface-inset-strong: rgba(255, 255, 255, 0.8);
-  --surface-highlight:    rgba(255, 255, 255, 0.18);
-  --shadow-floating-ui:   0 24px 44px rgba(0, 0, 0, 0.22), 0 8px 18px rgba(0, 0, 0, 0.10);
-  --shadow-timeline:      0 28px 48px rgba(0, 0, 0, 0.22), 0 10px 20px rgba(0, 0, 0, 0.10);
+  --surface-inset-strong: rgba(255, 255, 255, 0.78);
+  --surface-highlight:    rgba(255, 248, 235, 0.26);
+  --shadow-floating-ui:   0 24px 44px rgba(40, 30, 10, 0.18), 0 8px 18px rgba(40, 30, 10, 0.08);
+  --shadow-timeline:      0 28px 48px rgba(40, 30, 10, 0.18), 0 10px 20px rgba(40, 30, 10, 0.08);
   --text-on-accent:       #ffffff;
-  --text-on-accent-muted: rgba(255, 255, 255, 0.72);
-  --accent-text-shadow:   0 1px 1px rgba(0, 0, 0, 0.2);
-  --pill-sheen:           rgba(255, 255, 255, 0.18);
-  --pill-shimmer:         rgba(255, 255, 255, 0.45);
-  --pill-inset-soft:      rgba(255, 255, 255, 0.28);
-  --pill-inset-strong:    rgba(255, 255, 255, 0.35);
-  --pill-inset-active:    rgba(255, 255, 255, 0.24);
+  --text-on-accent-muted: rgba(255, 255, 255, 0.76);
+  --accent-text-shadow:   0 1px 1px rgba(70, 50, 20, 0.28);
+  --pill-sheen:           rgba(255, 244, 220, 0.18);
+  --pill-shimmer:         rgba(255, 248, 232, 0.42);
+  --pill-inset-soft:      rgba(255, 248, 232, 0.24);
+  --pill-inset-strong:    rgba(255, 248, 232, 0.32);
+  --pill-inset-active:    rgba(255, 248, 232, 0.18);
   --scrubber-thumb-bg:    #ffffff;
   --photo-chip-bg:        #ffffff;
   --photo-chip-border:    rgba(255, 255, 255, 0.96);
@@ -103,7 +103,7 @@
   --photo-chip-shadow-hover: 0 0 0 3px rgba(212, 168, 75, 0.28), 0 4px 12px rgba(86, 54, 8, 0.3);
   --photo-chip-shadow-multi: 0 0 0 3px rgba(212, 168, 75, 0.34), 0 4px 12px rgba(86, 54, 8, 0.28);
   --photo-chip-shadow-near:  0 0 0 4px rgba(245, 158, 11, 0.32), 0 0 0 8px rgba(245, 158, 11, 0.14), 0 6px 16px rgba(124, 72, 1, 0.34);
-  --sub-menu-border:          color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --sub-menu-border:          color-mix(in srgb, var(--text-primary) 10%, transparent);
   --sub-menu-header-overlay:  linear-gradient(115deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 42%, transparent 42%);
   --sub-menu-swatch-ring:     color-mix(in srgb, var(--text-primary) 8%, transparent);
   --sub-menu-note-inset:      color-mix(in srgb, var(--surface-raised) 38%, transparent);
@@ -118,8 +118,8 @@
   --viewer-chip-bg:           color-mix(in srgb, var(--viewer-topbar-bg) 70%, white);
   --viewer-chip-bg-hover:     color-mix(in srgb, var(--viewer-topbar-bg) 88%, white);
   --viewer-chip-border-hover: color-mix(in srgb, var(--text-primary) 22%, transparent);
-  --viewer-action-bg:         color-mix(in srgb, var(--viewer-topbar-bg) 78%, white);
-  --viewer-action-bg-hover:   color-mix(in srgb, var(--viewer-topbar-bg) 92%, white);
+  --viewer-action-bg:         color-mix(in srgb, #a8904f 84%, white);
+  --viewer-action-bg-hover:   color-mix(in srgb, #a8904f 92%, white);
   --startup-overlay-bg:       linear-gradient(180deg, rgba(245, 242, 235, 0.96), rgba(255, 255, 255, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 36%);
   --startup-card-border:      rgba(0,0,0,0.1);
   --startup-card-bg:          rgba(255,255,255,0.95);
@@ -130,7 +130,7 @@
   --bubble-card-bg:           rgba(255,255,255,0.82);
   --bubble-card-border:       rgba(0,0,0,0.08);
   --bubble-close:             rgba(0,0,0,0.4);
-  --bubble-kicker:            #9a7b2f;
+  --bubble-kicker:            #8a6c2e;
   --bubble-title:             var(--text-primary);
   --bubble-meta:              rgba(0,0,0,0.6);
   --bubble-meta-strong:       rgba(0,0,0,0.56);
@@ -139,11 +139,12 @@
   --bubble-preview-border:    rgba(0,0,0,0.08);
   --bubble-status:            rgba(0,0,0,0.55);
   --bubble-status-error:      rgba(132, 43, 43, 0.82);
-  --bubble-action-bg:         #1f1f1f;
-  --bubble-action-bg-hover:   #333333;
+  --bubble-action-bg:         #a8904f;
+  --bubble-action-bg-hover:   #927b3f;
   --bubble-action-text:       #ffffff;
 
   /* --- Semantic layer / pane colors ----------------------- */
+  --layer-pill-color:         #a8904f;
   --pane-left-color:          #00a99a;
   --pane-left-badge-bg:       #bff5ee;
   --pane-left-badge-text:     #005f55;
@@ -152,84 +153,84 @@
   --pane-right-badge-bg:      #eee6fb;
   --pane-right-badge-text:    #5c4697;
   --pane-right-panel-tint:    rgba(138, 106, 214, 0.12);
-  --layer-hand-color:         #888780;
-  --layer-frickx-color:       #9d7a43;
-  --layer-villaret-color:     #3f7c85;
-  --layer-ferraris-color:     #6aaa5a;
-  --layer-primitief-color:    #c97a2e;
-  --layer-vander-color:       #c45000;
-  --layer-gereduceerd-color:  #a0b020;
-  --layer-popp-color:         #7a5c9e;
-  --layer-ngi1873-color:      #4f7b66;
-  --layer-ngi1904-color:      #506b8f;
+  --layer-hand-color:         var(--layer-pill-color);
+  --layer-frickx-color:       var(--layer-pill-color);
+  --layer-villaret-color:     var(--layer-pill-color);
+  --layer-ferraris-color:     var(--layer-pill-color);
+  --layer-primitief-color:    var(--layer-pill-color);
+  --layer-vander-color:       var(--layer-pill-color);
+  --layer-gereduceerd-color:  var(--layer-pill-color);
+  --layer-popp-color:         var(--layer-pill-color);
+  --layer-ngi1873-color:      var(--layer-pill-color);
+  --layer-ngi1904-color:      var(--layer-pill-color);
 
   /* --- Timeline / chrome controls ------------------------- */
-  --toolbar-button-bg:          rgba(255, 255, 255, 0.94);
+  --toolbar-button-bg:          rgba(253, 252, 249, 0.94);
   --toolbar-button-hover-bg:    #ffffff;
-  --toolbar-button-active-bg:   var(--text-primary);
+  --toolbar-button-active-bg:   #a8904f;
   --toolbar-button-active-text: var(--surface-raised);
-  --toolbar-button-active-border: var(--text-primary);
-  --timeline-track-bg:          linear-gradient(90deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.18));
-  --timeline-tick:              rgba(0, 0, 0, 0.22);
-  --timeline-tick-strong:       rgba(0, 0, 0, 0.55);
-  --timeline-label:             rgba(0, 0, 0, 0.38);
-  --timeline-label-strong:      rgba(0, 0, 0, 0.65);
+  --toolbar-button-active-border: #a8904f;
+  --timeline-track-bg:          linear-gradient(90deg, rgba(120, 100, 60, 0.12), rgba(120, 100, 60, 0.22));
+  --timeline-tick:              rgba(120, 100, 60, 0.22);
+  --timeline-tick-strong:       rgba(120, 100, 60, 0.52);
+  --timeline-label:             rgba(80, 68, 44, 0.4);
+  --timeline-label-strong:      rgba(80, 68, 44, 0.68);
 
   /* --- Split view chrome ---------------------------------- */
-  --split-pane-edge-shadow:     rgba(0, 0, 0, 0.16);
+  --split-pane-edge-shadow:     rgba(120, 100, 60, 0.16);
   --split-divider-shine:        rgba(255, 255, 255, 0.78);
   --split-divider-shine-edge:   rgba(255, 255, 255, 0.14);
-  --split-divider-core:         rgba(0, 0, 0, 0.32);
-  --split-divider-core-edge:    rgba(0, 0, 0, 0.12);
+  --split-divider-core:         rgba(120, 100, 60, 0.3);
+  --split-divider-core-edge:    rgba(120, 100, 60, 0.12);
   --split-divider-outline:      rgba(255, 255, 255, 0.32);
-  --split-divider-shadow:       rgba(0, 0, 0, 0.18);
+  --split-divider-shadow:       rgba(40, 30, 10, 0.18);
 
   /* --- IIIF viewer overlay --------------------------------- */
-  --viewer-backdrop:    rgba(0, 0, 0, 0.45);
+  --viewer-backdrop:    rgba(30, 22, 10, 0.42);
   --viewer-bg:          var(--panel-bg);
   --viewer-topbar-bg:   var(--card-bg);
   --viewer-canvas-bg:   var(--panel-bg);
   --viewer-meta-bg:     color-mix(in srgb, var(--viewer-bg) 92%, white);
-  --viewer-body-bg:     linear-gradient(180deg, rgba(248, 246, 241, 0.92), rgba(241, 238, 231, 0.92));
-  --viewer-inline-shadow: 0 0 0 1px rgba(0, 0, 0, 0.10), 0 30px 64px rgba(0, 0, 0, 0.26), 0 10px 26px rgba(0, 0, 0, 0.14);
-  --viewer-side-shadow: 22px 0 30px -26px rgba(0, 0, 0, 0.24);
-  --viewer-side-shadow-mirrored: -22px 0 30px -26px rgba(0, 0, 0, 0.24);
+  --viewer-body-bg:     linear-gradient(180deg, rgba(248, 244, 236, 0.92), rgba(241, 235, 224, 0.92));
+  --viewer-inline-shadow: 0 0 0 1px rgba(120, 100, 60, 0.12), 0 30px 64px rgba(40, 30, 10, 0.22), 0 10px 26px rgba(40, 30, 10, 0.12);
+  --viewer-side-shadow: 22px 0 30px -26px rgba(40, 30, 10, 0.22);
+  --viewer-side-shadow-mirrored: -22px 0 30px -26px rgba(40, 30, 10, 0.22);
 }
 
 html[data-theme='dark'] {
-  --panel-bg:      #0f0f10;
-  --panel-border:  rgba(255, 255, 255, 0.14);
-  --card-bg:       #171719;
-  --card-border:   rgba(255, 255, 255, 0.12);
-  --sublayer-bg:   rgba(255, 255, 255, 0.08);
-  --overlay-bg:    rgba(18, 18, 20, 0.94);
-  --backdrop-color: rgba(0, 0, 0, 0.42);
+  --panel-bg:      #18140e;
+  --panel-border:  rgba(220, 200, 160, 0.14);
+  --card-bg:       #221c14;
+  --card-border:   rgba(220, 200, 160, 0.12);
+  --sublayer-bg:   rgba(168, 144, 79, 0.1);
+  --overlay-bg:    rgba(18, 14, 8, 0.96);
+  --backdrop-color: rgba(0, 0, 0, 0.48);
 
-  --text-primary:   #f5f5f5;
-  --text-secondary: rgba(255, 255, 255, 0.88);
-  --text-muted:     rgba(255, 255, 255, 0.56);
-  --text-muted-log: #b5b5b5;
-  --text-ok:        #8bd88b;
-  --text-error:     #ff8c8c;
-  --text-warn:      #ffd36d;
+  --text-primary:   #f3ead8;
+  --text-secondary: rgba(243, 234, 216, 0.86);
+  --text-muted:     rgba(223, 205, 168, 0.58);
+  --text-muted-log: rgba(223, 205, 168, 0.62);
+  --text-ok:        #9eb986;
+  --text-error:     #d4957d;
+  --text-warn:      #d0af64;
 
-  --input-bg:      #18181a;
-  --result-bg:     #18181a;
-  --result-hover:  #222225;
+  --input-bg:      #221c14;
+  --result-bg:     #221c14;
+  --result-hover:  #2d2419;
 
-  --toggle-off:    rgba(255, 255, 255, 0.16);
-  --toggle-thumb:  #0f0f10;
+  --toggle-off:    rgba(223, 205, 168, 0.18);
+  --toggle-thumb:  #f3ead8;
 
-  --border-light:  rgba(255, 255, 255, 0.12);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-ui:     rgba(255, 255, 255, 0.2);
+  --border-light:  rgba(223, 205, 168, 0.14);
+  --border-subtle: rgba(223, 205, 168, 0.08);
+  --border-ui:     rgba(223, 205, 168, 0.24);
 
-  --problem-border:      rgba(255, 140, 140, 0.28);
-  --problem-bg:          rgba(70, 24, 24, 0.58);
-  --problem-error-color: #ffb1b1;
+  --problem-border:      rgba(212, 125, 92, 0.26);
+  --problem-bg:          rgba(76, 34, 24, 0.54);
+  --problem-error-color: #efb29a;
 
-  --progress-bg:   rgba(255, 255, 255, 0.14);
-  --spinner-color: #a8c7ff;
+  --progress-bg:   rgba(223, 205, 168, 0.16);
+  --spinner-color: #a8904f;
 
   --shadow-sm:           0 1px 3px rgba(0, 0, 0, 0.42);
   --shadow-md:           0 4px 20px rgba(0, 0, 0, 0.34), 0 1px 4px rgba(0, 0, 0, 0.22);
@@ -240,17 +241,17 @@ html[data-theme='dark'] {
   --shadow-viewer:       0 24px 80px rgba(0, 0, 0, 0.5);
   --shadow-card:         0 12px 30px rgba(0, 0, 0, 0.34), 0 2px 8px rgba(0, 0, 0, 0.2);
 
-  --surface-floating:     rgba(10, 10, 11, 0.96);
-  --surface-raised:       #171719;
-  --timeline-panel-bg:    #101010;
-  --surface-disabled:     rgba(28, 28, 30, 0.98);
-  --surface-muted:        rgba(255, 255, 255, 0.08);
-  --surface-outline:      rgba(255, 255, 255, 0.24);
-  --surface-outline-soft: rgba(255, 255, 255, 0.14);
-  --surface-focus:        rgba(255, 255, 255, 0.58);
+  --surface-floating:     rgba(24, 20, 14, 0.96);
+  --surface-raised:       #221c14;
+  --timeline-panel-bg:    #16120d;
+  --surface-disabled:     rgba(35, 28, 20, 0.98);
+  --surface-muted:        rgba(223, 205, 168, 0.08);
+  --surface-outline:      rgba(223, 205, 168, 0.28);
+  --surface-outline-soft: rgba(223, 205, 168, 0.16);
+  --surface-focus:        rgba(223, 205, 168, 0.56);
   --surface-inset:        rgba(255, 255, 255, 0.08);
   --surface-inset-strong: rgba(255, 255, 255, 0.18);
-  --surface-highlight:    rgba(255, 255, 255, 0.1);
+  --surface-highlight:    rgba(255, 244, 220, 0.08);
   --shadow-floating-ui:   0 24px 44px rgba(0, 0, 0, 0.42), 0 8px 18px rgba(0, 0, 0, 0.24);
   --shadow-timeline:      0 28px 48px rgba(0, 0, 0, 0.42), 0 10px 20px rgba(0, 0, 0, 0.24);
   --text-on-accent:       #ffffff;
@@ -291,7 +292,7 @@ html[data-theme='dark'] {
   --bubble-card-bg:           rgba(26,26,28,0.9);
   --bubble-card-border:       rgba(255,255,255,0.1);
   --bubble-close:             rgba(255,255,255,0.56);
-  --bubble-kicker:            #d4b06a;
+  --bubble-kicker:            #cfb06d;
   --bubble-title:             var(--text-primary);
   --bubble-meta:              rgba(255,255,255,0.64);
   --bubble-meta-strong:       rgba(255,255,255,0.56);
@@ -300,20 +301,20 @@ html[data-theme='dark'] {
   --bubble-preview-border:    rgba(255,255,255,0.1);
   --bubble-status:            rgba(255,255,255,0.56);
   --bubble-status-error:      #ff9d9d;
-  --bubble-action-bg:         #f5f5f5;
-  --bubble-action-bg-hover:   #ffffff;
+  --bubble-action-bg:         #a8904f;
+  --bubble-action-bg-hover:   #b89e5a;
   --bubble-action-text:       #111214;
 
-  --toolbar-button-bg:           rgba(14, 14, 15, 0.94);
-  --toolbar-button-hover-bg:     #1a1a1c;
-  --toolbar-button-active-bg:    #ffffff;
+  --toolbar-button-bg:           rgba(24, 20, 14, 0.94);
+  --toolbar-button-hover-bg:     #2b2218;
+  --toolbar-button-active-bg:    #a8904f;
   --toolbar-button-active-text:  #0f0f10;
-  --toolbar-button-active-border: #ffffff;
-  --timeline-track-bg:           linear-gradient(90deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.22));
-  --timeline-tick:               rgba(255, 255, 255, 0.28);
-  --timeline-tick-strong:        rgba(255, 255, 255, 0.56);
-  --timeline-label:              rgba(255, 255, 255, 0.44);
-  --timeline-label-strong:       rgba(255, 255, 255, 0.74);
+  --toolbar-button-active-border: #a8904f;
+  --timeline-track-bg:           linear-gradient(90deg, rgba(223, 205, 168, 0.14), rgba(168, 144, 79, 0.24));
+  --timeline-tick:               rgba(223, 205, 168, 0.28);
+  --timeline-tick-strong:        rgba(223, 205, 168, 0.56);
+  --timeline-label:              rgba(223, 205, 168, 0.44);
+  --timeline-label-strong:       rgba(243, 234, 216, 0.74);
 
   --split-pane-edge-shadow:      rgba(255, 255, 255, 0.12);
   --split-divider-shine:         rgba(255, 255, 255, 0.88);

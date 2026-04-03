@@ -1,0 +1,184 @@
+/* ============================================================
+   Artemis shared UI primitives — edit here to change how
+   all shared patterns look across the whole app.
+   Import alongside theme.css.
+   ============================================================ */
+
+/* --- Panels ----------------------------------------------- */
+
+/* Floating panel: search boxes, result lists, small popups */
+.ui-panel {
+  border: 0.5px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-floating-ui);
+}
+
+/* Overlay panel: menus and drawers that sit above the map */
+.ui-panel-overlay {
+  border: 1px solid var(--border-ui);
+  border-radius: var(--radius-sm);
+  background: var(--overlay-bg);
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Card: structured floating panel with a header row */
+.ui-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Card header row */
+.ui-card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  background: var(--card-bg);
+  border-bottom: 0.5px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+/* --- Buttons ---------------------------------------------- */
+
+/* Chrome button: small labeled action (close, reload, toggle) */
+.ui-btn {
+  border: 1px solid var(--border-ui);
+  border-radius: var(--radius-xs);
+  background: var(--card-bg);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/* Primary action button: solid filled, high emphasis */
+.ui-btn-primary {
+  border: none;
+  border-radius: var(--radius-xs);
+  padding: 9px 14px;
+  background: var(--bubble-action-bg);
+  color: var(--bubble-action-text);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ui-btn-primary:hover {
+  background: var(--bubble-action-bg-hover);
+}
+
+/* Icon button: no border, no background, icon-only */
+.ui-icon-btn {
+  background: none;
+  border: none;
+  padding: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+}
+.ui-icon-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-muted);
+}
+
+/* --- Interactive rows ------------------------------------- */
+
+/* Clickable list row: search results, IIIF item rows */
+.ui-list-item {
+  border: 0;
+  background: var(--result-bg);
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  transition: background 0.12s;
+}
+.ui-list-item:hover {
+  background: var(--result-hover);
+}
+
+/* --- Form elements ---------------------------------------- */
+
+/* Bare input: transparent, no border, inherits panel bg */
+.ui-input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  flex: 1;
+}
+.ui-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* --- Text utilities --------------------------------------- */
+
+/* Small uppercase section label */
+.ui-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Muted secondary / trailing text */
+.ui-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* --- Badges & chips --------------------------------------- */
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-ui);
+}
+
+/* --- Problem / error block -------------------------------- */
+
+.ui-alert {
+  border: 1px solid var(--problem-border);
+  border-radius: var(--radius-xs);
+  padding: 6px 8px;
+  background: var(--problem-bg);
+  color: var(--problem-error-color);
+  font-size: 12px;
+}
+
+/* --- Utilities -------------------------------------------- */
+
+.ui-mono {
+  font-family: var(--font-mono);
+}

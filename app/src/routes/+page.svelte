@@ -2,6 +2,7 @@
 <script lang="ts">
   import 'maplibre-gl/dist/maplibre-gl.css';
   import '$lib/theme.css';
+  import '$lib/ui.css';
   import { onDestroy, onMount, tick } from 'svelte';
   import type maplibregl from 'maplibre-gl';
 
