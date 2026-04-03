@@ -115,9 +115,13 @@
   --scrubber-thumb-ring:      color-mix(in srgb, var(--pane-color) 18%, transparent);
   --scrubber-thumb-ring-hover: color-mix(in srgb, var(--pane-color) 22%, transparent);
   --viewer-chip-border:       color-mix(in srgb, var(--text-primary) 12%, transparent);
-  --viewer-chip-bg:           color-mix(in srgb, var(--viewer-topbar-bg) 70%, white);
-  --viewer-chip-bg-hover:     color-mix(in srgb, var(--viewer-topbar-bg) 88%, white);
-  --viewer-chip-border-hover: color-mix(in srgb, var(--text-primary) 22%, transparent);
+  --viewer-chip-bg:           color-mix(in srgb, #f7f2e6 92%, white);
+  --viewer-chip-bg-hover:     color-mix(in srgb, #ede3c8 90%, white);
+  --viewer-chip-border-hover: color-mix(in srgb, #a8904f 32%, transparent);
+  --viewer-toggle-bg:         #a8904f;
+  --viewer-toggle-bg-hover:   #927b3f;
+  --viewer-toggle-border:     #a8904f;
+  --viewer-toggle-text:       #ffffff;
   --viewer-action-bg:         color-mix(in srgb, #a8904f 84%, white);
   --viewer-action-bg-hover:   color-mix(in srgb, #a8904f 92%, white);
   --startup-overlay-bg:       linear-gradient(180deg, rgba(245, 242, 235, 0.96), rgba(255, 255, 255, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 36%);
@@ -145,14 +149,14 @@
 
   /* --- Semantic layer / pane colors ----------------------- */
   --layer-pill-color:         #a8904f;
-  --pane-left-color:          #00a99a;
-  --pane-left-badge-bg:       #bff5ee;
-  --pane-left-badge-text:     #005f55;
-  --pane-left-panel-tint:     rgba(0, 169, 154, 0.14);
-  --pane-right-color:         #8a6ad6;
-  --pane-right-badge-bg:      #eee6fb;
-  --pane-right-badge-text:    #5c4697;
-  --pane-right-panel-tint:    rgba(138, 106, 214, 0.12);
+  --pane-left-color:          #8f7a3e;
+  --pane-left-badge-bg:       #efe4bd;
+  --pane-left-badge-text:     #5f4f1f;
+  --pane-left-panel-tint:     rgba(143, 122, 62, 0.16);
+  --pane-right-color:         #b46b3f;
+  --pane-right-badge-bg:      #f3d8c8;
+  --pane-right-badge-text:    #7a4222;
+  --pane-right-panel-tint:    rgba(180, 107, 63, 0.14);
   --layer-hand-color:         var(--layer-pill-color);
   --layer-frickx-color:       var(--layer-pill-color);
   --layer-villaret-color:     var(--layer-pill-color);
@@ -277,9 +281,13 @@ html[data-theme='dark'] {
   --source-disabled-hover-inset: color-mix(in srgb, var(--surface-raised) 14%, transparent);
   --source-focus-inset:       rgba(255, 255, 255, 0.18);
   --viewer-chip-border:       color-mix(in srgb, var(--text-primary) 16%, transparent);
-  --viewer-chip-bg:           color-mix(in srgb, var(--viewer-topbar-bg) 92%, black);
-  --viewer-chip-bg-hover:     color-mix(in srgb, var(--viewer-topbar-bg) 82%, white);
-  --viewer-chip-border-hover: color-mix(in srgb, var(--text-primary) 28%, transparent);
+  --viewer-chip-bg:           color-mix(in srgb, #2b2418 90%, black);
+  --viewer-chip-bg-hover:     color-mix(in srgb, #3a3020 88%, black);
+  --viewer-chip-border-hover: color-mix(in srgb, #cfb06d 36%, transparent);
+  --viewer-toggle-bg:         #a8904f;
+  --viewer-toggle-bg-hover:   #b89e5a;
+  --viewer-toggle-border:     #cfb06d;
+  --viewer-toggle-text:       #1a150f;
   --viewer-action-bg:         color-mix(in srgb, var(--viewer-topbar-bg) 88%, black);
   --viewer-action-bg-hover:   color-mix(in srgb, var(--viewer-topbar-bg) 80%, white);
   --startup-overlay-bg:       linear-gradient(180deg, rgba(18, 18, 20, 0.96), rgba(10, 10, 12, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.12), transparent 36%);

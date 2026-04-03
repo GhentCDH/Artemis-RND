@@ -3,7 +3,7 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { MassartItem } from '$lib/artemis/types';
-  import { MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META, MAIN_LAYER_INFO, MAIN_LAYER_SOURCE } from '$lib/artemis/layerConfig';
+  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META, MAIN_LAYER_INFO, MAIN_LAYER_SOURCE } from '$lib/artemis/layerConfig';
 
   type PaneId = 'left' | 'right';
 
@@ -46,7 +46,7 @@
 
   const SOURCES = [
     {
-      key: 'hand', mainId: 'handdrawn', label: 'Hand drawn',
+      key: 'hand', mainId: 'handdrawn', label: MAIN_LAYER_LABELS.handdrawn,
       start: 1700, end: 1715, repr: 1707, color: 'var(--layer-hand-color)', lane: 1,
       sublayers: [
         { id: 'iiif', subId: 'handdrawn-iiif', label: 'Map', defaultOn: true },
@@ -55,21 +55,21 @@
       ],
     },
     {
-      key: 'frickx', mainId: 'frickx', label: 'Frickx',
+      key: 'frickx', mainId: 'frickx', label: MAIN_LAYER_LABELS.frickx,
       start: 1712, end: 1712, repr: 1712, color: 'var(--layer-frickx-color)', lane: 3,
       sublayers: [
         { id: 'wmts', subId: 'frickx-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'villaret', mainId: 'villaret', label: 'Villaret',
+      key: 'villaret', mainId: 'villaret', label: MAIN_LAYER_LABELS.villaret,
       start: 1745, end: 1748, repr: 1746, color: 'var(--layer-villaret-color)', lane: 4,
       sublayers: [
         { id: 'wmts', subId: 'villaret-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'ferraris', mainId: 'ferraris', label: 'Ferraris',
+      key: 'ferraris', mainId: 'ferraris', label: MAIN_LAYER_LABELS.ferraris,
       start: 1770, end: 1778, repr: 1774, color: 'var(--layer-ferraris-color)', lane: 2,
       sublayers: [
         { id: 'wmts', subId: 'ferraris-wmts', label: 'Map', defaultOn: true },
@@ -77,7 +77,7 @@
       ],
     },
     {
-      key: 'primitief', mainId: 'primitief', label: 'Primitief Kadaster',
+      key: 'primitief', mainId: 'primitief', label: MAIN_LAYER_LABELS.primitief,
       start: 1808, end: 1834, repr: 1814, color: 'var(--layer-primitief-color)', lane: 3,
       sublayers: [
         { id: 'iiif', subId: 'primitief-iiif', label: 'Map', defaultOn: true },
@@ -86,7 +86,7 @@
       ],
     },
     {
-      key: 'vander', mainId: 'vandermaelen', label: 'Vandermaelen',
+      key: 'vander', mainId: 'vandermaelen', label: MAIN_LAYER_LABELS.vandermaelen,
       start: 1846, end: 1854, repr: 1850, color: 'var(--layer-vander-color)', lane: 4,
       sublayers: [
         { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map', defaultOn: true },
@@ -94,7 +94,7 @@
       ],
     },
     {
-      key: 'gered', mainId: 'gereduceerd', label: 'Gereduceerd Kadaster',
+      key: 'gered', mainId: 'gereduceerd', label: MAIN_LAYER_LABELS.gereduceerd,
       start: 1847, end: 1855, repr: 1851, color: 'var(--layer-gereduceerd-color)', lane: 1,
       sublayers: [
         { id: 'iiif', subId: 'gereduceerd-iiif', label: 'Map', defaultOn: true },
@@ -103,21 +103,21 @@
       ],
     },
     {
-      key: 'popp', mainId: 'popp', label: 'Poppkaart',
+      key: 'popp', mainId: 'popp', label: MAIN_LAYER_LABELS.popp,
       start: 1842, end: 1879, repr: 1860, color: 'var(--layer-popp-color)', lane: 2,
       sublayers: [
         { id: 'wmts', subId: 'popp-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'ngi1873', mainId: 'ngi1873', label: 'NGI Basemap 1873',
+      key: 'ngi1873', mainId: 'ngi1873', label: MAIN_LAYER_LABELS.ngi1873,
       start: 1873, end: 1873, repr: 1873, color: 'var(--layer-ngi1873-color)', lane: 3,
       sublayers: [
         { id: 'wmts', subId: 'ngi1873-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'ngi1904', mainId: 'ngi1904', label: 'NGI Basemap 1904',
+      key: 'ngi1904', mainId: 'ngi1904', label: MAIN_LAYER_LABELS.ngi1904,
       start: 1904, end: 1904, repr: 1904, color: 'var(--layer-ngi1904-color)', lane: 1,
       sublayers: [
         { id: 'wmts', subId: 'ngi1904-wmts', label: 'Map', defaultOn: true },
@@ -171,6 +171,7 @@
 
   let hoveredSrc: SourceDef | null = null;
   let tooltipFixedStyle = '';
+  let fullLabelFitsBySource: Partial<Record<SourceKey, boolean>> = {};
 
   $: massartByYear = massartItems.reduce<Map<number, MassartItem[]>>((acc, item) => {
     const y = parseInt(item.year ?? '0', 10);
@@ -483,8 +484,68 @@
     return MAIN_LAYER_SHORT_LABELS[src.mainId] ?? src.label;
   }
 
+  function sourceEstimatedLabelWidthPx(label: string): number {
+    return Math.max(28, 10 + label.length * 7);
+  }
+
   function sourceMinWidthPx(src: SourceDef): number {
-    return Math.max(28, 10 + sourceShortLabel(src).length * 7);
+    return sourceEstimatedLabelWidthPx(sourceShortLabel(src));
+  }
+
+  function sourceRenderedWidthPx(src: SourceDef): number {
+    const inclusiveEnd = Math.max(src.start, src.end + 1);
+    const spanYears = Math.max(1, inclusiveEnd - src.start);
+    if (trackWidth <= 0) return sourceMinWidthPx(src);
+
+    const usableWidth = trackWidth - SCRUBBER_THUMB_SIZE;
+    const rangeWidthPx = (spanYears / axisSpan) * usableWidth;
+    return Math.max(rangeWidthPx, sourceMinWidthPx(src));
+  }
+
+  function sourceDisplayLabel(src: SourceDef): string {
+    return fullLabelFitsBySource[src.key] ? src.label : sourceShortLabel(src);
+  }
+
+  function pillCanFitFullLabel(el: HTMLElement): boolean {
+    const styles = getComputedStyle(el);
+    const availableWidth =
+      el.clientWidth -
+      parseFloat(styles.paddingLeft || '0') -
+      parseFloat(styles.paddingRight || '0');
+    const measureEl = el.querySelector<HTMLElement>('.block-label-measure');
+    if (!measureEl) return false;
+    return availableWidth >= measureEl.scrollWidth;
+  }
+
+  function measureSourceLabel(el: HTMLElement, src: SourceDef) {
+    let rafId = 0;
+
+    const update = () => {
+      rafId = 0;
+      const nextFits = pillCanFitFullLabel(el);
+      if (fullLabelFitsBySource[src.key] === nextFits) return;
+      fullLabelFitsBySource = { ...fullLabelFitsBySource, [src.key]: nextFits };
+    };
+
+    const scheduleUpdate = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(update);
+    };
+
+    const resizeObserver = new ResizeObserver(scheduleUpdate);
+    resizeObserver.observe(el);
+    scheduleUpdate();
+
+    return {
+      update(nextSrc: SourceDef) {
+        src = nextSrc;
+        scheduleUpdate();
+      },
+      destroy() {
+        if (rafId) cancelAnimationFrame(rafId);
+        resizeObserver.disconnect();
+      }
+    };
   }
 
   function sourceBlockStyle(src: SourceDef): string {
@@ -931,11 +992,13 @@
           type="button"
           title={`${src.label} · ${src.start}–${src.end}`}
           aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+          use:measureSourceLabel={src}
           on:click={(e) => jumpToSource(src, e)}
           on:mouseenter={(e) => onPillEnter(src, e)}
           on:mouseleave={onPillLeave}
         >
-          <span class="block-label">{sourceShortLabel(src)}</span>
+          <span class="block-label">{sourceDisplayLabel(src)}</span>
+          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
         </button>
       {/each}
     </div>
@@ -953,11 +1016,13 @@
           type="button"
           title={`${src.label} · ${src.start}–${src.end}`}
           aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+          use:measureSourceLabel={src}
           on:click={(e) => jumpToSource(src, e)}
           on:mouseenter={(e) => onPillEnter(src, e)}
           on:mouseleave={onPillLeave}
         >
-          <span class="block-label">{sourceShortLabel(src)}</span>
+          <span class="block-label">{sourceDisplayLabel(src)}</span>
+          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
         </button>
       {/each}
     </div>
@@ -1043,11 +1108,13 @@
           type="button"
           title={`${src.label} · ${src.start}–${src.end}`}
           aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+          use:measureSourceLabel={src}
           on:click={(e) => jumpToSource(src, e)}
           on:mouseenter={(e) => onPillEnter(src, e)}
           on:mouseleave={onPillLeave}
         >
-          <span class="block-label">{sourceShortLabel(src)}</span>
+          <span class="block-label">{sourceDisplayLabel(src)}</span>
+          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
         </button>
       {/each}
     </div>
@@ -1065,11 +1132,13 @@
           type="button"
           title={`${src.label} · ${src.start}–${src.end}`}
           aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+          use:measureSourceLabel={src}
           on:click={(e) => jumpToSource(src, e)}
           on:mouseenter={(e) => onPillEnter(src, e)}
           on:mouseleave={onPillLeave}
         >
-          <span class="block-label">{sourceShortLabel(src)}</span>
+          <span class="block-label">{sourceDisplayLabel(src)}</span>
+          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
         </button>
       {/each}
     </div>
@@ -1605,6 +1674,19 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     pointer-events: none;
+  }
+
+  .block-label-measure {
+    position: absolute;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+    font-family: var(--font-ui);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .ts-axis-line {

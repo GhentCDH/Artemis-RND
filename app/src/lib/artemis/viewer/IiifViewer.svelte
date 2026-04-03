@@ -28,6 +28,7 @@
   let loadingMetadata = false;
   let metadataError = '';
   let manifestDetails: IiifManifestDetails | null = null;
+  let metadataCollapsed = inline;
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
@@ -98,6 +99,25 @@
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape") dispatch("close");
   }
+
+  function resolveDisplayYear(): string {
+    const candidates: string[] = [];
+
+    if (manifestDetails) {
+      for (const field of manifestDetails.metadata) {
+        candidates.push(field.value);
+      }
+    }
+
+    candidates.push(manifestDetails?.title ?? '', title);
+
+    for (const candidate of candidates) {
+      const match = candidate.match(/\b(1[6-9]\d{2}|20\d{2})\b/);
+      if (match) return match[1];
+    }
+
+    return '';
+  }
 </script>
 
 <div
@@ -118,7 +138,35 @@
         </button>
       </div>
     {/if}
-    <div class="viewer-main" class:viewer-main--mirrored={inline && mirrored}>
+    {#if inline}
+      <div class="viewer-inline-header" class:viewer-inline-header--mirrored={mirrored}>
+        <div class="viewer-inline-header-copy">
+          <div class="viewer-inline-title">{manifestDetails?.title || title || 'Untitled document'}</div>
+          {#if resolveDisplayYear()}
+            <div class="viewer-inline-year">{resolveDisplayYear()}</div>
+          {/if}
+        </div>
+        <div class="viewer-inline-actions">
+          <button
+            class="viewer-inline-toggle"
+            type="button"
+            on:click={() => (metadataCollapsed = !metadataCollapsed)}
+            aria-expanded={!metadataCollapsed}
+            aria-label={metadataCollapsed ? 'Show metadata' : 'Hide metadata'}
+          >{metadataCollapsed ? 'Metadata' : 'Hide metadata'}</button>
+          <button class="ui-icon-btn viewer-close viewer-close--meta" type="button" on:click={() => dispatch("close")} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    {/if}
+    <div
+      class="viewer-main"
+      class:viewer-main--mirrored={inline && mirrored}
+      class:viewer-main--meta-collapsed={inline && metadataCollapsed}
+    >
       <div class="viewer-body" bind:this={container}>
         {#if loadingService}
           <div class="viewer-status">Loading image…</div>
@@ -126,14 +174,15 @@
           <div class="viewer-status viewer-error">{loadError}</div>
         {/if}
       </div>
-      <aside class="viewer-meta">
-        {#if inline}
+      <aside class="viewer-meta" class:viewer-meta--collapsed={inline && metadataCollapsed}>
+        {#if inline && !metadataCollapsed}
           <div class="viewer-meta-topbar">
-            <button class="ui-icon-btn viewer-close viewer-close--meta" type="button" on:click={() => dispatch("close")} aria-label="Close">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              </svg>
-            </button>
+            <button
+              class="viewer-inline-toggle viewer-inline-toggle--sidebar"
+              type="button"
+              on:click={() => (metadataCollapsed = true)}
+              aria-label="Hide metadata"
+            >Hide metadata</button>
           </div>
         {/if}
         {#if inline && historyItems.length > 1}
@@ -155,6 +204,9 @@
           <div class="viewer-meta-block">
             <div class="ui-label">Manifest</div>
             <div class="viewer-meta-heading">{manifestDetails?.title || title || 'Untitled document'}</div>
+            {#if resolveDisplayYear()}
+              <div class="viewer-meta-year">{resolveDisplayYear()}</div>
+            {/if}
             {#if manifestDetails?.summary}
               <p class="viewer-meta-summary">{manifestDetails.summary}</p>
             {/if}
@@ -285,6 +337,91 @@
     box-shadow: var(--viewer-inline-shadow);
   }
 
+  .viewer-inline-header {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 12px 14px;
+    background: color-mix(in srgb, var(--viewer-topbar-bg) 92%, transparent);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    backdrop-filter: blur(8px);
+  }
+
+  .viewer-inline-header--mirrored {
+    justify-content: flex-start;
+  }
+
+  .viewer-inline-header-copy {
+    min-width: 0;
+    max-width: min(360px, calc(100% - 96px));
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-end;
+    text-align: right;
+    justify-content: center;
+  }
+
+  .viewer-inline-header--mirrored .viewer-inline-header-copy {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .viewer-inline-title {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--text-primary);
+  }
+
+  .viewer-inline-year,
+  .viewer-meta-year {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .viewer-inline-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .viewer-inline-header--mirrored .viewer-inline-actions {
+    order: -1;
+  }
+
+  .viewer-inline-toggle {
+    height: 36px;
+    padding: 8px 12px;
+    border: 1px solid var(--viewer-toggle-border);
+    border-radius: var(--radius-pill);
+    background: var(--viewer-toggle-bg);
+    color: var(--viewer-toggle-text);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .viewer-inline-toggle:hover {
+    background: var(--viewer-toggle-bg-hover);
+  }
+
+  .viewer-inline-toggle--sidebar {
+    align-self: flex-end;
+  }
+
   .viewer-topbar {
     display: flex;
     align-items: center;
@@ -339,8 +476,16 @@
     grid-template-columns: minmax(0, 1fr) 320px;
   }
 
+  .viewer-main--meta-collapsed {
+    grid-template-columns: minmax(0, 1fr) 0;
+  }
+
   .viewer-main--mirrored {
     grid-template-columns: 320px minmax(0, 1fr);
+  }
+
+  .viewer-main--mirrored.viewer-main--meta-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr);
   }
 
   .viewer-meta {
@@ -353,6 +498,13 @@
     flex-direction: column;
     gap: 16px;
     z-index: 2;
+  }
+
+  .viewer-meta--collapsed {
+    width: 0;
+    padding: 0;
+    gap: 0;
+    border: none;
   }
 
   .viewer-main--mirrored .viewer-meta {
@@ -539,15 +691,30 @@
   }
 
   @media (max-width: 900px) {
+    .viewer-inline-header {
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      padding: 10px 12px;
+    }
+
     .viewer-main {
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    .viewer-main--meta-collapsed {
+      grid-template-rows: minmax(0, 1fr) 0;
     }
 
     .viewer-meta {
       max-height: 34vh;
       border-left: none;
       border-top: 0.5px solid var(--panel-border);
+    }
+
+    .viewer-meta--collapsed {
+      max-height: 0;
     }
   }
 </style>
