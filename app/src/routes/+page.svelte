@@ -1,5 +1,6 @@
 <!-- src/routes/+page.svelte — map shell + orchestration -->
 <script lang="ts">
+  import { dev } from '$app/environment';
   import 'maplibre-gl/dist/maplibre-gl.css';
   import '$lib/theme.css';
   import '$lib/ui.css';
@@ -29,7 +30,7 @@
   import { normalizeRawToponym } from '$lib/artemis/toponyms';
   import { asFiniteNumber } from '$lib/artemis/utils';
   import {
-    MAIN_LAYER_ORDER, MAIN_LAYER_META, MAIN_LAYER_LABELS,
+    MAIN_LAYER_ORDER, MAIN_LAYER_META, MAIN_LAYER_LABELS, MAIN_LAYER_INFO,
     MAIN_LAYER_SUBS, SUB_LAYER_DEFS,
     makeInitialMainLayerEnabled, makeInitialSubLayerEnabled,
     type MainLayerId, type HistCartLayerKey,
@@ -51,6 +52,31 @@
   type PaneId = 'left' | 'right';
   type ViewMode = 'single' | 'split';
   type ThemeMode = 'light' | 'dark';
+  type RuntimeSiteLogo = {
+    src: string;
+    alt: string;
+    href: string | null;
+    label: string;
+  };
+  type RuntimeTeamUnit = {
+    unit: string;
+    members: string[];
+  };
+  type RuntimeTeamInstitution = {
+    institution: string;
+    units: RuntimeTeamUnit[];
+  };
+  type RuntimeSiteMetadata = {
+    title: string;
+    info: string[];
+    attribution: string;
+    team: RuntimeTeamInstitution[];
+    logos: RuntimeSiteLogo[];
+  };
+  type RuntimeLayerMetadata = {
+    title: string;
+    info: string[];
+  };
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
   let mapStageEl: HTMLElement;
@@ -64,6 +90,15 @@
   const THEME_STORAGE_KEY = 'artemis-theme-mode';
   let scaleWidthPx = 0;
   let scaleLabel = '';
+  let siteInfoOpen = false;
+  let siteMetadata: RuntimeSiteMetadata = {
+    title: 'About Artemis',
+    info: [],
+    attribution: '',
+    team: [] as RuntimeTeamInstitution[],
+    logos: [],
+  };
+  let layerMetadataByMainId: Record<string, RuntimeLayerMetadata> = {};
   const SCALE_MAX_WIDTH_PX = 120;
   let searchFocusMainId: MainLayerId | null = null;
   let searchFocusYear: number | null = null;
@@ -100,6 +135,170 @@
 
   function primitiveGeojsonUrl(): string {
     return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/Primitive/index.geojson`;
+  }
+
+  function runtimeStaticBaseUrl(): string {
+    const base = normalizeDatasetBaseUrl(datasetBaseUrl.trim());
+    if (!base) return '';
+    if (/\/build\/?$/i.test(base)) return base.replace(/\/build\/?$/i, '/static');
+    return `${base}/static`.replace(/\/+$/, '');
+  }
+
+  async function fetchRuntimeJson<T>(url: string): Promise<T> {
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    const trimmed = text.trim().toLowerCase();
+    if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
+      throw new Error(`Expected JSON but got HTML from ${url}`);
+    }
+    return JSON.parse(text) as T;
+  }
+
+  function normalizeParagraphList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter(Boolean);
+  }
+
+  function normalizeTeamGroups(value: unknown): RuntimeTeamInstitution[] {
+    if (!Array.isArray(value)) return [];
+    const byInstitution: Record<string, RuntimeTeamUnit[]> = {};
+
+    value.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') return;
+      const institution = typeof (entry as any).institution === 'string' ? (entry as any).institution.trim() : '';
+      const unit = typeof (entry as any).unit === 'string' ? (entry as any).unit.trim() : '';
+      const members = Array.isArray((entry as any).members)
+        ? (entry as any).members
+            .map((m: unknown) => (typeof m === 'string' ? m.trim() : ''))
+            .filter(Boolean)
+        : [];
+
+      if (!institution || (!unit && members.length === 0)) return;
+      if (!byInstitution[institution]) byInstitution[institution] = [];
+      byInstitution[institution].push({ unit, members });
+    });
+
+    return Object.entries(byInstitution).map(([institution, units]) => ({
+      institution,
+      units,
+    }));
+  }
+
+  function normalizeSiteLogos(value: unknown, repoRoot: string): RuntimeSiteLogo[] {
+    if (!Array.isArray(value)) return [];
+    function resolveSrc(raw: string): string {
+      if (!raw) return raw;
+      // Already absolute
+      if (/^https?:\/\//i.test(raw)) return raw;
+      // Relative path from site.json — resolve against repo root
+      if (repoRoot) return `${repoRoot}/${raw.replace(/^\//, '')}`;
+      return raw;
+    }
+    return value.flatMap((entry) => {
+      if (typeof entry === 'string') {
+        const src = resolveSrc(entry.trim());
+        return src ? [{ src, alt: '', href: null, label: src }] : [];
+      }
+      if (!entry || typeof entry !== 'object') return [];
+      const rawSrc = typeof (entry as any).src === 'string' ? (entry as any).src.trim() : '';
+      if (!rawSrc) return [];
+      const src = resolveSrc(rawSrc);
+      const alt = typeof (entry as any).alt === 'string' ? (entry as any).alt.trim() : '';
+      const hrefRaw = typeof (entry as any).href === 'string' ? (entry as any).href.trim() : '';
+      const label =
+        (typeof (entry as any).label === 'string' && (entry as any).label.trim()) ||
+        (typeof (entry as any).name === 'string' && (entry as any).name.trim()) ||
+        alt ||
+        rawSrc;
+      return [{ src, alt, href: hrefRaw || null, label }];
+    });
+  }
+
+  function normalizeSiteMetadata(raw: unknown, repoRoot = ''): RuntimeSiteMetadata {
+    const data = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    return {
+      title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : 'About Artemis',
+      info: normalizeParagraphList(data.info),
+      attribution: typeof data.attribution === 'string' ? data.attribution.trim() : '',
+      team: normalizeTeamGroups(data.team),
+      logos: normalizeSiteLogos(data.logos, repoRoot),
+    };
+  }
+
+  function normalizeLayerMetadataMap(raw: unknown): Record<string, RuntimeLayerMetadata> {
+    const data = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    return Object.fromEntries(
+      Object.entries(data).flatMap(([key, value]) => {
+        if (!value || typeof value !== 'object') return [];
+        const title = typeof (value as any).title === 'string' && (value as any).title.trim()
+          ? (value as any).title.trim()
+          : key;
+        const info = normalizeParagraphList((value as any).info);
+        return [[key, { title, info }]];
+      })
+    );
+  }
+
+  function layerMetadataCandidates(mainId: string): string[] {
+    const subIds = MAIN_LAYER_SUBS[mainId] ?? [];
+    const iiifSubId = subIds.find((subId) => SUB_LAYER_DEFS[subId]?.kind === 'iiif');
+    const iiifLayer = iiifSubId ? getIiifInfoForSub(iiifSubId) : undefined;
+    const explicitLayerId = typeof (iiifLayer as any)?.layerId === 'string'
+      ? String((iiifLayer as any).layerId).trim()
+      : '';
+    const compiledTail = iiifLayer?.compiledCollectionPath?.split('/').filter(Boolean).pop() ?? '';
+    return [...new Set([explicitLayerId, compiledTail, mainId].filter(Boolean))];
+  }
+
+  function fallbackLayerMetadata(mainId: string): RuntimeLayerMetadata {
+    return {
+      title: MAIN_LAYER_LABELS[mainId] ?? mainId,
+      info: MAIN_LAYER_INFO[mainId] ? [MAIN_LAYER_INFO[mainId]] : [],
+    };
+  }
+
+  function resolveLayerMetadataByMainId(rawByKey: Record<string, RuntimeLayerMetadata>): Record<string, RuntimeLayerMetadata> {
+    return Object.fromEntries(
+      mainLayerOrder.map((mainId) => {
+        const candidates = layerMetadataCandidates(mainId);
+        const resolved = candidates.map((key) => rawByKey[key]).find(Boolean);
+        if (!resolved && dev) {
+          console.warn(`[runtime-metadata] missing layer metadata key(s)=${candidates.join(', ')} label="${MAIN_LAYER_LABELS[mainId] ?? mainId}"`);
+        }
+        return [mainId, resolved ?? fallbackLayerMetadata(mainId)];
+      })
+    );
+  }
+
+  async function loadRuntimeMetadata() {
+    const staticBaseUrl = runtimeStaticBaseUrl();
+    if (!staticBaseUrl) {
+      siteMetadata = normalizeSiteMetadata(null);
+      layerMetadataByMainId = resolveLayerMetadataByMainId({});
+      return;
+    }
+
+    const [siteResult, layerResult] = await Promise.allSettled([
+      fetchRuntimeJson<unknown>(`${staticBaseUrl}/site.json`),
+      fetchRuntimeJson<unknown>(`${staticBaseUrl}/layers.json`),
+    ]);
+
+    const repoRoot = staticBaseUrl.replace(/\/static\/?$/i, '');
+    if (siteResult.status === 'fulfilled') {
+      siteMetadata = normalizeSiteMetadata(siteResult.value, repoRoot);
+    } else {
+      if (dev) console.warn(`[runtime-metadata] site.json unavailable: ${siteResult.reason?.message ?? String(siteResult.reason)}`);
+      siteMetadata = normalizeSiteMetadata(null);
+    }
+
+    const rawLayers = layerResult.status === 'fulfilled' ? normalizeLayerMetadataMap(layerResult.value) : {};
+    if (layerResult.status === 'rejected' && dev) {
+      console.warn(`[runtime-metadata] layers.json unavailable: ${layerResult.reason?.message ?? String(layerResult.reason)}`);
+    }
+    layerMetadataByMainId = resolveLayerMetadataByMainId(rawLayers);
   }
 
   // ─── Massart ───────────────────────────────────────────────────────────────
@@ -200,16 +399,6 @@
   function applyThemeMode(next: ThemeMode) {
     themeMode = next;
     document.documentElement.dataset.theme = next;
-  }
-
-  function toggleThemeMode() {
-    const next: ThemeMode = themeMode === 'dark' ? 'light' : 'dark';
-    applyThemeMode(next);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      /* ignore persistence failures */
-    }
   }
 
   function formatScaleDistance(distanceMeters: number): string {
@@ -981,6 +1170,7 @@
     try {
       const index = await loadCompiledIndex(cfg());
       layers = normalizeSourceLayers(index);
+      await loadRuntimeMetadata();
       groupIdToMainId.clear();
       for (const [mainId, subs] of Object.entries(MAIN_LAYER_SUBS)) {
         for (const subId of subs) {
@@ -1604,6 +1794,7 @@
   }
 </script>
 
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && siteInfoOpen) { siteInfoOpen = false; } }} />
 <div class="wrap">
   <main class="map-shell">
     <div
@@ -1715,17 +1906,15 @@
             on:click={toggleSplitMode}
           >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
           <button
-            class="theme-toggle"
-            class:is-dark={themeMode === 'dark'}
+            class="compare-toggle site-info-toggle"
             type="button"
-            aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            on:click={toggleThemeMode}
+            aria-label="Open site information"
+            title="Open site information"
+            aria-haspopup="dialog"
+            aria-expanded={siteInfoOpen}
+            on:click={() => (siteInfoOpen = !siteInfoOpen)}
           >
-            <span class="theme-toggle-glyph" aria-hidden="true">
-              <span class="theme-toggle-sun">☀</span>
-              <span class="theme-toggle-moon">☾</span>
-            </span>
+            About
           </button>
         </div>
         {#if scaleLabel}
@@ -1737,6 +1926,7 @@
       </div>
       <Timeslider
         {massartItems}
+        {layerMetadataByMainId}
         dualPaneEnabled={dualPaneEnabled}
         disabledPane={hasViewerPane && isSplitLayout ? viewerPane : null}
         leftYear={massartYear}
@@ -1755,6 +1945,95 @@
         on:open-viewer={(e) => openViewer({ title: e.detail.title, sourceManifestUrl: e.detail.sourceManifestUrl, imageServiceUrl: e.detail.imageServiceUrl }, 'left')}
       />
     </div>
+
+    {#if siteInfoOpen}
+      <div
+        class="site-info-backdrop"
+        role="button"
+        tabindex="0"
+        aria-label="Close site information"
+        on:click={(event) => {
+          if (event.target === event.currentTarget) siteInfoOpen = false;
+        }}
+        on:keydown={(event) => {
+          if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            siteInfoOpen = false;
+          }
+        }}
+      >
+        <div
+          class="site-info-modal ui-panel-overlay"
+          role="dialog"
+          tabindex="-1"
+          aria-modal="true"
+          aria-label={siteMetadata.title}
+        >
+          <div class="site-info-head">
+            <div>
+              <div class="ui-label">Site Info</div>
+              <h2>{siteMetadata.title}</h2>
+            </div>
+            <button class="ui-btn site-info-close" type="button" on:click={() => (siteInfoOpen = false)}>Close</button>
+          </div>
+          <div class="site-info-body">
+            {#each siteMetadata.info as paragraph}
+              <p>{paragraph}</p>
+            {/each}
+            {#if siteMetadata.team.length > 0}
+              <div class="site-info-section">
+                <div class="ui-label">Team</div>
+                <div class="site-info-team">
+                  {#each siteMetadata.team as institution}
+                    <div class="site-info-team-institution-group">
+                      <div class="site-info-team-institution">{institution.institution}</div>
+                      <div class="site-info-team-units">
+                        {#each institution.units as unit}
+                          <div class="site-info-team-unit-group">
+                            {#if unit.unit}
+                              <div class="site-info-team-unit">{unit.unit}</div>
+                            {/if}
+                            {#if unit.members.length > 0}
+                              <ul class="site-info-team-members">
+                                {#each unit.members as member}
+                                  <li>{member}</li>
+                                {/each}
+                              </ul>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if siteMetadata.logos.length > 0}
+              <div class="site-info-section">
+                <div class="ui-label">Partners</div>
+                <div class="site-info-logos">
+                  {#each siteMetadata.logos as logo}
+                    {#if logo.href}
+                      <a href={logo.href} target="_blank" rel="noreferrer" title={logo.label}>
+                        <img src={logo.src} alt={logo.alt} loading="lazy" />
+                      </a>
+                    {:else}
+                      <img src={logo.src} alt={logo.alt} title={logo.label} loading="lazy" />
+                    {/if}
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if siteMetadata.attribution}
+              <div class="site-info-section">
+                <div class="ui-label">Attribution</div>
+                <p>{siteMetadata.attribution}</p>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
 
     {#if imageCollectionBubbleItem}
       <ImageCollectionBubble
@@ -2038,63 +2317,187 @@
     color: var(--toolbar-button-active-text);
   }
 
-  .theme-toggle {
-    width: 44px;
-    padding: 0;
-    border: 1px solid var(--surface-outline-soft);
-    border-radius: var(--radius-xs);
-    background: var(--toolbar-button-bg);
+  .site-info-toggle {
+    min-width: 92px;
+    justify-content: center;
+  }
+
+  .site-info-toggle[aria-expanded='true'] {
+    background: var(--toolbar-button-active-bg);
+    border-color: var(--toolbar-button-active-border);
+    color: var(--toolbar-button-active-text);
+  }
+
+  .site-info-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 110;
+    background: rgba(17, 15, 11, 0.26);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 88px 20px 20px;
+  }
+
+  .site-info-modal {
+    width: min(920px, calc(100vw - 40px));
+    max-height: min(84vh, 900px);
+    overflow: auto;
+    padding: 22px 24px 20px;
     color: var(--text-primary);
-    box-shadow: var(--shadow-sm);
-    cursor: pointer;
-    pointer-events: auto;
+    /* Override ui-panel-overlay dark overlay bg with the warm panel surface */
+    background: var(--surface-floating);
+    backdrop-filter: blur(6px);
+    border-color: var(--surface-outline-soft);
+    box-shadow: 0 8px 32px rgba(40, 30, 10, 0.14), 0 2px 6px rgba(40, 30, 10, 0.08);
+  }
+
+  .site-info-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-ui) 82%, transparent);
+  }
+
+  .site-info-head h2 {
+    margin: 6px 0 0;
+    font-size: clamp(24px, 2vw, 30px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .site-info-close {
+    flex: 0 0 auto;
+  }
+
+  .site-info-body {
+    font-family: var(--font-ui);
+  }
+
+  .site-info-body p {
+    margin: 0 0 14px;
+    max-width: 64ch;
+    font-size: 14px;
+    line-height: 1.68;
+    color: color-mix(in srgb, var(--text-primary) 94%, white 6%);
+  }
+
+  .site-info-section {
+    margin-top: 20px;
+    padding-top: 14px;
+    border-top: 1px solid color-mix(in srgb, var(--border-ui) 76%, transparent);
+  }
+
+
+  .site-info-logos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 12px;
+    align-items: center;
+  }
+
+  .site-info-logos a,
+  .site-info-logos img {
+    border-radius: var(--radius-xs);
+  }
+
+  .site-info-logos a {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--border-ui) 74%, transparent);
+    background: color-mix(in srgb, var(--overlay-bg) 86%, black 14%);
+    transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
   }
 
-  .theme-toggle:hover {
+  .site-info-logos a:hover {
     transform: translateY(-1px);
-    background: var(--toolbar-button-hover-bg);
+    border-color: var(--border-ui);
+    background: color-mix(in srgb, var(--overlay-bg) 92%, black 8%);
   }
 
-  .theme-toggle-glyph {
-    position: relative;
-    width: 18px;
-    height: 18px;
+  .site-info-logos img {
     display: block;
+    max-height: 52px;
+    max-width: 140px;
+    object-fit: contain;
   }
 
-  .theme-toggle-sun,
-  .theme-toggle-moon {
-    position: absolute;
-    inset: 0;
+  .site-info-team {
     display: grid;
-    place-items: center;
-    font-size: 15px;
-    line-height: 1;
-    transition: transform 180ms ease, opacity 180ms ease;
+    gap: 18px;
   }
 
-  .theme-toggle-sun {
-    opacity: 1;
-    transform: scale(1) rotate(0deg);
+  .site-info-team-institution-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
-  .theme-toggle-moon {
-    opacity: 0;
-    transform: scale(0.6) rotate(-70deg);
+  .site-info-team-institution {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
   }
 
-  .theme-toggle.is-dark .theme-toggle-sun {
-    opacity: 0;
-    transform: scale(0.6) rotate(70deg);
+  .site-info-team-units {
+    display: grid;
+    gap: 10px;
+    padding-left: 8px;
+    border-left: 2px solid color-mix(in srgb, var(--border-ui) 40%, transparent);
   }
 
-  .theme-toggle.is-dark .theme-toggle-moon {
-    opacity: 1;
-    transform: scale(1) rotate(0deg);
+  .site-info-team-unit-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .site-info-team-unit {
+    font-size: 12px;
+    color: color-mix(in srgb, var(--text-primary) 78%, white 22%);
+    font-weight: 500;
+    margin: 0;
+  }
+
+  .site-info-team-members {
+    margin: 0;
+    padding-left: 14px;
+    list-style: none;
+    display: grid;
+    gap: 2px;
+  }
+
+  .site-info-team-members li {
+    font-size: 12px;
+    line-height: 1.35;
+    color: color-mix(in srgb, var(--text-primary) 85%, white 15%);
+  }
+
+  @media (max-width: 700px) {
+    .site-info-modal {
+      width: min(100vw - 24px, 920px);
+      max-height: min(88vh, 900px);
+      padding: 18px 18px 16px;
+    }
+
+    .site-info-head {
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+    }
+
+    .site-info-head h2 {
+      font-size: 22px;
+    }
   }
 
   @media (max-width: 700px) {

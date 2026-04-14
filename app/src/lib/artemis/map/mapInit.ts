@@ -115,6 +115,19 @@ const BASE_WATER_SOURCE_ID = "artemis-base-water-source";
 const BASE_WATER_FILL_LAYER_ID = "artemis-base-water-fill";
 const BASE_WATER_LINE_LAYER_ID = "artemis-base-water-line";
 
+function isMapStyleUsable(targetMap: maplibregl.Map | null | undefined): targetMap is maplibregl.Map {
+  if (!targetMap) return false;
+  try {
+    return Boolean(
+      targetMap.isStyleLoaded?.() ||
+      targetMap.loaded?.() ||
+      (targetMap.getStyle?.()?.layers?.length ?? 0) > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
   const style = map.getStyle();
   const layers = style?.layers ?? [];
@@ -225,9 +238,9 @@ export function destroyMapContext() {
   map = null;
 }
 
-export function setHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerKey, visible: boolean): void {
+export function setHistCartLayerVisible(map: maplibregl.Map | null | undefined, key: HistCartLayerKey, visible: boolean): void {
   const cfg = HISTCART_LAYERS[key];
-  if (!cfg) return;
+  if (!cfg || !isMapStyleUsable(map)) return;
 
   const hasSource = !!map.getSource(cfg.sourceId);
   const hasLayer = !!map.getLayer(cfg.layerId);
@@ -259,21 +272,21 @@ export function setHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerK
   if (hasSource) map.removeSource(cfg.sourceId);
 }
 
-export function isHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerKey): boolean {
+export function isHistCartLayerVisible(map: maplibregl.Map | null | undefined, key: HistCartLayerKey): boolean {
   const cfg = HISTCART_LAYERS[key];
-  return !!(cfg && map.getLayer(cfg.layerId));
+  return !!(cfg && isMapStyleUsable(map) && map.getLayer(cfg.layerId));
 }
 
-export function setHistCartLayerOpacity(map: maplibregl.Map, key: HistCartLayerKey, opacity: number): void {
+export function setHistCartLayerOpacity(map: maplibregl.Map | null | undefined, key: HistCartLayerKey, opacity: number): void {
   const cfg = HISTCART_LAYERS[key];
-  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  if (!cfg || !isMapStyleUsable(map) || !map.getLayer(cfg.layerId)) return;
   const clamped = Math.max(0, Math.min(1, opacity));
   map.setPaintProperty(cfg.layerId, "raster-opacity", clamped);
 }
 
-export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKey): void {
+export function moveHistCartLayerToTop(map: maplibregl.Map | null | undefined, key: HistCartLayerKey): void {
   const cfg = HISTCART_LAYERS[key];
-  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  if (!cfg || !isMapStyleUsable(map) || !map.getLayer(cfg.layerId)) return;
   map.moveLayer(cfg.layerId);
 }
 
@@ -281,9 +294,9 @@ export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKe
 // Land usage WMS overlay layers (on top of HISTCART WMTS base)
 // ---------------------------------------------------------------------------
 
-export function setLandUsageLayerVisible(map: maplibregl.Map, key: LandUsageLayerKey, visible: boolean): void {
+export function setLandUsageLayerVisible(map: maplibregl.Map | null | undefined, key: LandUsageLayerKey, visible: boolean): void {
   const cfg = LAND_USAGE_LAYERS[key];
-  if (!cfg) return;
+  if (!cfg || !isMapStyleUsable(map)) return;
   const hasSource = !!map.getSource(cfg.sourceId);
   const hasLayer  = !!map.getLayer(cfg.layerId);
   if (visible) {
@@ -304,9 +317,9 @@ export function setLandUsageLayerVisible(map: maplibregl.Map, key: LandUsageLaye
   if (hasSource) map.removeSource(cfg.sourceId);
 }
 
-export function setLandUsageLayerOpacity(map: maplibregl.Map, key: LandUsageLayerKey, opacity: number): void {
+export function setLandUsageLayerOpacity(map: maplibregl.Map | null | undefined, key: LandUsageLayerKey, opacity: number): void {
   const cfg = LAND_USAGE_LAYERS[key];
-  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  if (!cfg || !isMapStyleUsable(map) || !map.getLayer(cfg.layerId)) return;
   map.setPaintProperty(cfg.layerId, "raster-opacity", Math.max(0, Math.min(1, opacity)));
 }
 
@@ -355,7 +368,8 @@ export function setIiifHoverMasks(m: maplibregl.Map, masks: IiifHoverMask[] | nu
   try { if (m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_HOVER_LINE_LAYER_ID); } catch { /* ignore */ }
 }
 
-export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, geojsonUrl: string): void {
+export function setPrimitiveLayerVisible(map: maplibregl.Map | null | undefined, visible: boolean, geojsonUrl: string): void {
+  if (!isMapStyleUsable(map)) return;
   const hasSource = !!map.getSource(PRIMITIVE_SOURCE_ID);
   const hasHoverSource = !!map.getSource(PRIMITIVE_HOVER_SOURCE_ID);
   const hasFillLayer = !!map.getLayer(PRIMITIVE_FILL_LAYER_ID);

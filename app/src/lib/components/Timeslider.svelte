@@ -3,11 +3,13 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { MassartItem } from '$lib/artemis/types';
-  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META, MAIN_LAYER_INFO, MAIN_LAYER_SOURCE } from '$lib/artemis/layerConfig';
+  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META } from '$lib/artemis/layerConfig';
 
   type PaneId = 'left' | 'right';
+  type LayerMetadata = { title: string; info: string[] };
 
   export let massartItems: MassartItem[] = [];
+  export let layerMetadataByMainId: Record<string, LayerMetadata> = {};
   export let yearLeeway: number = 3;
   export let loadingLayers: Record<string, boolean> = {};
   export let dualPaneEnabled = false;
@@ -171,6 +173,7 @@
   let prevPaneVisible: Record<PaneId, Record<string, boolean>> = { left: {}, right: {} };
   let openInfoKey: string | null = null;
   let openMenuKey: SourceKey | null = null;
+  let layerInfoModalKey: string | null = null;
 
   let hoveredSrc: SourceDef | null = null;
   let tooltipFixedStyle = '';
@@ -429,7 +432,7 @@
 
   function onInfoButtonClick(event: MouseEvent, key: string) {
     event.stopPropagation();
-    toggleInfo(key);
+    layerInfoModalKey = layerInfoModalKey === key ? null : key;
   }
 
   function toggleMenu(event: MouseEvent, key: SourceKey) {
@@ -462,12 +465,13 @@
     menuCloseTimer = null;
   }
 
-  function mainLayerInfo(mainId: string, fallback: string): string {
-    return MAIN_LAYER_INFO[mainId] ?? fallback;
-  }
-
-  function mainLayerSource(mainId: string): { label: string; url: string } | null {
-    return MAIN_LAYER_SOURCE[mainId] ?? null;
+  function mainLayerInfoCard(mainId: string, fallbackTitle: string): LayerMetadata {
+    const meta = layerMetadataByMainId[mainId];
+    if (!meta) return { title: fallbackTitle, info: [] };
+    return {
+      title: meta.title?.trim() || fallbackTitle,
+      info: Array.isArray(meta.info) ? meta.info.filter((paragraph) => typeof paragraph === 'string' && paragraph.trim()) : [],
+    };
   }
 
   function setLayerEnabled(pane: PaneId, key: SourceKey, enabled: boolean) {
@@ -850,6 +854,8 @@
   }
 </script>
 
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && layerInfoModalKey) { layerInfoModalKey = null; } }} />
+
 <div class="timeslider">
   <div class="ts-track" bind:clientWidth={trackWidth}>
     {#if dualPaneEnabled}
@@ -934,8 +940,7 @@
             </svg>
           </button>
           {#if openMenuKey === src.key}
-            {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-            {@const layerSource = mainLayerSource(src.mainId)}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
@@ -968,19 +973,10 @@
                         >i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                            <p class="sub-menu-info-text">{layerInfo}</p>
-                            {#if layerSource}
-                              <div class="sub-menu-source-block">
-                                <span class="sub-menu-source-label">Source</span>
-                                <a
-                                  class="sub-menu-source-link"
-                                  href={layerSource.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  title={layerSource.url}
-                                >{layerSource.label}</a>
-                              </div>
-                            {/if}
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
                           </div>
                         {/if}
                       </div>
@@ -1060,19 +1056,10 @@
                       >i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a
-                                class="sub-menu-source-link"
-                                href={layerSource.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={layerSource.url}
-                              >{layerSource.label}</a>
-                            </div>
-                          {/if}
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
                         </div>
                       {/if}
                     </div>
@@ -1134,8 +1121,7 @@
             </svg>
           </button>
           {#if openMenuKey === src.key}
-            {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-            {@const layerSource = mainLayerSource(src.mainId)}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
@@ -1154,13 +1140,10 @@
                         <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                            <p class="sub-menu-info-text">{layerInfo}</p>
-                            {#if layerSource}
-                              <div class="sub-menu-source-block">
-                                <span class="sub-menu-source-label">Source</span>
-                                <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                              </div>
-                            {/if}
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
                           </div>
                         {/if}
                       </div>
@@ -1199,13 +1182,10 @@
                       <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                            </div>
-                          {/if}
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
                         </div>
                       {/if}
                     </div>
@@ -1309,8 +1289,7 @@
             </svg>
           </button>
           {#if openMenuKey === src.key}
-            {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-            {@const layerSource = mainLayerSource(src.mainId)}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
@@ -1329,13 +1308,10 @@
                         <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                            <p class="sub-menu-info-text">{layerInfo}</p>
-                            {#if layerSource}
-                              <div class="sub-menu-source-block">
-                                <span class="sub-menu-source-label">Source</span>
-                                <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                              </div>
-                            {/if}
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
                           </div>
                         {/if}
                       </div>
@@ -1374,13 +1350,10 @@
                       <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                            </div>
-                          {/if}
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
                         </div>
                       {/if}
                     </div>
@@ -1434,8 +1407,7 @@
             </svg>
           </button>
           {#if openMenuKey === src.key}
-            {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-            {@const layerSource = mainLayerSource(src.mainId)}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
@@ -1454,13 +1426,10 @@
                         <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                            <p class="sub-menu-info-text">{layerInfo}</p>
-                            {#if layerSource}
-                              <div class="sub-menu-source-block">
-                                <span class="sub-menu-source-label">Source</span>
-                                <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                              </div>
-                            {/if}
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
                           </div>
                         {/if}
                       </div>
@@ -1499,13 +1468,10 @@
                       <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                            </div>
-                          {/if}
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
                         </div>
                       {/if}
                     </div>
@@ -1532,6 +1498,49 @@
     <span class="pill-hover-tip-name">{hoveredSrc.label}</span>
     <span class="pill-hover-tip-range">{hoveredSrc.start}–{hoveredSrc.end}</span>
   </div>
+{/if}
+
+{#if layerInfoModalKey}
+  {@const [paneStr, mainId] = layerInfoModalKey.split(':') as [string, string]}
+  {@const layerMeta = mainId ? layerMetadataByMainId[mainId] : null}
+  {#if layerMeta}
+    <div
+      class="layer-info-backdrop"
+      role="button"
+      tabindex="0"
+      aria-label="Close layer information"
+      on:click={(event) => {
+        if (event.target === event.currentTarget) layerInfoModalKey = null;
+      }}
+      on:keydown={(event) => {
+        if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          layerInfoModalKey = null;
+        }
+      }}
+    >
+      <div
+        class="layer-info-modal ui-panel-overlay"
+        role="dialog"
+        tabindex="-1"
+        aria-modal="true"
+        aria-label={layerMeta.title}
+      >
+        <div class="layer-info-head">
+          <div>
+            <div class="ui-label">Layer Info</div>
+            <h2>{layerMeta.title}</h2>
+          </div>
+          <button class="ui-btn layer-info-close" type="button" on:click={() => (layerInfoModalKey = null)}>Close</button>
+        </div>
+        <div class="layer-info-body">
+          {#each layerMeta.info as paragraph}
+            <p>{paragraph}</p>
+          {/each}
+        </div>
+      </div>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -1874,35 +1883,13 @@
     margin: 0;
   }
 
-  .sub-menu-source-block {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid color-mix(in srgb, var(--sub-menu-note-inset) 80%, transparent);
-  }
-
-  .sub-menu-source-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
+  .sub-menu-info-title {
+    margin: 0 0 6px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
-  }
-
-  .sub-menu-source-link {
-    color: var(--text-primary);
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
-    word-break: break-word;
-  }
-
-  .sub-menu-source-link:hover,
-  .sub-menu-source-link:focus-visible {
-    color: color-mix(in srgb, var(--text-primary) 88%, black);
   }
 
   .sub-menu-pills {
@@ -2569,5 +2556,87 @@
 
   :global(.pill-hover-tip-range) {
     opacity: 0.65;
+  }
+
+  /* Layer info modal (similar to site-info modal) */
+  .layer-info-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    background: rgba(17, 15, 11, 0.26);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 88px 20px 20px;
+  }
+
+  .layer-info-modal {
+    width: min(760px, calc(100vw - 40px));
+    max-height: min(72vh, 760px);
+    overflow: auto;
+    padding: 22px 24px 20px;
+    color: var(--text-primary);
+    /* Override ui-panel-overlay dark overlay bg with the warm panel surface */
+    background: var(--surface-floating);
+    backdrop-filter: blur(6px);
+    border-color: var(--surface-outline-soft);
+    box-shadow: 0 8px 32px rgba(40, 30, 10, 0.14), 0 2px 6px rgba(40, 30, 10, 0.08);
+  }
+
+  .layer-info-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-ui) 82%, transparent);
+  }
+
+  .layer-info-head h2 {
+    margin: 6px 0 0;
+    font-size: clamp(20px, 1.8vw, 26px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .layer-info-close {
+    flex: 0 0 auto;
+  }
+
+  .layer-info-body {
+    font-family: var(--font-ui);
+  }
+
+  .layer-info-body p {
+    margin: 0 0 14px;
+    max-width: 64ch;
+    font-size: 14px;
+    line-height: 1.68;
+    color: color-mix(in srgb, var(--text-primary) 94%, white 6%);
+  }
+
+  @media (max-width: 700px) {
+    .layer-info-backdrop {
+      padding: 60px 20px 20px;
+    }
+
+    .layer-info-modal {
+      width: min(100vw - 24px, 760px);
+      max-height: min(78vh, 760px);
+      padding: 18px 18px 16px;
+    }
+
+    .layer-info-head {
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+    }
+
+    .layer-info-head h2 {
+      font-size: 20px;
+    }
   }
 </style>

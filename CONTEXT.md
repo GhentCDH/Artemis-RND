@@ -21,7 +21,7 @@
 ## 3. Architecture
 
 - `app/src/routes/+page.svelte`: orchestration, map init, layer visibility, search, viewer state.
-- `app/src/lib/components/Timeslider.svelte`: timeline UI, pill interaction, pane controls, sublayer menu UI.
+- `app/src/lib/components/Timeslider.svelte`: timeline UI, pill interaction, pane controls, sublayer menu UI, and runtime-driven per-layer info cards.
 - `app/src/lib/artemis/map/mapInit.ts`: WMTS/WMS/raster/map source setup.
 - `app/src/lib/artemis/layerConfig.ts`: main layers, sublayers, labels, short labels, colors, info text, source URLs.
 - `app/src/lib/artemis/runner.ts`: IIIF loading, parking, restoring, Allmaps integration.
@@ -32,16 +32,18 @@
 - `FEATURE_FLAGS.debugMenu = false`
 - `Massart/index.json` is loaded separately from the compiled IIIF index.
 - `renderLayers` in `build/index.json` is effectively required by the viewer.
-- `build/index.json` now exposes stable `layerId` values on `layers` and `renderLayers`.
-- Main-layer info/source text is configured in `MAIN_LAYER_INFO` and `MAIN_LAYER_SOURCE`.
+- `build/index.json` now exposes stable `layerId` values on `layers` and `renderLayers`, but the currently published data may still lag until the next crawl/deploy.
+- The viewer is transitioning away from hardcoded `MAIN_LAYER_INFO` / `MAIN_LAYER_SOURCE` metadata toward runtime-loaded `static/site.json` and `static/layers.json`.
 
 ## 5. Decisions
 
 - `Timeslider.svelte` is the mounted timeline; legacy timeline files are not active.
 - NGI 1873 / NGI 1904 are connected as raster tile services, not via confirmed WMTS capabilities.
 - Villaret is connected as WMS-backed raster, not via confirmed WMTS.
-- Sublayers should not have info buttons.
-- Only main layers should have an info button, intended to open a bubble with description plus source link.
+- The dark-mode toggle in the main toolbar is a dead feature and should be removed.
+- The toolbar position currently occupied by the dark-mode toggle should become the site-info trigger.
+- Clicking the site-info trigger should open a popup/modal that renders the content from `static/site.json`.
+- Layer-specific info should be opened from the existing per-layer info control in the timeline/menu UI and should render content from `static/layers.json`.
 - Runtime-edited viewer metadata should live outside preprocessing output and be loaded directly from the data repo `static/` area.
 - Missing runtime metadata for a `layerId` should warn in development and fall back safely; it must not break the viewer.
 
@@ -65,7 +67,7 @@ What is already implemented:
 - The old top-of-window sublayer menu block has been removed from `app/src/lib/components/Timeslider.svelte`.
 - Each pill now renders a dedicated folder-tab button and a per-pill popover container.
 - Menu state is modeled with a single `openMenuKey`, so the state shape already supports “only one open at a time”.
-- The per-pill menu content reuses the existing sublayer controls and main-layer info/source content.
+- The per-pill menu content reuses the existing sublayer controls and now renders runtime-loaded layer metadata rather than the old hardcoded source/info block.
 - The click-guard logic for the track has been updated so interacting with pill/menu UI should not jump the timeline.
 - Compare-mode header layout has been normalized across the duplicated compare-menu branches in `Timeslider.svelte` so the intended order is `checkbox + Left`, then `layer title/date + info`, then `Right + checkbox`.
 
@@ -82,8 +84,8 @@ Reactivity fix applied (2026-04-03):
 
 ## 7. Bugs
 
-- `Main-layer info bubble still broken`
-  Clicking the main-layer `i` button still does not show the bubble in the running UI, even after refactoring the markup into a dedicated `sub-menu-info-anchor` and wiring `MAIN_LAYER_INFO` / `MAIN_LAYER_SOURCE`.
+- `Site-info modal styling still unresolved`
+  Runtime metadata is now wired, but the site-info modal opened from the toolbar still does not visually match the rest of the Artemis UI closely enough. Treat this as unresolved styling work in `app/src/routes/+page.svelte`.
 - `Pill click isolation not trusted`
   There was an attempted implementation to disable other overlapping layers when a pill is clicked, but the user reported that the behavior still does not work correctly. Treat this as unresolved and re-test from the UI before relying on it.
 - `Hover info behavior has been unstable`
@@ -95,26 +97,39 @@ Reactivity fix applied (2026-04-03):
 
 ## 8. Verification
 
-- Last verified command: `pnpm -s run check`
+- Last verified command: `pnpm run check`
 - Current TypeScript/Svelte status at last edit: `0 errors, 0 warnings`
-- Important: compile status is clean, but runtime behavior is not fully verified. The pill expand tab fix needs a live browser test. The compare-mode header order is now acceptable for now, but spacing/visual polish may still need browser tuning. The info bubble is still broken at runtime.
+- Important: compile status is clean, but runtime behavior is not fully verified. The pill expand tab fix needs a live browser test. The compare-mode header order is now acceptable for now, but spacing/visual polish may still need browser tuning.
+- Runtime metadata status at last edit:
+  - `app/src/routes/+page.svelte` now loads `static/site.json` and `static/layers.json` at runtime from the data repo `static/` area.
+  - Missing metadata logs development warnings and falls back safely.
+  - The toolbar dark-mode slot has been replaced with an `About` trigger.
+  - The `About` trigger opens a site-info modal populated from `site.json`.
+  - `Timeslider.svelte` now receives `layerMetadataByMainId` and renders runtime layer info cards from `layers.json`.
+  - The `About` button now shares the same base button chrome as `Compare`.
+  - Remaining issue: the site-info modal/panel styling still feels visually disconnected from the rest of the app and needs another styling pass.
 
 ## 9. SSR / Server-Side Notes
 
 - `app/src/lib/artemis/ui/ToponymSearch.svelte` had a `document is not defined` crash on the server (SSR). The `onDestroy` callback was calling `document.removeEventListener` unconditionally. Fixed by guarding with `if (typeof document !== 'undefined')`. `onDestroy` runs during SSR in SvelteKit; `onMount` does not. Any future use of browser globals in `onDestroy` must use the same guard.
 
+## 9.1 System-Specific Rendering Note
+
+- A machine-specific IIIF drift/parallax bug was traced to GNOME fractional display scaling on X11, not to Artemis data or annotation content. On Ubuntu 24.04 with NVIDIA (`Quadro RTX 4000`, driver `580.126.09`), a 4K display (`3840x2160` at `100 Hz`) configured at `125%` scale caused Mutter/XRandR to apply an effective transform of about `1.599991`, producing a `6144x3456` framebuffer. In that state, single-view mode showed warped IIIF layers drifting relative to the basemap, while compare mode appeared stable. Setting the display scale back to `100%` fixed the bug immediately without code changes or logout.
+- Practical takeaway: if single-view IIIF layers appear to pan independently of the basemap on one machine only, check `xrandr --verbose` for a non-identity transform and GNOME monitor scaling before debugging Artemis code.
+
 ## 10. Next Actions
 
 1. Verify pill expand tab works in the live browser after the reactivity fix.
-2. Hand off the main-layer info bubble bug to an agent and debug it in the live app, not only via static code inspection.
+2. Restyle the site-info modal in `app/src/routes/+page.svelte` so it matches the rest of the Artemis UI rather than reading like a separate generic overlay.
 3. Re-test pill click isolation in-browser and either fix or remove the current partial implementation.
-4. Once interaction bugs are stable, simplify `Timeslider.svelte` and remove dead experimental code paths.
+4. Simplify `Timeslider.svelte` and remove dead experimental code paths now that runtime metadata wiring is in place.
 
 ## 10.1 Data Runtime Join Instructions
 
 - Artemis-RnD-Data now treats `static/` as hand-edited runtime content, not as preprocessing output.
 - `static/Baselayer/` has been moved under that manual content boundary.
-- The viewer should keep loading `build/index.json` for generated layer structure, but load `static/site.json` and `static/layers.json` separately when those files are introduced.
+- The viewer should keep loading `build/index.json` for generated layer structure, and load `static/site.json` and `static/layers.json` separately at runtime.
 - `static/site.json` is intentionally simple:
   - `title`
   - `info` as an array of paragraphs
@@ -124,10 +139,17 @@ Reactivity fix applied (2026-04-03):
 - `static/layers.json` is intentionally simple:
   - keys are either viewer `mainId` values or compiled IIIF render-layer ids
   - each entry contains only `title` and `info`
+- Site-level informational content does not require crawl-generated layer keys.
 - For WMTS/WMS/searchable/geojson layers that exist only in viewer config, resolve metadata by `mainId`.
 - For compiled IIIF layers, prefer explicit `renderLayers[].layerId` once `build/index.json` has been regenerated.
 - Until `build/index.json` is regenerated with explicit `layerId`, the viewer should map current IIIF render layers using the compiled-collection-derived ids already seeded in `static/layers.json`.
 - The viewer should render `site.info` by joining paragraphs, and render `team` / `logos` as separate sections rather than folding them into one text blob.
+- The site-info popup should be opened from the current toolbar dark-mode-toggle slot.
+- The layer-info popup should be opened from the existing per-layer info button in the timeline/menu UI.
+- This runtime join is now implemented in the viewer:
+  - `+page.svelte` fetches and normalizes `site.json` and `layers.json`.
+  - `Timeslider.svelte` consumes resolved layer metadata via `layerMetadataByMainId`.
+  - The toolbar `About` button opens a site-info modal from runtime metadata.
 - If a resolved key has no corresponding entry in `static/layers.json`, log a development warning that names the missing key and visible layer label, then fall back to generated label/default metadata.
 - Updating `static/*.json` should not require rerunning the Artemis-RnD-Data preprocessing pipeline; only the static asset itself should need to change.
 - Existing hardcoded viewer metadata in `app/src/lib/artemis/layerConfig.ts` should be treated as migration targets for this runtime-loaded metadata contract.
