@@ -106,7 +106,7 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
-  const DEFAULT_BASE_URL = 'https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/master/build';
+  const DEFAULT_BASE_URL = 'https://ghentech.github.io/Artemis-RnD-Data/build';
   const FEATURE_FLAGS: { startupPreloadScreen: boolean; debugMenu: boolean } = {
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
@@ -128,7 +128,7 @@
     );
     if (blobMatch) {
       const [, owner, repo, ref, buildPath] = blobMatch;
-      return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${buildPath}`.replace(/\/+$/, '');
+      return `https://${owner.toLowerCase()}.github.io/${repo}/${buildPath}`.replace(/\/+$/, '');
     }
     return url.replace(/\/index\.json\/?$/i, '').replace(/\/+$/, '');
   }
