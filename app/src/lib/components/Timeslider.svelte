@@ -939,65 +939,63 @@
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
-                  <div class="sub-menu-header-row">
-                    <div class="sub-menu-header">
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input
+                        class="sub-menu-checkbox-input"
+                        type="checkbox"
+                        checked={leftEnabledLayers[src.key]}
+                        aria-label="{src.label} layer visible in left pane"
+                        on:click|stopPropagation
+                        on:change={() => toggleLayerEnabled('left', src.key)}
+                      />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
                       <span class="sub-menu-swatch" style="--c:{src.color}"></span>
                       <span class="sub-menu-title-wrap">
                         <span class="sub-menu-title">{src.label}</span>
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button
+                          class="sub-menu-info-button"
+                          type="button"
+                          aria-label="{src.label} info"
+                          title="{src.label} info"
+                          aria-expanded={isInfoOpen(infoKey('left', src.key))}
+                          on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
+                        >i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <p class="sub-menu-info-text">{layerInfo}</p>
+                            {#if layerSource}
+                              <div class="sub-menu-source-block">
+                                <span class="sub-menu-source-label">Source</span>
+                                <a
+                                  class="sub-menu-source-link"
+                                  href={layerSource.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={layerSource.url}
+                                >{layerSource.label}</a>
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
                     </div>
-                    <div class="sub-menu-header-toggles">
-                      <label class="sub-menu-pane-check sub-menu-pane-check--left">
-                        <span class="sub-menu-pane-check-label">Left</span>
-                        <input
-                          class="sub-menu-checkbox-input"
-                          type="checkbox"
-                          checked={leftEnabledLayers[src.key]}
-                          aria-label="{src.label} layer visible in left pane"
-                          on:click|stopPropagation
-                          on:change={() => toggleLayerEnabled('left', src.key)}
-                        />
-                      </label>
-                      <label class="sub-menu-pane-check sub-menu-pane-check--right">
-                        <span class="sub-menu-pane-check-label">Right</span>
-                        <input
-                          class="sub-menu-checkbox-input"
-                          type="checkbox"
-                          checked={rightEnabledLayers[src.key]}
-                          aria-label="{src.label} layer visible in right pane"
-                          on:click|stopPropagation
-                          on:change={() => toggleLayerEnabled('right', src.key)}
-                        />
-                      </label>
-                    </div>
-                    <div class="sub-menu-info-anchor">
-                      <button
-                        class="sub-menu-info-button"
-                        type="button"
-                        aria-label="{src.label} info"
-                        title="{src.label} info"
-                        aria-expanded={isInfoOpen(infoKey('left', src.key))}
-                        on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
-                      >i</button>
-                      {#if isInfoOpen(infoKey('left', src.key))}
-                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a
-                                class="sub-menu-source-link"
-                                href={layerSource.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={layerSource.url}
-                              >{layerSource.label}</a>
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input
+                        class="sub-menu-checkbox-input"
+                        type="checkbox"
+                        checked={rightEnabledLayers[src.key]}
+                        aria-label="{src.label} layer visible in right pane"
+                        on:click|stopPropagation
+                        on:change={() => toggleLayerEnabled('right', src.key)}
+                      />
+                    </label>
                   </div>
                   {#if src.sublayers.length > 1}
                     <div class="sub-menu-compare-grid">
@@ -1141,38 +1139,36 @@
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
-                  <div class="sub-menu-header-row">
-                    <div class="sub-menu-header">
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
                       <span class="sub-menu-swatch" style="--c:{src.color}"></span>
                       <span class="sub-menu-title-wrap">
                         <span class="sub-menu-title">{src.label}</span>
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <p class="sub-menu-info-text">{layerInfo}</p>
+                            {#if layerSource}
+                              <div class="sub-menu-source-block">
+                                <span class="sub-menu-source-label">Source</span>
+                                <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
                     </div>
-                    <div class="sub-menu-header-toggles">
-                      <label class="sub-menu-pane-check sub-menu-pane-check--left">
-                        <span class="sub-menu-pane-check-label">Left</span>
-                        <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
-                      </label>
-                      <label class="sub-menu-pane-check sub-menu-pane-check--right">
-                        <span class="sub-menu-pane-check-label">Right</span>
-                        <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
-                      </label>
-                    </div>
-                    <div class="sub-menu-info-anchor">
-                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
-                      {#if isInfoOpen(infoKey('left', src.key))}
-                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
+                    </label>
                   </div>
                   {#if src.sublayers.length > 1}
                     <div class="sub-menu-compare-grid">
@@ -1318,38 +1314,36 @@
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
-                  <div class="sub-menu-header-row">
-                    <div class="sub-menu-header">
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
                       <span class="sub-menu-swatch" style="--c:{src.color}"></span>
                       <span class="sub-menu-title-wrap">
                         <span class="sub-menu-title">{src.label}</span>
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <p class="sub-menu-info-text">{layerInfo}</p>
+                            {#if layerSource}
+                              <div class="sub-menu-source-block">
+                                <span class="sub-menu-source-label">Source</span>
+                                <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
                     </div>
-                    <div class="sub-menu-header-toggles">
-                      <label class="sub-menu-pane-check sub-menu-pane-check--left">
-                        <span class="sub-menu-pane-check-label">Left</span>
-                        <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
-                      </label>
-                      <label class="sub-menu-pane-check sub-menu-pane-check--right">
-                        <span class="sub-menu-pane-check-label">Right</span>
-                        <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
-                      </label>
-                    </div>
-                    <div class="sub-menu-info-anchor">
-                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
-                      {#if isInfoOpen(infoKey('left', src.key))}
-                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
+                    </label>
                   </div>
                   {#if src.sublayers.length > 1}
                     <div class="sub-menu-compare-grid">
@@ -1445,38 +1439,36 @@
             <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
               {#if dualPaneEnabled}
                 <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
-                  <div class="sub-menu-header-row">
-                    <div class="sub-menu-header">
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
                       <span class="sub-menu-swatch" style="--c:{src.color}"></span>
                       <span class="sub-menu-title-wrap">
                         <span class="sub-menu-title">{src.label}</span>
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <p class="sub-menu-info-text">{layerInfo}</p>
+                            {#if layerSource}
+                              <div class="sub-menu-source-block">
+                                <span class="sub-menu-source-label">Source</span>
+                                <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
                     </div>
-                    <div class="sub-menu-header-toggles">
-                      <label class="sub-menu-pane-check sub-menu-pane-check--left">
-                        <span class="sub-menu-pane-check-label">Left</span>
-                        <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
-                      </label>
-                      <label class="sub-menu-pane-check sub-menu-pane-check--right">
-                        <span class="sub-menu-pane-check-label">Right</span>
-                        <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
-                      </label>
-                    </div>
-                    <div class="sub-menu-info-anchor">
-                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
-                      {#if isInfoOpen(infoKey('left', src.key))}
-                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                          <p class="sub-menu-info-text">{layerInfo}</p>
-                          {#if layerSource}
-                            <div class="sub-menu-source-block">
-                              <span class="sub-menu-source-label">Source</span>
-                              <a class="sub-menu-source-link" href={layerSource.url} target="_blank" rel="noreferrer" title={layerSource.url}>{layerSource.label}</a>
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
+                    </label>
                   </div>
                   {#if src.sublayers.length > 1}
                     <div class="sub-menu-compare-grid">
@@ -1591,25 +1583,50 @@
     gap: 8px;
   }
 
-  .sub-menu--compare .sub-menu-header-row {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  .sub-menu-compare-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
+    gap: 10px;
+    margin: -10px -10px 0;
+    padding: 10px;
+    background: var(--pane-header-tint, transparent);
+    border-radius: calc(var(--radius-md) - 2px) calc(var(--radius-md) - 2px) 0 0;
+    overflow: visible;
+    position: relative;
   }
 
-  .sub-menu--compare .sub-menu-header {
+  .sub-menu-compare-header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      var(--sub-menu-header-overlay),
+      var(--pattern);
+    background-size: auto, var(--pattern-size);
+    background-position: center, center;
+    opacity: 0.9;
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  .sub-menu-compare-info {
     grid-column: 2;
-    margin: -10px 0 0;
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     min-width: 0;
-  }
-
-  .sub-menu--compare .sub-menu-header-toggles {
-    display: contents;
   }
 
   .sub-menu-pane-check {
     display: flex;
     align-items: center;
     gap: 6px;
+    justify-content: center;
+    min-height: 40px;
     padding: 0;
     border-radius: 0;
     background: transparent;
@@ -1621,8 +1638,23 @@
   }
 
   .sub-menu-pane-check--right {
-    grid-column: 4;
+    grid-column: 3;
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-right-color) 18%, transparent);
+  }
+
+  .sub-menu-pane-check--compare {
+    justify-self: start;
+    position: relative;
+    z-index: 1;
+  }
+
+  .sub-menu-pane-check--compare.sub-menu-pane-check--left {
+    grid-column: 1;
+  }
+
+  .sub-menu-pane-check--compare.sub-menu-pane-check--right {
+    grid-column: 3;
+    justify-self: end;
   }
 
   .sub-menu--compare .sub-menu-pane-check--left,
@@ -1713,6 +1745,11 @@
     min-width: 0;
   }
 
+  .sub-menu--compare .sub-menu-title-wrap {
+    justify-content: center;
+    flex: 0 1 auto;
+  }
+
   .sub-menu-title-meta {
     font-family: var(--font-mono);
     font-size: 10px;
@@ -1793,12 +1830,15 @@
 
   .sub-menu-info-anchor {
     position: relative;
+    display: flex;
+    align-items: center;
     align-self: center;
     z-index: 4;
+    flex: 0 0 auto;
   }
 
-  .sub-menu--compare .sub-menu-info-anchor {
-    grid-column: 3;
+  .sub-menu-info-anchor--compare {
+    margin-left: 0;
   }
 
   .sub-menu-info-card {

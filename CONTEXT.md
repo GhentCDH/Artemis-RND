@@ -64,10 +64,12 @@ What is already implemented:
 - Menu state is modeled with a single `openMenuKey`, so the state shape already supports “only one open at a time”.
 - The per-pill menu content reuses the existing sublayer controls and main-layer info/source content.
 - The click-guard logic for the track has been updated so interacting with pill/menu UI should not jump the timeline.
+- Compare-mode header layout has been normalized across the duplicated compare-menu branches in `Timeslider.svelte` so the intended order is `checkbox + Left`, then `layer title/date + info`, then `Right + checkbox`.
 
 What is still unresolved:
 
 - The menu may now open correctly after the reactivity fix below, but this has not yet been verified in the live browser. Re-test before marking as done.
+- `Timeslider.svelte` still contains multiple overlapping/duplicated compare-menu implementations. Any future sublayer-menu UI change must be applied across all active branches until the file is simplified.
 
 Reactivity fix applied (2026-04-03):
 
@@ -92,7 +94,7 @@ Reactivity fix applied (2026-04-03):
 
 - Last verified command: `pnpm -s run check`
 - Current TypeScript/Svelte status at last edit: `0 errors, 0 warnings`
-- Important: compile status is clean, but runtime behavior is not fully verified. The pill expand tab fix needs a live browser test. The info bubble is still broken at runtime.
+- Important: compile status is clean, but runtime behavior is not fully verified. The pill expand tab fix needs a live browser test. The compare-mode header order is now acceptable for now, but spacing/visual polish may still need browser tuning. The info bubble is still broken at runtime.
 
 ## 9. SSR / Server-Side Notes
 
