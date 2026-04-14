@@ -10,3 +10,6 @@ app/static/annotations
 
 # OS noise
 .DS_Store
+
+# Claude Code
+.claude
