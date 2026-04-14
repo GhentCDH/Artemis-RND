@@ -106,7 +106,7 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
-  const DEFAULT_BASE_URL = 'https://ghentech.github.io/Artemis-RnD-Data/build';
+  const DEFAULT_BASE_URL = 'https://ghentcdh.github.io/Artemis-RnD-Data/build';
   const FEATURE_FLAGS: { startupPreloadScreen: boolean; debugMenu: boolean } = {
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,

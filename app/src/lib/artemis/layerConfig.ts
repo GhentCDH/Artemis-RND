@@ -114,15 +114,15 @@ export const MAIN_LAYER_SOURCE: Record<string, { label: string; url: string }> =
   },
   primitief: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentech.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
   },
   gereduceerd: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentech.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
   },
   handdrawn: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentech.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
   },
 };
 
