@@ -25,7 +25,7 @@ This app loads precompiled outputs from `Artemis-RnD-Data/build`, renders georef
 
 Default dataset base URL points to:
 
-- `https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/master/build`
+- `https://ghentcdh.github.io/Artemis-RnD-Data/build`
 
 Required files at dataset base:
 
