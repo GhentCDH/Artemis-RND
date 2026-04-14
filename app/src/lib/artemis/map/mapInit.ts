@@ -1,5 +1,6 @@
 // $lib/artemis/map/mapInit.ts
 import maplibregl from "maplibre-gl";
+import basemapGeojsonUrl from "$lib/assets/Baselayer.geojson?url";
 
 let map: maplibregl.Map | null = null;
 type BaseMapTheme = "light" | "dark";
@@ -97,8 +98,6 @@ const LAND_USAGE_LAYERS: Record<
 };
 
 const BELGIUM_BOUNDS: [number, number, number, number] = [2.53, 50.685, 5.92, 51.52];
-const WORLD_GRID_BOUNDS: [number, number, number, number] = [-180, -85, 180, 85];
-
 const IIIF_HOVER_SOURCE_ID = "iiif-hover-mask-source";
 const IIIF_HOVER_LINE_LAYER_ID = "iiif-hover-mask-line";
 
@@ -111,10 +110,23 @@ const PRIMITIVE_SELECT_SOURCE_ID = "primitive-parcels-select-source";
 const PRIMITIVE_SELECT_FILL_LAYER_ID = "primitive-parcels-select-fill";
 const PRIMITIVE_SELECT_LINE_LAYER_ID = "primitive-parcels-select-line";
 const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
-const BASE_GRID_SOURCE_ID = "artemis-base-grid-source";
-const BASE_GRID_MINOR_LAYER_ID = "artemis-base-grid-minor";
-const BASE_GRID_MAJOR_LAYER_ID = "artemis-base-grid-major";
 const BASE_BACKGROUND_LAYER_ID = "artemis-base-background";
+const BASE_WATER_SOURCE_ID = "artemis-base-water-source";
+const BASE_WATER_FILL_LAYER_ID = "artemis-base-water-fill";
+const BASE_WATER_LINE_LAYER_ID = "artemis-base-water-line";
+
+function isMapStyleUsable(targetMap: maplibregl.Map | null | undefined): targetMap is maplibregl.Map {
+  if (!targetMap) return false;
+  try {
+    return Boolean(
+      targetMap.isStyleLoaded?.() ||
+      targetMap.loaded?.() ||
+      (targetMap.getStyle?.()?.layers?.length ?? 0) > 0
+    );
+  } catch {
+    return false;
+  }
+}
 
 function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
   const style = map.getStyle();
@@ -126,68 +138,24 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
   return createMapContextWithTheme(container, "light");
 }
 
-function buildGridGeoJSON(): GeoJSON.FeatureCollection {
-  const [minLng, minLat, maxLng, maxLat] = WORLD_GRID_BOUNDS;
-  const features: GeoJSON.Feature[] = [];
-
-  function roundCoord(value: number): number {
-    return Math.round(value * 1000) / 1000;
-  }
-
-  function addVerticalLines(step: number, major = false) {
-    const start = Math.ceil(minLng / step) * step;
-    for (let lng = start; lng <= maxLng + 1e-9; lng += step) {
-      features.push({
-        type: "Feature",
-        properties: { major },
-        geometry: {
-          type: "LineString",
-          coordinates: [
-            [roundCoord(lng), minLat],
-            [roundCoord(lng), maxLat]
-          ]
-        }
-      });
-    }
-  }
-
-  function addHorizontalLines(step: number, major = false) {
-    const start = Math.ceil(minLat / step) * step;
-    for (let lat = start; lat <= maxLat + 1e-9; lat += step) {
-      features.push({
-        type: "Feature",
-        properties: { major },
-        geometry: {
-          type: "LineString",
-          coordinates: [
-            [minLng, roundCoord(lat)],
-            [maxLng, roundCoord(lat)]
-          ]
-        }
-      });
-    }
-  }
-
-  addVerticalLines(0.25, false);
-  addHorizontalLines(0.25, false);
-  addVerticalLines(1, true);
-  addHorizontalLines(1, true);
-
-  return { type: "FeatureCollection", features };
+function getCssColor(token: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  return value || fallback;
 }
 
 function getBaseMapStyle(theme: BaseMapTheme): maplibregl.StyleSpecification {
   const isDark = theme === "dark";
-  const backgroundColor = isDark ? "#1a150f" : "#f4efe4";
-  const minorGridColor = isDark ? "rgba(207, 176, 109, 0.08)" : "rgba(168, 144, 79, 0.10)";
-  const majorGridColor = isDark ? "rgba(207, 176, 109, 0.16)" : "rgba(168, 144, 79, 0.18)";
+  const backgroundColor = getCssColor("--map-background", isDark ? "#15120d" : "#f6f2ea");
+  const waterFillColor = getCssColor("--map-water-fill", isDark ? "#29434b" : "#c5d9dc");
+  const waterOutlineColor = getCssColor("--map-water-outline", isDark ? "#5f8790" : "#93aeb4");
 
   return {
     version: 8,
     sources: {
-      [BASE_GRID_SOURCE_ID]: {
+      [BASE_WATER_SOURCE_ID]: {
         type: "geojson",
-        data: buildGridGeoJSON()
+        data: basemapGeojsonUrl
       }
     },
     layers: [
@@ -199,32 +167,25 @@ function getBaseMapStyle(theme: BaseMapTheme): maplibregl.StyleSpecification {
         }
       },
       {
-        id: BASE_GRID_MINOR_LAYER_ID,
-        type: "line",
-        source: BASE_GRID_SOURCE_ID,
-        filter: ["==", ["get", "major"], false],
+        id: BASE_WATER_FILL_LAYER_ID,
+        type: "fill",
+        source: BASE_WATER_SOURCE_ID,
         paint: {
-          "line-color": minorGridColor,
-          "line-width": [
-            "interpolate", ["linear"], ["zoom"],
-            6, 0.4,
-            10, 0.7,
-            14, 1
-          ]
+          "fill-color": waterFillColor,
+          "fill-opacity": 1
         }
       },
       {
-        id: BASE_GRID_MAJOR_LAYER_ID,
+        id: BASE_WATER_LINE_LAYER_ID,
         type: "line",
-        source: BASE_GRID_SOURCE_ID,
-        filter: ["==", ["get", "major"], true],
+        source: BASE_WATER_SOURCE_ID,
         paint: {
-          "line-color": majorGridColor,
+          "line-color": waterOutlineColor,
           "line-width": [
             "interpolate", ["linear"], ["zoom"],
-            6, 0.6,
-            10, 0.9,
-            14, 1.3
+            7, 0.35,
+            10, 0.6,
+            14, 1.1
           ]
         }
       }
@@ -277,9 +238,9 @@ export function destroyMapContext() {
   map = null;
 }
 
-export function setHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerKey, visible: boolean): void {
+export function setHistCartLayerVisible(map: maplibregl.Map | null | undefined, key: HistCartLayerKey, visible: boolean): void {
   const cfg = HISTCART_LAYERS[key];
-  if (!cfg) return;
+  if (!cfg || !isMapStyleUsable(map)) return;
 
   const hasSource = !!map.getSource(cfg.sourceId);
   const hasLayer = !!map.getLayer(cfg.layerId);
@@ -311,21 +272,21 @@ export function setHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerK
   if (hasSource) map.removeSource(cfg.sourceId);
 }
 
-export function isHistCartLayerVisible(map: maplibregl.Map, key: HistCartLayerKey): boolean {
+export function isHistCartLayerVisible(map: maplibregl.Map | null | undefined, key: HistCartLayerKey): boolean {
   const cfg = HISTCART_LAYERS[key];
-  return !!(cfg && map.getLayer(cfg.layerId));
+  return !!(cfg && isMapStyleUsable(map) && map.getLayer(cfg.layerId));
 }
 
-export function setHistCartLayerOpacity(map: maplibregl.Map, key: HistCartLayerKey, opacity: number): void {
+export function setHistCartLayerOpacity(map: maplibregl.Map | null | undefined, key: HistCartLayerKey, opacity: number): void {
   const cfg = HISTCART_LAYERS[key];
-  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  if (!cfg || !isMapStyleUsable(map) || !map.getLayer(cfg.layerId)) return;
   const clamped = Math.max(0, Math.min(1, opacity));
   map.setPaintProperty(cfg.layerId, "raster-opacity", clamped);
 }
 
-export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKey): void {
+export function moveHistCartLayerToTop(map: maplibregl.Map | null | undefined, key: HistCartLayerKey): void {
   const cfg = HISTCART_LAYERS[key];
-  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  if (!cfg || !isMapStyleUsable(map) || !map.getLayer(cfg.layerId)) return;
   map.moveLayer(cfg.layerId);
 }
 
@@ -333,9 +294,9 @@ export function moveHistCartLayerToTop(map: maplibregl.Map, key: HistCartLayerKe
 // Land usage WMS overlay layers (on top of HISTCART WMTS base)
 // ---------------------------------------------------------------------------
 
-export function setLandUsageLayerVisible(map: maplibregl.Map, key: LandUsageLayerKey, visible: boolean): void {
+export function setLandUsageLayerVisible(map: maplibregl.Map | null | undefined, key: LandUsageLayerKey, visible: boolean): void {
   const cfg = LAND_USAGE_LAYERS[key];
-  if (!cfg) return;
+  if (!cfg || !isMapStyleUsable(map)) return;
   const hasSource = !!map.getSource(cfg.sourceId);
   const hasLayer  = !!map.getLayer(cfg.layerId);
   if (visible) {
@@ -356,9 +317,9 @@ export function setLandUsageLayerVisible(map: maplibregl.Map, key: LandUsageLaye
   if (hasSource) map.removeSource(cfg.sourceId);
 }
 
-export function setLandUsageLayerOpacity(map: maplibregl.Map, key: LandUsageLayerKey, opacity: number): void {
+export function setLandUsageLayerOpacity(map: maplibregl.Map | null | undefined, key: LandUsageLayerKey, opacity: number): void {
   const cfg = LAND_USAGE_LAYERS[key];
-  if (!cfg || !map.getLayer(cfg.layerId)) return;
+  if (!cfg || !isMapStyleUsable(map) || !map.getLayer(cfg.layerId)) return;
   map.setPaintProperty(cfg.layerId, "raster-opacity", Math.max(0, Math.min(1, opacity)));
 }
 
@@ -407,7 +368,8 @@ export function setIiifHoverMasks(m: maplibregl.Map, masks: IiifHoverMask[] | nu
   try { if (m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_HOVER_LINE_LAYER_ID); } catch { /* ignore */ }
 }
 
-export function setPrimitiveLayerVisible(map: maplibregl.Map, visible: boolean, geojsonUrl: string): void {
+export function setPrimitiveLayerVisible(map: maplibregl.Map | null | undefined, visible: boolean, geojsonUrl: string): void {
+  if (!isMapStyleUsable(map)) return;
   const hasSource = !!map.getSource(PRIMITIVE_SOURCE_ID);
   const hasHoverSource = !!map.getSource(PRIMITIVE_HOVER_SOURCE_ID);
   const hasFillLayer = !!map.getLayer(PRIMITIVE_FILL_LAYER_ID);

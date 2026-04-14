@@ -48,6 +48,11 @@
   --badge-search-bg:   #f5eedf;
   --badge-search-color: #8a6820;
 
+  /* --- Map base ------------------------------------------- */
+  --map-background:   #f6f2ea;
+  --map-water-fill:   #c5d9dc;
+  --map-water-outline:#93aeb4;
+
   /* --- Problem / error blocks ------------------------------ */
   --problem-border:       rgba(168, 80, 40, 0.22);
   --problem-bg:           #fdf6f0;
@@ -157,16 +162,16 @@
   --pane-right-badge-bg:      #f3d8c8;
   --pane-right-badge-text:    #7a4222;
   --pane-right-panel-tint:    rgba(180, 107, 63, 0.14);
-  --layer-hand-color:         var(--layer-pill-color);
-  --layer-frickx-color:       var(--layer-pill-color);
-  --layer-villaret-color:     var(--layer-pill-color);
-  --layer-ferraris-color:     var(--layer-pill-color);
-  --layer-primitief-color:    var(--layer-pill-color);
-  --layer-vander-color:       var(--layer-pill-color);
-  --layer-gereduceerd-color:  var(--layer-pill-color);
-  --layer-popp-color:         var(--layer-pill-color);
-  --layer-ngi1873-color:      var(--layer-pill-color);
-  --layer-ngi1904-color:      var(--layer-pill-color);
+  --layer-hand-color:         #99885c;
+  --layer-frickx-color:       #ae8451;
+  --layer-villaret-color:     #9d8f46;
+  --layer-ferraris-color:     #8f9851;
+  --layer-primitief-color:    #b3834a;
+  --layer-vander-color:       #b06f4b;
+  --layer-gereduceerd-color:  #8f9c45;
+  --layer-popp-color:         #9a7a5a;
+  --layer-ngi1873-color:      #8a8d5b;
+  --layer-ngi1904-color:      #8b7651;
 
   /* --- Timeline / chrome controls ------------------------- */
   --toolbar-button-bg:          rgba(253, 252, 249, 0.94);
@@ -232,6 +237,10 @@ html[data-theme='dark'] {
   --problem-border:      rgba(212, 125, 92, 0.26);
   --problem-bg:          rgba(76, 34, 24, 0.54);
   --problem-error-color: #efb29a;
+
+  --map-background:      #15120d;
+  --map-water-fill:      #29434b;
+  --map-water-outline:   #5f8790;
 
   --progress-bg:   rgba(223, 205, 168, 0.16);
   --spinner-color: #a8904f;
@@ -312,6 +321,18 @@ html[data-theme='dark'] {
   --bubble-action-bg:         #a8904f;
   --bubble-action-bg-hover:   #b89e5a;
   --bubble-action-text:       #111214;
+
+  --layer-pill-color:         #a8904f;
+  --layer-hand-color:         #8f8360;
+  --layer-frickx-color:       #b1905f;
+  --layer-villaret-color:     #9f9556;
+  --layer-ferraris-color:     #8ea164;
+  --layer-primitief-color:    #bb8553;
+  --layer-vander-color:       #b17054;
+  --layer-gereduceerd-color:  #92a45b;
+  --layer-popp-color:         #9b7f63;
+  --layer-ngi1873-color:      #879267;
+  --layer-ngi1904-color:      #8c7a5b;
 
   --toolbar-button-bg:           rgba(24, 20, 14, 0.94);
   --toolbar-button-hover-bg:     #2b2218;

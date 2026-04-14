@@ -1,7 +1,7 @@
 <!-- Floating search panel (top-center). Handles toponym + manifest search internally;
      dispatches events for map-level actions (fly-to, layer activation). -->
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { normalizeSearchText, scoreText } from '$lib/artemis/search';
   import { MAIN_LAYER_META, MAIN_LAYER_LABELS } from '$lib/artemis/layerConfig';
   import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/types';
@@ -21,9 +21,16 @@
   let query = '';
   let locked = false;
   let firstFocusSeen = false;
+  let menuOpen = false;
   let suggestions: ToponymIndexItem[] = [];
   let toponymResults: Array<ToponymIndexItem & { score: number }> = [];
   let manifestResults: Array<ManifestSearchItem & { score: number }> = [];
+  let panelEl: HTMLElement | null = null;
+  let inputEl: HTMLInputElement | null = null;
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const POINTER_LEEWAY_PX = 28;
+  const POINTER_CLOSE_DELAY_MS = 140;
 
   function findMainId(mapName: string): string | undefined {
     const norm = mapName.trim().toLowerCase();
@@ -74,38 +81,128 @@
   }
 
   function onFocus() {
+    menuOpen = true;
     if (firstFocusSeen) return;
     firstFocusSeen = true;
     pickSuggestions(3);
   }
 
+  function cancelPendingClose() {
+    if (closeTimer === null) return;
+    clearTimeout(closeTimer);
+    closeTimer = null;
+  }
+
+  function closeMenu() {
+    cancelPendingClose();
+    menuOpen = false;
+    locked = false;
+    inputEl?.blur();
+  }
+
+  function scheduleClose() {
+    cancelPendingClose();
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      closeMenu();
+    }, POINTER_CLOSE_DELAY_MS);
+  }
+
+  function pointerWithinLeeway(event: PointerEvent): boolean {
+    if (!panelEl) return false;
+    const rect = panelEl.getBoundingClientRect();
+    return (
+      event.clientX >= rect.left - POINTER_LEEWAY_PX &&
+      event.clientX <= rect.right + POINTER_LEEWAY_PX &&
+      event.clientY >= rect.top - POINTER_LEEWAY_PX &&
+      event.clientY <= rect.bottom + POINTER_LEEWAY_PX
+    );
+  }
+
+  function handleDocumentPointerMove(event: PointerEvent) {
+    if (!menuOpen) return;
+    if (pointerWithinLeeway(event)) {
+      cancelPendingClose();
+      return;
+    }
+    scheduleClose();
+  }
+
+  function handleDocumentPointerDown(event: PointerEvent) {
+    if (!menuOpen) return;
+    if (panelEl?.contains(event.target as Node)) return;
+    closeMenu();
+  }
+
+  function onInput() {
+    locked = false;
+    menuOpen = true;
+    cancelPendingClose();
+  }
+
+  function onPanelPointerEnter() {
+    if (!menuOpen) return;
+    cancelPendingClose();
+  }
+
+  function clearQuery() {
+    query = '';
+    locked = false;
+    menuOpen = true;
+    cancelPendingClose();
+    inputEl?.focus();
+  }
+
   function selectToponym(item: ToponymIndexItem) {
     query = item.text;
-    locked = true;
+    closeMenu();
     dispatch('fly-to-toponym', item);
   }
 
   function selectManifest(result: ManifestSearchItem & { score: number }) {
     query = result.text;
-    locked = true;
+    closeMenu();
     dispatch('manifest-click', result);
   }
+
+  onMount(() => {
+    document.addEventListener('pointermove', handleDocumentPointerMove);
+    document.addEventListener('pointerdown', handleDocumentPointerDown);
+  });
+
+  onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('pointermove', handleDocumentPointerMove);
+      document.removeEventListener('pointerdown', handleDocumentPointerDown);
+    }
+    cancelPendingClose();
+  });
 
   $: { query; toponymIndex; manifestSearchIndex; updateResults(); }
   $: if (toponymIndex.length > 0 && firstFocusSeen && query === '') pickSuggestions(3);
 </script>
 
-<section class="toponym-search-panel">
+<section class="toponym-search-panel" role="search" aria-label="Toponym and manifest search" bind:this={panelEl} on:pointerenter={onPanelPointerEnter}>
   <div class="ui-panel toponym-search-row">
     <input
+      bind:this={inputEl}
       type="search"
       class="ui-input"
       placeholder="Search manifests and toponyms..."
       bind:value={query}
-      on:input={() => (locked = false)}
+      on:input={onInput}
       on:focus={onFocus}
       spellcheck="false"
     />
+    {#if query.trim()}
+      <button
+        type="button"
+        class="toponym-clear"
+        aria-label="Clear search query"
+        title="Clear search"
+        on:click={clearQuery}
+      >×</button>
+    {/if}
     {#if loading}
       <span class="toponym-search-status">Loading…</span>
     {/if}
@@ -115,7 +212,7 @@
     <div class="ui-panel toponym-feedback toponym-search-error">{error}</div>
   {/if}
 
-  {#if firstFocusSeen && query.trim() === '' && suggestions.length > 0}
+  {#if menuOpen && firstFocusSeen && query.trim() === '' && suggestions.length > 0}
     <div class="ui-panel toponym-suggestions">
       <div class="ui-label">Try one of these</div>
       <div class="toponym-suggestion-list">
@@ -132,7 +229,7 @@
     </div>
   {/if}
 
-  {#if !locked && query.trim() && (manifestResults.length > 0 || toponymResults.length > 0)}
+  {#if menuOpen && !locked && query.trim() && (manifestResults.length > 0 || toponymResults.length > 0)}
     <div class="ui-panel toponym-results" role="listbox" aria-label="Search results">
       {#if manifestResults.length > 0}
         <div class="ui-label result-group-title">IIIF manifests</div>
@@ -159,7 +256,7 @@
         {/each}
       {/if}
     </div>
-  {:else if !locked && query.trim() && !loading && !error}
+  {:else if menuOpen && !locked && query.trim() && !loading && !error}
     <div class="ui-panel toponym-feedback">No matching manifests or toponyms.</div>
   {/if}
 </section>
@@ -188,6 +285,30 @@
     font-size: 11px;
     color: var(--text-muted);
     white-space: nowrap;
+  }
+
+  .toponym-clear {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease;
+  }
+
+  .toponym-clear:hover {
+    background: var(--result-hover);
+    border-color: var(--border-light);
+    color: var(--text-primary);
+    transform: scale(1.04);
   }
 
   .toponym-results {

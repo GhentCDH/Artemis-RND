@@ -1,21 +1,24 @@
 <!-- app/src/lib/components/Timeslider.svelte -->
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { MassartItem } from '$lib/artemis/types';
-  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META, MAIN_LAYER_INFO, MAIN_LAYER_SOURCE } from '$lib/artemis/layerConfig';
+  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META } from '$lib/artemis/layerConfig';
 
   type PaneId = 'left' | 'right';
+  type LayerMetadata = { title: string; info: string[] };
 
   export let massartItems: MassartItem[] = [];
+  export let layerMetadataByMainId: Record<string, LayerMetadata> = {};
   export let yearLeeway: number = 3;
   export let loadingLayers: Record<string, boolean> = {};
   export let dualPaneEnabled = false;
-  export let showLeftPaneControls = true;
-  export let showRightPaneControls = true;
   export let disabledPane: PaneId | null = null;
   export let leftYear: number | undefined = undefined;
   export let rightYear: number | undefined = undefined;
+  export let searchFocusMainId: string | null = null;
+  export let searchFocusYear: number | null = null;
+  export let searchFocusNonce = 0;
 
   const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
     left: {
@@ -140,6 +143,7 @@
   let localRightYear = defaultYear;
   let lastLeftYearProp: number | undefined = undefined;
   let lastRightYearProp: number | undefined = undefined;
+  let lastSearchFocusNonce = 0;
   let dualPaneModePrev = dualPaneEnabled;
   let dualPaneYearsInitialized = dualPaneEnabled;
 
@@ -168,10 +172,16 @@
   let prevVisible: Record<string, boolean> = {};
   let prevPaneVisible: Record<PaneId, Record<string, boolean>> = { left: {}, right: {} };
   let openInfoKey: string | null = null;
+  let openMenuKey: SourceKey | null = null;
+  let layerInfoModalKey: string | null = null;
 
   let hoveredSrc: SourceDef | null = null;
   let tooltipFixedStyle = '';
   let fullLabelFitsBySource: Partial<Record<SourceKey, boolean>> = {};
+  let dragCleanup: (() => void) | null = null;
+  let menuCloseTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const MENU_CLOSE_DELAY_MS = 260;
 
   $: massartByYear = massartItems.reduce<Map<number, MassartItem[]>>((acc, item) => {
     const y = parseInt(item.year ?? '0', 10);
@@ -239,6 +249,50 @@
     const ratio = Math.max(0, Math.min(1, (year - axisStart) / axisSpan));
     const usableWidth = Math.max(0, trackWidth - SCRUBBER_THUMB_SIZE);
     return ratio * usableWidth + SCRUBBER_THUMB_SIZE / 2;
+  }
+
+  function scrubberIndicatorStyle(year: number, color?: string, badgeBg?: string, badgeText?: string): string {
+    const bits = [`left:${scrubberCenterPx(year)}px`];
+    if (color) bits.push(`--pane-color:${color}`);
+    if (badgeBg) bits.push(`--pane-badge-bg:${badgeBg}`);
+    if (badgeText) bits.push(`--pane-badge-text:${badgeText}`);
+    return bits.join(';');
+  }
+
+  function applyDraggedYear(pane: PaneId, clientX: number) {
+    const trackEl = document.querySelector('.ts-track') as HTMLElement | null;
+    if (!trackEl) return;
+    const rect = trackEl.getBoundingClientRect();
+    const year = yearFromTrackClientX(clientX, rect);
+    if (!dualPaneEnabled) {
+      setSingleYear(year);
+      return;
+    }
+    setPaneYear(pane, year);
+  }
+
+  function startKnobDrag(pane: PaneId, event: PointerEvent) {
+    if (dualPaneEnabled && disabledPane === pane) return;
+    event.preventDefault();
+    dragCleanup?.();
+    applyDraggedYear(pane, event.clientX);
+
+    const onMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyDraggedYear(pane, moveEvent.clientX);
+    };
+
+    const onEnd = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+      dragCleanup = null;
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    dragCleanup = onEnd;
   }
 
   function onSliderInput(pane: PaneId, e: Event) {
@@ -325,7 +379,7 @@
 
   function onTrackClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
-    if (target?.closest('.source-block, .img-dot, .ts-scrubber, .sub-menu, .sub-menu-header--toggle, .sub-pill, .sub-menu-checkbox-input')) return;
+    if (target?.closest('.source-pill-wrap, .source-menu-popover, .img-dot, .ts-scrubber, .sub-menu, .sub-menu-header--toggle, .sub-pill, .sub-menu-checkbox-input, .source-folder-tab')) return;
 
     const trackEl = (e.currentTarget as HTMLElement).closest('.ts-track') as HTMLElement | null;
     if (!trackEl) return;
@@ -360,6 +414,10 @@
     return SOURCES.find((src) => src.key === key)!;
   }
 
+  function sourceByMainId(mainId: string): SourceDef | undefined {
+    return SOURCES.find((src) => src.mainId === mainId);
+  }
+
   function infoKey(pane: PaneId, key: SourceKey, subId?: string): string {
     return subId ? `${pane}:${key}:${subId}` : `${pane}:${key}`;
   }
@@ -374,15 +432,46 @@
 
   function onInfoButtonClick(event: MouseEvent, key: string) {
     event.stopPropagation();
-    toggleInfo(key);
+    layerInfoModalKey = layerInfoModalKey === key ? null : key;
   }
 
-  function mainLayerInfo(mainId: string, fallback: string): string {
-    return MAIN_LAYER_INFO[mainId] ?? fallback;
+  function toggleMenu(event: MouseEvent, key: SourceKey) {
+    event.stopPropagation();
+    if (menuCloseTimer !== null) {
+      clearTimeout(menuCloseTimer);
+      menuCloseTimer = null;
+    }
+    openInfoKey = null;
+    openMenuKey = openMenuKey === key ? null : key;
   }
 
-  function mainLayerSource(mainId: string): { label: string; url: string } | null {
-    return MAIN_LAYER_SOURCE[mainId] ?? null;
+  function closeMenu(key: SourceKey) {
+    if (openMenuKey !== key) return;
+    openMenuKey = null;
+    openInfoKey = null;
+  }
+
+  function scheduleCloseMenu(key: SourceKey) {
+    if (menuCloseTimer !== null) clearTimeout(menuCloseTimer);
+    menuCloseTimer = setTimeout(() => {
+      menuCloseTimer = null;
+      closeMenu(key);
+    }, MENU_CLOSE_DELAY_MS);
+  }
+
+  function cancelCloseMenu() {
+    if (menuCloseTimer === null) return;
+    clearTimeout(menuCloseTimer);
+    menuCloseTimer = null;
+  }
+
+  function mainLayerInfoCard(mainId: string, fallbackTitle: string): LayerMetadata {
+    const meta = layerMetadataByMainId[mainId];
+    if (!meta) return { title: fallbackTitle, info: [] };
+    return {
+      title: meta.title?.trim() || fallbackTitle,
+      info: Array.isArray(meta.info) ? meta.info.filter((paragraph) => typeof paragraph === 'string' && paragraph.trim()) : [],
+    };
   }
 
   function setLayerEnabled(pane: PaneId, key: SourceKey, enabled: boolean) {
@@ -565,8 +654,9 @@
     return `left:${leftPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)}`;
   }
 
-  function sourceMenuStyle(src: SourceDef): string {
-    return `--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)}`;
+  function sourceMenuStyle(src: SourceDef, pane: PaneId = 'left'): string {
+    const paneTint = pane === 'right' ? 'var(--pane-right-panel-tint)' : 'var(--pane-left-panel-tint)';
+    return `--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pane-header-tint:${paneTint}`;
   }
 
   function sourceIsCurrentForKey(key: SourceKey): boolean {
@@ -609,7 +699,12 @@
     }
   });
 
-  $: halfKnobYears = trackWidth > 0 ? (9 / (trackWidth - SCRUBBER_THUMB_SIZE)) * axisSpan : 3;
+  onDestroy(() => {
+    dragCleanup?.();
+    cancelCloseMenu();
+  });
+
+  $: halfKnobYears = yearLeeway;
 
   $: if (leftYear != null && leftYear !== lastLeftYearProp) {
     lastLeftYearProp = leftYear;
@@ -636,6 +731,22 @@
       sliderYear = localLeftYear;
     }
     dualPaneModePrev = dualPaneEnabled;
+  }
+
+  $: if (searchFocusNonce !== lastSearchFocusNonce) {
+    lastSearchFocusNonce = searchFocusNonce;
+    if (searchFocusMainId) {
+      const src = sourceByMainId(searchFocusMainId);
+      const targetYear = searchFocusYear ?? src?.repr;
+      if (src && targetYear != null) {
+        setLayerEnabled('left', src.key, true);
+        const overlapping = paneSourcesForYear(targetYear)
+          .filter((candidate) => candidate.key !== src.key);
+        for (const candidate of overlapping) {
+          setLayerEnabled('left', candidate.key, false);
+        }
+      }
+    }
   }
 
   $: visiblePanes = (dualPaneEnabled
@@ -743,236 +854,52 @@
   }
 </script>
 
-{#if dualPaneEnabled}
-  {#if showLeftPaneControls && leftPanelSources.length > 0}
-    <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
-      {#each leftPanelSources as src}
-        {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-        {@const layerSource = mainLayerSource(src.mainId)}
-        <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src)}>
-          <div class="sub-menu-header-row">
-            <button
-              class="sub-menu-header sub-menu-header--toggle"
-              class:is-disabled={!leftEnabledLayers[src.key]}
-              type="button"
-              title="{src.label} — global visibility"
-              on:click={() => toggleLayerEnabled('left', src.key)}
-            >
-              <span class="sub-menu-swatch" style="--c:{src.color}"></span>
-              <span class="sub-menu-title-wrap">
-                <span class="sub-menu-title">{src.label}</span>
-                <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
-              </span>
-            </button>
-            <input
-              class="sub-menu-checkbox-input"
-              type="checkbox"
-              checked={leftEnabledLayers[src.key]}
-              aria-label="{src.label} layer visible in left pane"
-              on:click|stopPropagation
-              on:change={() => toggleLayerEnabled('left', src.key)}
-            />
-            <div class="sub-menu-info-anchor">
-              <button
-                class="sub-menu-info-button"
-                type="button"
-                aria-label="{src.label} info"
-                title="{src.label} info"
-                aria-expanded={isInfoOpen(infoKey('left', src.key))}
-                on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
-              >i</button>
-              {#if isInfoOpen(infoKey('left', src.key))}
-                <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                  <p class="sub-menu-info-text">{layerInfo}</p>
-                  {#if layerSource}
-                    <div class="sub-menu-source-block">
-                      <span class="sub-menu-source-label">Source</span>
-                      <a
-                        class="sub-menu-source-link"
-                        href={layerSource.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={layerSource.url}
-                      >{layerSource.label}</a>
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </div>
-          {#if src.sublayers.length > 1}
-            <div class="sub-menu-pills">
-              {#each src.sublayers as sub}
-                <button
-                  class="sub-pill"
-                  class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
-                  class:is-layer-disabled={!leftEnabledLayers[src.key]}
-                  style="--c:{src.color}"
-                  type="button"
-                  title="{src.label} — {sub.label}"
-                  on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}
-                >{sub.label}</button>
-              {/each}
-            </div>
-          {/if}
-        </section>
-      {/each}
-    </div>
-  {/if}
-
-  {#if showRightPaneControls && rightPanelSources.length > 0}
-    <div class="ts-sub-panel ts-sub-panel--right" transition:fade={{ duration: 140 }}>
-      {#each rightPanelSources as src}
-        {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-        {@const layerSource = mainLayerSource(src.mainId)}
-        <section class="sub-menu" class:is-layer-disabled={!rightEnabledLayers[src.key]} style={sourceMenuStyle(src)}>
-          <div class="sub-menu-header-row">
-            <button
-              class="sub-menu-header sub-menu-header--toggle"
-              class:is-disabled={!rightEnabledLayers[src.key]}
-              type="button"
-              title="{src.label} — global visibility"
-              on:click={() => toggleLayerEnabled('right', src.key)}
-            >
-              <span class="sub-menu-swatch" style="--c:{src.color}"></span>
-              <span class="sub-menu-title-wrap">
-                <span class="sub-menu-title">{src.label}</span>
-                <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
-              </span>
-            </button>
-            <input
-              class="sub-menu-checkbox-input"
-              type="checkbox"
-              checked={rightEnabledLayers[src.key]}
-              aria-label="{src.label} layer visible in right pane"
-              on:click|stopPropagation
-              on:change={() => toggleLayerEnabled('right', src.key)}
-            />
-            <div class="sub-menu-info-anchor">
-              <button
-                class="sub-menu-info-button"
-                type="button"
-                aria-label="{src.label} info"
-                title="{src.label} info"
-                aria-expanded={isInfoOpen(infoKey('right', src.key))}
-                on:click={(event) => onInfoButtonClick(event, infoKey('right', src.key))}
-              >i</button>
-              {#if isInfoOpen(infoKey('right', src.key))}
-                <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                  <p class="sub-menu-info-text">{layerInfo}</p>
-                  {#if layerSource}
-                    <div class="sub-menu-source-block">
-                      <span class="sub-menu-source-label">Source</span>
-                      <a
-                        class="sub-menu-source-link"
-                        href={layerSource.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={layerSource.url}
-                      >{layerSource.label}</a>
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </div>
-          {#if src.sublayers.length > 1}
-            <div class="sub-menu-pills">
-              {#each src.sublayers as sub}
-                <button
-                  class="sub-pill"
-                  class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)}
-                  class:is-layer-disabled={!rightEnabledLayers[src.key]}
-                  style="--c:{src.color}"
-                  type="button"
-                  title="{src.label} — {sub.label}"
-                  on:click={() => toggleSublayer('right', src.key, sub.subId, sub.id)}
-                >{sub.label}</button>
-              {/each}
-            </div>
-          {/if}
-        </section>
-      {/each}
-    </div>
-  {/if}
-{:else if showLeftPaneControls && singlePanelSources.length > 0}
-  <div class="ts-sub-panel ts-sub-panel--left" transition:fade={{ duration: 140 }}>
-    {#each singlePanelSources as src}
-      {@const layerInfo = mainLayerInfo(src.mainId, src.label)}
-      {@const layerSource = mainLayerSource(src.mainId)}
-      <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src)}>
-        <div class="sub-menu-header-row">
-          <button
-            class="sub-menu-header sub-menu-header--toggle"
-            class:is-disabled={!leftEnabledLayers[src.key]}
-            type="button"
-            title="{src.label} — global visibility"
-            on:click={() => toggleLayerEnabled('left', src.key)}
-          >
-            <span class="sub-menu-swatch" style="--c:{src.color}"></span>
-            <span class="sub-menu-title-wrap">
-              <span class="sub-menu-title">{src.label}</span>
-              <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
-            </span>
-          </button>
-          <input
-            class="sub-menu-checkbox-input"
-            type="checkbox"
-            checked={leftEnabledLayers[src.key]}
-            aria-label="{src.label} layer visible"
-            on:click|stopPropagation
-            on:change={() => toggleLayerEnabled('left', src.key)}
-          />
-          <div class="sub-menu-info-anchor">
-            <button
-              class="sub-menu-info-button"
-              type="button"
-              aria-label="{src.label} info"
-              title="{src.label} info"
-              aria-expanded={isInfoOpen(infoKey('left', src.key))}
-              on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
-            >i</button>
-            {#if isInfoOpen(infoKey('left', src.key))}
-              <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
-                <p class="sub-menu-info-text">{layerInfo}</p>
-                {#if layerSource}
-                  <div class="sub-menu-source-block">
-                    <span class="sub-menu-source-label">Source</span>
-                    <a
-                      class="sub-menu-source-link"
-                      href={layerSource.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={layerSource.url}
-                    >{layerSource.label}</a>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        </div>
-        {#if src.sublayers.length > 1}
-          <div class="sub-menu-pills">
-            {#each src.sublayers as sub}
-              <button
-                class="sub-pill"
-                class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
-                class:is-layer-disabled={!leftEnabledLayers[src.key]}
-                style="--c:{src.color}"
-                type="button"
-                title="{src.label} — {sub.label}"
-                on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}
-              >{sub.label}</button>
-            {/each}
-          </div>
-        {/if}
-      </section>
-    {/each}
-  </div>
-{/if}
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && layerInfoModalKey) { layerInfoModalKey = null; } }} />
 
 <div class="timeslider">
   <div class="ts-track" bind:clientWidth={trackWidth}>
+    {#if dualPaneEnabled}
+      {#each visiblePanes as pane}
+        <span
+          class="ts-scrub-indicator"
+          class:ts-scrub-indicator--right={pane.id === 'right'}
+          class:is-disabled={disabledPane === pane.id}
+          style={scrubberIndicatorStyle(yearForPane(pane.id), pane.color, PANE_META[pane.id].badgeBg, PANE_META[pane.id].badgeText)}
+          aria-hidden="true"
+        ></span>
+        <span
+          class="scrubber-label"
+          class:scrubber-label--right={pane.id === 'right'}
+          class:is-disabled={disabledPane === pane.id}
+          style={scrubberIndicatorStyle(yearForPane(pane.id), pane.color, PANE_META[pane.id].badgeBg, PANE_META[pane.id].badgeText)}
+          role="slider"
+          tabindex={disabledPane === pane.id ? -1 : 0}
+          aria-valuemin={axisStart}
+          aria-valuemax={axisEnd}
+          aria-valuenow={Math.round(pane.year)}
+          aria-label={`${pane.label} timeline year`}
+          on:pointerdown={(event) => startKnobDrag(pane.id, event)}
+        >&lt; {Math.round(pane.year)} &gt;</span>
+      {/each}
+    {:else}
+      <span
+        class="ts-scrub-indicator ts-scrub-indicator--single"
+        style={scrubberIndicatorStyle(sliderYear)}
+        aria-hidden="true"
+      ></span>
+      <span
+        class="scrubber-label scrubber-label--single"
+        style={scrubberIndicatorStyle(sliderYear)}
+        role="slider"
+        tabindex="0"
+        aria-valuemin={axisStart}
+        aria-valuemax={axisEnd}
+        aria-valuenow={Math.round(sliderYear)}
+        aria-label="Timeline year"
+        on:pointerdown={(event) => startKnobDrag('left', event)}
+      >&lt; {Math.round(sliderYear)} &gt;</span>
+    {/if}
+
     <button
       class="ts-track-hitarea"
       type="button"
@@ -982,70 +909,303 @@
     <div class="ts-row ts-row--lane-1">
       {#each lane1 as src}
         {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-        <button
-          class="source-block"
-          class:is-disabled={!enabled}
-          class:is-current={sourceIsCurrentForKey(src.key)}
-          class:is-compare-overlap={sourceHasOverlap(src.key)}
-          class:is-loading={loadingLayers[src.mainId]}
-          style={sourceBlockStyle(src)}
-          type="button"
-          title={`${src.label} · ${src.start}–${src.end}`}
-          aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
-          use:measureSourceLabel={src}
-          on:click={(e) => jumpToSource(src, e)}
-          on:mouseenter={(e) => onPillEnter(src, e)}
-          on:mouseleave={onPillLeave}
-        >
-          <span class="block-label">{sourceDisplayLabel(src)}</span>
-          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
-        </button>
+        <div class="source-pill-wrap" role="group" aria-label={`${src.label} timeline controls`} class:is-open={openMenuKey === src.key} style={sourceBlockStyle(src)} on:mouseenter={cancelCloseMenu} on:mouseleave={() => scheduleCloseMenu(src.key)}>
+          <button
+            class="source-block"
+            class:is-disabled={!enabled}
+            class:is-current={sourceIsCurrentForKey(src.key)}
+            class:is-compare-overlap={sourceHasOverlap(src.key)}
+            class:is-loading={loadingLayers[src.mainId]}
+            type="button"
+            title={`${src.label} · ${src.start}–${src.end}`}
+            aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+            use:measureSourceLabel={src}
+            on:click={(e) => jumpToSource(src, e)}
+            on:mouseenter={(e) => onPillEnter(src, e)}
+            on:mouseleave={onPillLeave}
+          >
+            <span class="block-label">{sourceDisplayLabel(src)}</span>
+            <span class="block-label-measure" aria-hidden="true">{src.label}</span>
+          </button>
+          <button
+            class="source-folder-tab"
+            class:is-open={openMenuKey === src.key}
+            type="button"
+            aria-label={`Open ${src.label} sublayers`}
+            aria-expanded={openMenuKey === src.key}
+            on:click={(event) => toggleMenu(event, src.key)}
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 7.5l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          {#if openMenuKey === src.key}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
+            <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
+              {#if dualPaneEnabled}
+                <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input
+                        class="sub-menu-checkbox-input"
+                        type="checkbox"
+                        checked={leftEnabledLayers[src.key]}
+                        aria-label="{src.label} layer visible in left pane"
+                        on:click|stopPropagation
+                        on:change={() => toggleLayerEnabled('left', src.key)}
+                      />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button
+                          class="sub-menu-info-button"
+                          type="button"
+                          aria-label="{src.label} info"
+                          title="{src.label} info"
+                          aria-expanded={isInfoOpen(infoKey('left', src.key))}
+                          on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
+                        >i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input
+                        class="sub-menu-checkbox-input"
+                        type="checkbox"
+                        checked={rightEnabledLayers[src.key]}
+                        aria-label="{src.label} layer visible in right pane"
+                        on:click|stopPropagation
+                        on:change={() => toggleLayerEnabled('right', src.key)}
+                      />
+                    </label>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-compare-grid">
+                      {#each src.sublayers as sub}
+                        <div class="sub-menu-compare-row">
+                          <span class="sub-menu-compare-name">{sub.label}</span>
+                          <div class="sub-menu-compare-controls sub-menu-compare-controls--split" style="--c:{src.color}">
+                            <button
+                              class="sub-pill sub-pill--split sub-pill--split-left"
+                              class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
+                              class:is-layer-disabled={!leftEnabledLayers[src.key]}
+                              type="button"
+                              title="{src.label} — Left {sub.label}"
+                              on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}
+                            >{sub.label}</button>
+                            <button
+                              class="sub-pill sub-pill--split sub-pill--split-right"
+                              class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)}
+                              class:is-layer-disabled={!rightEnabledLayers[src.key]}
+                              type="button"
+                              title="{src.label} — Right {sub.label}"
+                              on:click={() => toggleSublayer('right', src.key, sub.subId, sub.id)}
+                            >{sub.label}</button>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {:else}
+                <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-header-row">
+                    <button
+                      class="sub-menu-header sub-menu-header--toggle"
+                      class:is-disabled={!leftEnabledLayers[src.key]}
+                      type="button"
+                      title="{src.label} — global visibility"
+                      on:click={() => toggleLayerEnabled('left', src.key)}
+                    >
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                    </button>
+                    <input
+                      class="sub-menu-checkbox-input"
+                      type="checkbox"
+                      checked={leftEnabledLayers[src.key]}
+                      aria-label="{src.label} layer visible in left pane"
+                      on:click|stopPropagation
+                      on:change={() => toggleLayerEnabled('left', src.key)}
+                    />
+                    <div class="sub-menu-info-anchor">
+                      <button
+                        class="sub-menu-info-button"
+                        type="button"
+                        aria-label="{src.label} info"
+                        title="{src.label} info"
+                        aria-expanded={isInfoOpen(infoKey('left', src.key))}
+                        on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
+                      >i</button>
+                      {#if isInfoOpen(infoKey('left', src.key))}
+                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-pills">
+                      {#each src.sublayers as sub}
+                        <button
+                          class="sub-pill"
+                          class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)}
+                          class:is-layer-disabled={!leftEnabledLayers[src.key]}
+                          style="--c:{src.color}"
+                          type="button"
+                          title="{src.label} — {sub.label}"
+                          on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}
+                        >{sub.label}</button>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {/if}
+            </div>
+          {/if}
+        </div>
       {/each}
     </div>
 
     <div class="ts-row ts-row--lane-2">
       {#each lane2 as src}
         {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-        <button
-          class="source-block"
-          class:is-disabled={!enabled}
-          class:is-current={sourceIsCurrentForKey(src.key)}
-          class:is-compare-overlap={sourceHasOverlap(src.key)}
-          class:is-loading={loadingLayers[src.mainId]}
-          style={sourceBlockStyle(src)}
-          type="button"
-          title={`${src.label} · ${src.start}–${src.end}`}
-          aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
-          use:measureSourceLabel={src}
-          on:click={(e) => jumpToSource(src, e)}
-          on:mouseenter={(e) => onPillEnter(src, e)}
-          on:mouseleave={onPillLeave}
-        >
-          <span class="block-label">{sourceDisplayLabel(src)}</span>
-          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
-        </button>
+        <div class="source-pill-wrap" role="group" aria-label={`${src.label} timeline controls`} class:is-open={openMenuKey === src.key} style={sourceBlockStyle(src)} on:mouseenter={cancelCloseMenu} on:mouseleave={() => scheduleCloseMenu(src.key)}>
+          <button
+            class="source-block"
+            class:is-disabled={!enabled}
+            class:is-current={sourceIsCurrentForKey(src.key)}
+            class:is-compare-overlap={sourceHasOverlap(src.key)}
+            class:is-loading={loadingLayers[src.mainId]}
+            type="button"
+            title={`${src.label} · ${src.start}–${src.end}`}
+            aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+            use:measureSourceLabel={src}
+            on:click={(e) => jumpToSource(src, e)}
+            on:mouseenter={(e) => onPillEnter(src, e)}
+            on:mouseleave={onPillLeave}
+          >
+            <span class="block-label">{sourceDisplayLabel(src)}</span>
+            <span class="block-label-measure" aria-hidden="true">{src.label}</span>
+          </button>
+          <button
+            class="source-folder-tab"
+            class:is-open={openMenuKey === src.key}
+            type="button"
+            aria-label={`Open ${src.label} sublayers`}
+            aria-expanded={openMenuKey === src.key}
+            on:click={(event) => toggleMenu(event, src.key)}
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 7.5l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          {#if openMenuKey === src.key}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
+            <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
+              {#if dualPaneEnabled}
+                <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
+                    </label>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-compare-grid">
+                      {#each src.sublayers as sub}
+                        <div class="sub-menu-compare-row">
+                          <span class="sub-menu-compare-name">{sub.label}</span>
+                          <div class="sub-menu-compare-controls sub-menu-compare-controls--split" style="--c:{src.color}">
+                            <button class="sub-pill sub-pill--split sub-pill--split-left" class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)} class:is-layer-disabled={!leftEnabledLayers[src.key]} type="button" title="{src.label} — Left {sub.label}" on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                            <button class="sub-pill sub-pill--split sub-pill--split-right" class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)} class:is-layer-disabled={!rightEnabledLayers[src.key]} type="button" title="{src.label} — Right {sub.label}" on:click={() => toggleSublayer('right', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {:else}
+                <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-header-row">
+                    <button class="sub-menu-header sub-menu-header--toggle" class:is-disabled={!leftEnabledLayers[src.key]} type="button" title="{src.label} — global visibility" on:click={() => toggleLayerEnabled('left', src.key)}>
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                    </button>
+                    <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                    <div class="sub-menu-info-anchor">
+                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                      {#if isInfoOpen(infoKey('left', src.key))}
+                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-pills">
+                      {#each src.sublayers as sub}
+                        <button class="sub-pill" class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)} class:is-layer-disabled={!leftEnabledLayers[src.key]} style="--c:{src.color}" type="button" title="{src.label} — {sub.label}" on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {/if}
+            </div>
+          {/if}
+        </div>
       {/each}
     </div>
 
     <div class="ts-axis-line">
-      {#if dualPaneEnabled}
-        {#each visiblePanes as pane}
-          <span
-            class="scrubber-label"
-            class:scrubber-label--right={pane.id === 'right'}
-            class:is-disabled={disabledPane === pane.id}
-            style="left:{scrubberCenterPx(yearForPane(pane.id))}px;--pane-color:{pane.color};--pane-badge-bg:{PANE_META[pane.id].badgeBg};--pane-badge-text:{PANE_META[pane.id].badgeText}"
-            aria-hidden="true"
-          >{pane.label} · {Math.round(pane.year)}</span>
-        {/each}
-      {:else}
-        <span
-          class="scrubber-label scrubber-label--single"
-          style="left:{scrubberCenterPx(sliderYear)}px"
-          aria-hidden="true"
-        >{Math.round(sliderYear)}</span>
-      {/if}
-
       {#each ticks as tick}
         <span class="ts-tick ts-tick--{tick.kind}" style="left:{pct(tick.year,axisStart,axisSpan)}">
           <span class="ts-tick-label">{tick.year}</span>
@@ -1098,48 +1258,236 @@
     <div class="ts-row ts-row--lane-3">
       {#each lane3 as src}
         {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-        <button
-          class="source-block"
-          class:is-disabled={!enabled}
-          class:is-current={sourceIsCurrentForKey(src.key)}
-          class:is-compare-overlap={sourceHasOverlap(src.key)}
-          class:is-loading={loadingLayers[src.mainId]}
-          style={sourceBlockStyle(src)}
-          type="button"
-          title={`${src.label} · ${src.start}–${src.end}`}
-          aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
-          use:measureSourceLabel={src}
-          on:click={(e) => jumpToSource(src, e)}
-          on:mouseenter={(e) => onPillEnter(src, e)}
-          on:mouseleave={onPillLeave}
-        >
-          <span class="block-label">{sourceDisplayLabel(src)}</span>
-          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
-        </button>
+        <div class="source-pill-wrap" role="group" aria-label={`${src.label} timeline controls`} class:is-open={openMenuKey === src.key} style={sourceBlockStyle(src)} on:mouseenter={cancelCloseMenu} on:mouseleave={() => scheduleCloseMenu(src.key)}>
+          <button
+            class="source-block"
+            class:is-disabled={!enabled}
+            class:is-current={sourceIsCurrentForKey(src.key)}
+            class:is-compare-overlap={sourceHasOverlap(src.key)}
+            class:is-loading={loadingLayers[src.mainId]}
+            type="button"
+            title={`${src.label} · ${src.start}–${src.end}`}
+            aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+            use:measureSourceLabel={src}
+            on:click={(e) => jumpToSource(src, e)}
+            on:mouseenter={(e) => onPillEnter(src, e)}
+            on:mouseleave={onPillLeave}
+          >
+            <span class="block-label">{sourceDisplayLabel(src)}</span>
+            <span class="block-label-measure" aria-hidden="true">{src.label}</span>
+          </button>
+          <button
+            class="source-folder-tab"
+            class:is-open={openMenuKey === src.key}
+            type="button"
+            aria-label={`Open ${src.label} sublayers`}
+            aria-expanded={openMenuKey === src.key}
+            on:click={(event) => toggleMenu(event, src.key)}
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 7.5l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          {#if openMenuKey === src.key}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
+            <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
+              {#if dualPaneEnabled}
+                <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
+                    </label>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-compare-grid">
+                      {#each src.sublayers as sub}
+                        <div class="sub-menu-compare-row">
+                          <span class="sub-menu-compare-name">{sub.label}</span>
+                          <div class="sub-menu-compare-controls sub-menu-compare-controls--split" style="--c:{src.color}">
+                            <button class="sub-pill sub-pill--split sub-pill--split-left" class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)} class:is-layer-disabled={!leftEnabledLayers[src.key]} type="button" title="{src.label} — Left {sub.label}" on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                            <button class="sub-pill sub-pill--split sub-pill--split-right" class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)} class:is-layer-disabled={!rightEnabledLayers[src.key]} type="button" title="{src.label} — Right {sub.label}" on:click={() => toggleSublayer('right', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {:else}
+                <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-header-row">
+                    <button class="sub-menu-header sub-menu-header--toggle" class:is-disabled={!leftEnabledLayers[src.key]} type="button" title="{src.label} — global visibility" on:click={() => toggleLayerEnabled('left', src.key)}>
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                    </button>
+                    <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                    <div class="sub-menu-info-anchor">
+                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                      {#if isInfoOpen(infoKey('left', src.key))}
+                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-pills">
+                      {#each src.sublayers as sub}
+                        <button class="sub-pill" class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)} class:is-layer-disabled={!leftEnabledLayers[src.key]} style="--c:{src.color}" type="button" title="{src.label} — {sub.label}" on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {/if}
+            </div>
+          {/if}
+        </div>
       {/each}
     </div>
 
     <div class="ts-row ts-row--lane-4">
       {#each lane4 as src}
         {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-        <button
-          class="source-block"
-          class:is-disabled={!enabled}
-          class:is-current={sourceIsCurrentForKey(src.key)}
-          class:is-compare-overlap={sourceHasOverlap(src.key)}
-          class:is-loading={loadingLayers[src.mainId]}
-          style={sourceBlockStyle(src)}
-          type="button"
-          title={`${src.label} · ${src.start}–${src.end}`}
-          aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
-          use:measureSourceLabel={src}
-          on:click={(e) => jumpToSource(src, e)}
-          on:mouseenter={(e) => onPillEnter(src, e)}
-          on:mouseleave={onPillLeave}
-        >
-          <span class="block-label">{sourceDisplayLabel(src)}</span>
-          <span class="block-label-measure" aria-hidden="true">{src.label}</span>
-        </button>
+        <div class="source-pill-wrap" role="group" aria-label={`${src.label} timeline controls`} class:is-open={openMenuKey === src.key} style={sourceBlockStyle(src)} on:mouseenter={cancelCloseMenu} on:mouseleave={() => scheduleCloseMenu(src.key)}>
+          <button
+            class="source-block"
+            class:is-disabled={!enabled}
+            class:is-current={sourceIsCurrentForKey(src.key)}
+            class:is-compare-overlap={sourceHasOverlap(src.key)}
+            class:is-loading={loadingLayers[src.mainId]}
+            type="button"
+            title={`${src.label} · ${src.start}–${src.end}`}
+            aria-label={`Jump to ${src.label} (${src.start}–${src.end})`}
+            use:measureSourceLabel={src}
+            on:click={(e) => jumpToSource(src, e)}
+            on:mouseenter={(e) => onPillEnter(src, e)}
+            on:mouseleave={onPillLeave}
+          >
+            <span class="block-label">{sourceDisplayLabel(src)}</span>
+            <span class="block-label-measure" aria-hidden="true">{src.label}</span>
+          </button>
+          <button
+            class="source-folder-tab"
+            class:is-open={openMenuKey === src.key}
+            type="button"
+            aria-label={`Open ${src.label} sublayers`}
+            aria-expanded={openMenuKey === src.key}
+            on:click={(event) => toggleMenu(event, src.key)}
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 7.5l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          {#if openMenuKey === src.key}
+            {@const layerMeta = mainLayerInfoCard(src.mainId, src.label)}
+            <div class="source-menu-popover" transition:fade={{ duration: 140 }}>
+              {#if dualPaneEnabled}
+                <section class="sub-menu sub-menu--compare" style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-compare-header">
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--left">
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                      <span class="sub-menu-pane-check-label">Left</span>
+                    </label>
+                    <div class="sub-menu-compare-info">
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                      <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        {#if isInfoOpen(infoKey('left', src.key))}
+                          <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                            <div class="sub-menu-info-title">{layerMeta.title}</div>
+                            {#each layerMeta.info as paragraph}
+                              <p class="sub-menu-info-text">{paragraph}</p>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                    <label class="sub-menu-pane-check sub-menu-pane-check--compare sub-menu-pane-check--right">
+                      <span class="sub-menu-pane-check-label">Right</span>
+                      <input class="sub-menu-checkbox-input" type="checkbox" checked={rightEnabledLayers[src.key]} aria-label="{src.label} layer visible in right pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('right', src.key)} />
+                    </label>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-compare-grid">
+                      {#each src.sublayers as sub}
+                        <div class="sub-menu-compare-row">
+                          <span class="sub-menu-compare-name">{sub.label}</span>
+                          <div class="sub-menu-compare-controls sub-menu-compare-controls--split" style="--c:{src.color}">
+                            <button class="sub-pill sub-pill--split sub-pill--split-left" class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)} class:is-layer-disabled={!leftEnabledLayers[src.key]} type="button" title="{src.label} — Left {sub.label}" on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                            <button class="sub-pill sub-pill--split sub-pill--split-right" class:is-disabled={!isSublayerEnabled('right', src.key, sub.id)} class:is-layer-disabled={!rightEnabledLayers[src.key]} type="button" title="{src.label} — Right {sub.label}" on:click={() => toggleSublayer('right', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {:else}
+                <section class="sub-menu" class:is-layer-disabled={!leftEnabledLayers[src.key]} style={sourceMenuStyle(src, 'left')}>
+                  <div class="sub-menu-header-row">
+                    <button class="sub-menu-header sub-menu-header--toggle" class:is-disabled={!leftEnabledLayers[src.key]} type="button" title="{src.label} — global visibility" on:click={() => toggleLayerEnabled('left', src.key)}>
+                      <span class="sub-menu-swatch" style="--c:{src.color}"></span>
+                      <span class="sub-menu-title-wrap">
+                        <span class="sub-menu-title">{src.label}</span>
+                        <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
+                      </span>
+                    </button>
+                    <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
+                    <div class="sub-menu-info-anchor">
+                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                      {#if isInfoOpen(infoKey('left', src.key))}
+                        <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
+                          <div class="sub-menu-info-title">{layerMeta.title}</div>
+                          {#each layerMeta.info as paragraph}
+                            <p class="sub-menu-info-text">{paragraph}</p>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                  {#if src.sublayers.length > 1}
+                    <div class="sub-menu-pills">
+                      {#each src.sublayers as sub}
+                        <button class="sub-pill" class:is-disabled={!isSublayerEnabled('left', src.key, sub.id)} class:is-layer-disabled={!leftEnabledLayers[src.key]} style="--c:{src.color}" type="button" title="{src.label} — {sub.label}" on:click={() => toggleSublayer('left', src.key, sub.subId, sub.id)}>{sub.label}</button>
+                      {/each}
+                    </div>
+                  {/if}
+                </section>
+              {/if}
+            </div>
+          {/if}
+        </div>
       {/each}
     </div>
   </div>
@@ -1152,35 +1500,50 @@
   </div>
 {/if}
 
+{#if layerInfoModalKey}
+  {@const [paneStr, mainId] = layerInfoModalKey.split(':') as [string, string]}
+  {@const layerMeta = mainId ? layerMetadataByMainId[mainId] : null}
+  {#if layerMeta}
+    <div
+      class="layer-info-backdrop"
+      role="button"
+      tabindex="0"
+      aria-label="Close layer information"
+      on:click={(event) => {
+        if (event.target === event.currentTarget) layerInfoModalKey = null;
+      }}
+      on:keydown={(event) => {
+        if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          layerInfoModalKey = null;
+        }
+      }}
+    >
+      <div
+        class="layer-info-modal ui-panel-overlay"
+        role="dialog"
+        tabindex="-1"
+        aria-modal="true"
+        aria-label={layerMeta.title}
+      >
+        <div class="layer-info-head">
+          <div>
+            <div class="ui-label">Layer Info</div>
+            <h2>{layerMeta.title}</h2>
+          </div>
+          <button class="ui-btn layer-info-close" type="button" on:click={() => (layerInfoModalKey = null)}>Close</button>
+        </div>
+        <div class="layer-info-body">
+          {#each layerMeta.info as paragraph}
+            <p>{paragraph}</p>
+          {/each}
+        </div>
+      </div>
+    </div>
+  {/if}
+{/if}
+
 <style>
-  .ts-sub-panel {
-    position: fixed;
-    top: 12px;
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    padding: 10px;
-    background: var(--surface-floating);
-    border: 0.5px solid var(--surface-outline-soft);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
-    pointer-events: all;
-  }
-
-  .ts-sub-panel--left {
-    left: 12px;
-    --pane-border: var(--pane-left-color);
-    --pane-header-tint: var(--pane-left-panel-tint);
-  }
-
-  .ts-sub-panel--right {
-    right: 12px;
-    --pane-border: var(--pane-right-color);
-    --pane-header-tint: var(--pane-right-panel-tint);
-  }
-
   .sub-menu {
     position: relative;
     display: flex;
@@ -1192,6 +1555,10 @@
     border: 1px solid var(--sub-menu-border);
     border-radius: var(--radius-md);
     box-shadow: inset 0 0 0 1px var(--surface-inset);
+  }
+
+  .sub-menu--compare {
+    min-width: 248px;
   }
 
   .sub-menu.is-layer-disabled {
@@ -1217,6 +1584,100 @@
     grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px;
     align-items: stretch;
+  }
+
+  .sub-menu-header-toggles {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sub-menu-compare-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin: -10px -10px 0;
+    padding: 10px;
+    background: var(--pane-header-tint, transparent);
+    border-radius: calc(var(--radius-md) - 2px) calc(var(--radius-md) - 2px) 0 0;
+    overflow: visible;
+    position: relative;
+  }
+
+  .sub-menu-compare-header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      var(--sub-menu-header-overlay),
+      var(--pattern);
+    background-size: auto, var(--pattern-size);
+    background-position: center, center;
+    opacity: 0.9;
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  .sub-menu-compare-info {
+    grid-column: 2;
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .sub-menu-pane-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .sub-menu-pane-check--left {
+    grid-column: 1;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-left-color) 18%, transparent);
+  }
+
+  .sub-menu-pane-check--right {
+    grid-column: 3;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-right-color) 18%, transparent);
+  }
+
+  .sub-menu-pane-check--compare {
+    justify-self: start;
+    position: relative;
+    z-index: 1;
+  }
+
+  .sub-menu-pane-check--compare.sub-menu-pane-check--left {
+    grid-column: 1;
+  }
+
+  .sub-menu-pane-check--compare.sub-menu-pane-check--right {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .sub-menu--compare .sub-menu-pane-check--left,
+  .sub-menu--compare .sub-menu-pane-check--right {
+    box-shadow: none;
+  }
+
+  .sub-menu-pane-check-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
   }
 
   .sub-menu-header--toggle {
@@ -1291,6 +1752,11 @@
     gap: 2px;
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .sub-menu--compare .sub-menu-title-wrap {
+    justify-content: center;
+    flex: 0 1 auto;
   }
 
   .sub-menu-title-meta {
@@ -1373,8 +1839,15 @@
 
   .sub-menu-info-anchor {
     position: relative;
+    display: flex;
+    align-items: center;
     align-self: center;
     z-index: 4;
+    flex: 0 0 auto;
+  }
+
+  .sub-menu-info-anchor--compare {
+    margin-left: 0;
   }
 
   .sub-menu-info-card {
@@ -1410,41 +1883,65 @@
     margin: 0;
   }
 
-  .sub-menu-source-block {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid color-mix(in srgb, var(--sub-menu-note-inset) 80%, transparent);
-  }
-
-  .sub-menu-source-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
+  .sub-menu-info-title {
+    margin: 0 0 6px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
   }
 
-  .sub-menu-source-link {
-    color: var(--text-primary);
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
-    word-break: break-word;
-  }
-
-  .sub-menu-source-link:hover,
-  .sub-menu-source-link:focus-visible {
-    color: color-mix(in srgb, var(--text-primary) 88%, black);
-  }
-
   .sub-menu-pills {
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .sub-menu-compare-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sub-menu-compare-row {
+    display: block;
+    gap: 0;
+    align-items: center;
+  }
+
+  .sub-menu-compare-name {
+    display: none;
+  }
+
+  .sub-menu-compare-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .sub-menu-compare-controls--split {
+    gap: 0;
+    border-radius: var(--radius-xs);
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 80%, transparent) inset,
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+
+  .sub-pill--split {
+    border-radius: 0;
+    box-shadow: none;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .sub-pill--split-left {
+    border-right: 1px solid color-mix(in srgb, var(--text-on-accent) 22%, transparent);
+  }
+
+  .sub-pill--split-right {
+    border-left: 1px solid color-mix(in srgb, black 12%, transparent);
   }
 
   .sub-menu-disabled-note {
@@ -1528,6 +2025,7 @@
     position: relative;
     display: flex;
     flex-direction: column;
+    overflow: visible;
   }
 
   .ts-track-hitarea {
@@ -1550,7 +2048,7 @@
   .ts-row {
     position: relative;
     overflow: visible;
-    z-index: 2;
+    z-index: 30;
     pointer-events: none;
   }
 
@@ -1563,10 +2061,10 @@
 
   .source-block {
     position: absolute;
-    top: 0;
+    top: 16px;
+    right: 0;
     bottom: 0;
-    width: var(--pill-width);
-    min-width: var(--pill-min-width);
+    left: 0;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -1580,13 +2078,118 @@
     appearance: none;
     z-index: 1;
     overflow: visible;
-    padding: 0 7px;
+    padding: 0 34px 0 8px;
     margin: 0;
     pointer-events: auto;
     transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease, box-shadow 200ms ease;
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset,
       0 5px 12px rgba(0, 0, 0, 0.10);
+  }
+
+  .source-pill-wrap {
+    position: absolute;
+    top: -16px;
+    bottom: 0;
+    width: var(--pill-width);
+    min-width: var(--pill-min-width);
+    pointer-events: auto;
+  }
+
+  .source-pill-wrap.is-open {
+    z-index: 80;
+  }
+
+  .source-pill-wrap.is-open .source-block {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--c) 70%, white),
+      0 12px 24px rgba(0, 0, 0, 0.18);
+  }
+
+  .source-folder-tab {
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--surface-outline-soft) 80%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--c) 68%, white 32%);
+    color: var(--text-on-accent);
+    box-shadow:
+      0 1px 6px rgba(0, 0, 0, 0.14),
+      0 0 0 1px color-mix(in srgb, white 38%, transparent) inset;
+    cursor: pointer;
+    z-index: 3;
+  }
+
+  .source-folder-tab svg {
+    transition: transform 160ms ease;
+  }
+
+  .source-folder-tab.is-open svg {
+    transform: rotate(180deg);
+  }
+
+  .source-folder-tab.is-open {
+    background: color-mix(in srgb, var(--c) 56%, white 44%);
+    box-shadow:
+      0 1px 6px rgba(0, 0, 0, 0.12),
+      0 0 0 2px color-mix(in srgb, var(--c) 55%, white);
+  }
+
+  .source-menu-popover {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    transform: none;
+    z-index: 90;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: max-content;
+    max-width: min(320px, calc(100vw - 32px));
+    pointer-events: auto;
+  }
+
+  .source-menu-popover::before {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border: 2px dashed color-mix(in srgb, var(--text-primary) 24%, transparent);
+    border-radius: calc(var(--radius-md) + 4px);
+    pointer-events: none;
+  }
+
+  .source-menu-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .source-menu-pane-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    align-self: flex-start;
+    padding: 4px 8px;
+    border-radius: var(--radius-pill);
+  }
+
+  .source-menu-pane-label--left {
+    background: var(--pane-left-badge-bg);
+    color: var(--pane-left-badge-text);
+  }
+
+  .source-menu-pane-label--right {
+    background: var(--pane-right-badge-bg);
+    color: var(--pane-right-badge-text);
   }
 
   .source-block:focus-visible {
@@ -1691,7 +2294,7 @@
 
   .ts-axis-line {
     position: relative;
-    height: 8px;
+    height: 10px;
     background: var(--timeline-track-bg);
     border-radius: var(--radius-pill);
     z-index: 20;
@@ -1703,21 +2306,47 @@
       inset 0 -1px 0 color-mix(in srgb, var(--surface-outline-soft) 90%, transparent);
   }
 
+  .ts-scrub-indicator {
+    position: absolute;
+    top: -22px;
+    bottom: 0;
+    width: 4px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: var(--pane-color);
+    z-index: 21;
+    pointer-events: none;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--surface-raised) 42%, transparent),
+      0 4px 10px color-mix(in srgb, var(--pane-color) 18%, transparent);
+  }
+
+  .ts-scrub-indicator--single {
+    background: var(--text-secondary);
+  }
+
+  .ts-scrub-indicator.is-disabled {
+    opacity: 0.4;
+    filter: saturate(0.18);
+  }
+
 
   .scrubber-label {
     position: absolute;
-    bottom: calc(100% + 43px);
+    top: -34px;
     transform: translateX(-50%);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     color: var(--pane-badge-text);
     background: var(--pane-badge-bg);
-    border: 2px solid var(--scrubber-badge-border);
+    border: 2px solid rgba(24, 18, 10, 0.82);
     border-radius: 99px;
-    padding: 6px 11px;
+    padding: 7px 12px;
     white-space: nowrap;
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: ew-resize;
+    touch-action: none;
     z-index: 24;
     box-shadow:
       0 0 0 2px var(--scrubber-badge-ring),
@@ -1727,30 +2356,30 @@
   .scrubber-label.is-disabled {
     opacity: 0.42;
     filter: saturate(0.18);
+    pointer-events: none;
+    cursor: default;
   }
 
   .scrubber-label--single {
     color: var(--text-secondary);
     background: var(--surface-floating);
-    border-color: var(--surface-outline-soft);
-    border-radius: var(--radius-xs);
-    padding: 3px 8px;
+    border-radius: 999px;
+    padding: 7px 12px;
   }
 
   .scrubber-label--right {
-    bottom: calc(100% + 70px);
+    top: -34px;
   }
 
   .ts-scrubber {
     position: absolute;
     left: 0;
-    top: 50%;
-    height: 64px;
-    transform: translateY(-50%);
+    top: -40px;
+    height: 42px;
     width: 100%;
     margin: 0;
     padding: 0;
-    z-index: 23;
+    z-index: 25;
     cursor: ew-resize;
     -webkit-appearance: none;
     -moz-appearance: none;
@@ -1759,7 +2388,7 @@
     border: none;
     outline: none;
     accent-color: transparent;
-    pointer-events: none;
+    pointer-events: auto;
   }
 
   .ts-scrubber.is-disabled {
@@ -1773,62 +2402,40 @@
 
   .ts-scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 36px;
-    height: 64px;
-    border-radius: 18px;
-    background-color: var(--scrubber-thumb-bg);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='64' viewBox='0 0 36 64'%3E%3Cpath d='M13 32 L8 27 M13 32 L8 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M23 32 L28 27 M23 32 L28 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: center;
-    border: 3.5px solid var(--pane-color);
+    width: 72px;
+    height: 34px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
     cursor: ew-resize;
-    box-shadow:
-      0 14px 28px rgba(0, 0, 0, 0.26),
-      0 0 0 6px var(--scrubber-thumb-ring),
-      0 0 0 1px var(--surface-inset-strong) inset,
-      0 0 0 1px rgba(255, 255, 255, 0.7);
+    box-shadow: none;
     pointer-events: auto;
   }
 
   .ts-scrubber.is-disabled::-webkit-slider-thumb {
     cursor: default;
-    box-shadow:
-      0 4px 10px rgba(0, 0, 0, 0.14),
-      0 0 0 2px var(--surface-inset) inset;
+    box-shadow: none;
   }
 
   .ts-scrubber::-webkit-slider-thumb:hover {
-    box-shadow:
-      0 16px 32px rgba(0, 0, 0, 0.30),
-      0 0 0 7px var(--scrubber-thumb-ring-hover),
-      0 0 0 1px var(--surface-inset-strong) inset,
-      0 0 0 1px rgba(255, 255, 255, 0.78);
+    box-shadow: none;
   }
 
   .ts-scrubber::-moz-range-thumb {
     -moz-appearance: none;
-    width: 36px;
-    height: 64px;
-    border-radius: 18px;
-    background-color: var(--scrubber-thumb-bg);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='64' viewBox='0 0 36 64'%3E%3Cpath d='M13 32 L8 27 M13 32 L8 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M23 32 L28 27 M23 32 L28 37' stroke='%23555555' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: center;
-    border: 3.5px solid var(--pane-color);
+    width: 72px;
+    height: 34px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
     cursor: ew-resize;
-    box-shadow:
-      0 14px 28px rgba(0, 0, 0, 0.26),
-      0 0 0 6px var(--scrubber-thumb-ring),
-      0 0 0 1px var(--surface-inset-strong) inset,
-      0 0 0 1px rgba(255, 255, 255, 0.7);
+    box-shadow: none;
     pointer-events: auto;
   }
 
   .ts-scrubber.is-disabled::-moz-range-thumb {
     cursor: default;
-    box-shadow:
-      0 4px 10px rgba(0, 0, 0, 0.14),
-      0 0 0 2px var(--surface-inset) inset;
+    box-shadow: none;
   }
 
   .ts-scrubber::-moz-focus-outer {
@@ -1840,12 +2447,12 @@
   }
 
   .ts-scrubber::-webkit-slider-runnable-track {
-    height: 64px;
+    height: 42px;
     background: transparent;
   }
 
   .ts-scrubber::-moz-range-track {
-    height: 64px;
+    height: 42px;
     background: transparent;
     border: none;
   }
@@ -1949,5 +2556,87 @@
 
   :global(.pill-hover-tip-range) {
     opacity: 0.65;
+  }
+
+  /* Layer info modal (similar to site-info modal) */
+  .layer-info-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    background: rgba(17, 15, 11, 0.26);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 88px 20px 20px;
+  }
+
+  .layer-info-modal {
+    width: min(760px, calc(100vw - 40px));
+    max-height: min(72vh, 760px);
+    overflow: auto;
+    padding: 22px 24px 20px;
+    color: var(--text-primary);
+    /* Override ui-panel-overlay dark overlay bg with the warm panel surface */
+    background: var(--surface-floating);
+    backdrop-filter: blur(6px);
+    border-color: var(--surface-outline-soft);
+    box-shadow: 0 8px 32px rgba(40, 30, 10, 0.14), 0 2px 6px rgba(40, 30, 10, 0.08);
+  }
+
+  .layer-info-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-ui) 82%, transparent);
+  }
+
+  .layer-info-head h2 {
+    margin: 6px 0 0;
+    font-size: clamp(20px, 1.8vw, 26px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .layer-info-close {
+    flex: 0 0 auto;
+  }
+
+  .layer-info-body {
+    font-family: var(--font-ui);
+  }
+
+  .layer-info-body p {
+    margin: 0 0 14px;
+    max-width: 64ch;
+    font-size: 14px;
+    line-height: 1.68;
+    color: color-mix(in srgb, var(--text-primary) 94%, white 6%);
+  }
+
+  @media (max-width: 700px) {
+    .layer-info-backdrop {
+      padding: 60px 20px 20px;
+    }
+
+    .layer-info-modal {
+      width: min(100vw - 24px, 760px);
+      max-height: min(78vh, 760px);
+      padding: 18px 18px 16px;
+    }
+
+    .layer-info-head {
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+    }
+
+    .layer-info-head h2 {
+      font-size: 20px;
+    }
   }
 </style>
