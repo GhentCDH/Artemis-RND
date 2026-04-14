@@ -20,7 +20,7 @@
   import {
     loadCompiledIndex, runLayerGroup, removeLayerGroup, parkLayerGroup, clearAllLayerGroups,
     isLayerGroupParked, setLayerGroupOpacity, getLayerGroupLayerIds,
-    resetCompiledIndexCache, resetPaneRuntime, getIiifCacheStats, getLayerGroupId,
+    resetCompiledIndexCache, resetPaneRuntime, getIiifCacheStats, getLayerGroupId, refreshActiveLayerGroups,
     getAllActiveWarpedMaps, getManifestInfoForMapId,
     type LayerInfo, type CompiledIndex, type CompiledRunnerConfig, type LayerRenderStats,
   } from '$lib/artemis/runner';
@@ -165,10 +165,32 @@
 
   function setViewMode(nextMode: ViewMode) {
     viewMode = nextMode;
-    void tick().then(() => {
-      try { map?.resize(); } catch { /* ignore */ }
-      try { rightMap?.resize(); } catch { /* ignore */ }
-    });
+    void syncMapsAfterLayoutChange(nextMode);
+  }
+
+  function waitForAnimationFrame() {
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  async function syncMapsAfterLayoutChange(nextMode: ViewMode) {
+    await tick();
+    await waitForAnimationFrame();
+
+    try { map?.resize(); } catch { /* ignore */ }
+    try { rightMap?.resize(); } catch { /* ignore */ }
+
+    await waitForAnimationFrame();
+
+    try { map?.resize(); } catch { /* ignore */ }
+    try { rightMap?.resize(); } catch { /* ignore */ }
+
+    if (map?.isStyleLoaded()) {
+      await rehydratePaneMap(map, 'main');
+    }
+
+    if (nextMode === 'split' && rightMap?.isStyleLoaded()) {
+      await rehydratePaneMap(rightMap, 'right');
+    }
   }
 
   function toggleSplitMode() {
@@ -1371,6 +1393,7 @@
     });
     rightMap.on('move', () => {
       if (imageCollectionBubbleItem) closeImageCollectionBubble();
+      refreshActiveLayerGroups('right');
       syncCamera('right');
       updateScaleIndicator(rightMap);
     });
@@ -1548,6 +1571,7 @@
 
     const onMapMove = () => {
       if (imageCollectionBubbleItem) closeImageCollectionBubble();
+      refreshActiveLayerGroups('main');
       syncCamera('left');
       updateScaleIndicator(map);
     };

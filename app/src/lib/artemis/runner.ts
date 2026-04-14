@@ -457,6 +457,19 @@ export function getLayerGroupLayerIds(groupId: string, paneId: PaneRuntimeId = "
   return [...(runtime.activeLayersByGroup.get(groupId) ?? runtime.parkedLayersByGroup.get(groupId)?.layerIds ?? [])];
 }
 
+export function refreshActiveLayerGroups(paneId: PaneRuntimeId = "main") {
+  const runtime = getPaneRuntime(paneId);
+  for (const layers of runtime.activeWarpedLayersByGroup.values()) {
+    for (const layer of layers) {
+      try {
+        (layer as any).nativeUpdate?.();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
 export async function clearAllLayerGroups(map: maplibregl.Map, paneId: PaneRuntimeId = "main") {
   await waitForMapReady(map);
   for (const [groupId] of getPaneRuntime(paneId).activeLayersByGroup) {

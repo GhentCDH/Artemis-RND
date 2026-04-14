@@ -32,6 +32,7 @@
 - `FEATURE_FLAGS.debugMenu = false`
 - `Massart/index.json` is loaded separately from the compiled IIIF index.
 - `renderLayers` in `build/index.json` is effectively required by the viewer.
+- `build/index.json` now exposes stable `layerId` values on `layers` and `renderLayers`.
 - Main-layer info/source text is configured in `MAIN_LAYER_INFO` and `MAIN_LAYER_SOURCE`.
 
 ## 5. Decisions
@@ -41,6 +42,8 @@
 - Villaret is connected as WMS-backed raster, not via confirmed WMTS.
 - Sublayers should not have info buttons.
 - Only main layers should have an info button, intended to open a bubble with description plus source link.
+- Runtime-edited viewer metadata should live outside preprocessing output and be loaded directly from the data repo `static/` area.
+- Missing runtime metadata for a `layerId` should warn in development and fall back safely; it must not break the viewer.
 
 ## 6. Todos
 
@@ -106,6 +109,29 @@ Reactivity fix applied (2026-04-03):
 2. Hand off the main-layer info bubble bug to an agent and debug it in the live app, not only via static code inspection.
 3. Re-test pill click isolation in-browser and either fix or remove the current partial implementation.
 4. Once interaction bugs are stable, simplify `Timeslider.svelte` and remove dead experimental code paths.
+
+## 10.1 Data Runtime Join Instructions
+
+- Artemis-RnD-Data now treats `static/` as hand-edited runtime content, not as preprocessing output.
+- `static/Baselayer/` has been moved under that manual content boundary.
+- The viewer should keep loading `build/index.json` for generated layer structure, but load `static/site.json` and `static/layers.json` separately when those files are introduced.
+- `static/site.json` is intentionally simple:
+  - `title`
+  - `info` as an array of paragraphs
+  - `attribution`
+  - `team`
+  - `logos`
+- `static/layers.json` is intentionally simple:
+  - keys are either viewer `mainId` values or compiled IIIF render-layer ids
+  - each entry contains only `title` and `info`
+- For WMTS/WMS/searchable/geojson layers that exist only in viewer config, resolve metadata by `mainId`.
+- For compiled IIIF layers, prefer explicit `renderLayers[].layerId` once `build/index.json` has been regenerated.
+- Until `build/index.json` is regenerated with explicit `layerId`, the viewer should map current IIIF render layers using the compiled-collection-derived ids already seeded in `static/layers.json`.
+- The viewer should render `site.info` by joining paragraphs, and render `team` / `logos` as separate sections rather than folding them into one text blob.
+- If a resolved key has no corresponding entry in `static/layers.json`, log a development warning that names the missing key and visible layer label, then fall back to generated label/default metadata.
+- Updating `static/*.json` should not require rerunning the Artemis-RnD-Data preprocessing pipeline; only the static asset itself should need to change.
+- Existing hardcoded viewer metadata in `app/src/lib/artemis/layerConfig.ts` should be treated as migration targets for this runtime-loaded metadata contract.
+- Important transition note: current published `build/index.json` may not yet contain explicit `layerId`, so the first viewer integration must not assume that field is always present.
 
 ## 10. UI Token Strategy
 
