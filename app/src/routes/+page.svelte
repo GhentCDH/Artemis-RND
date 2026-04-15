@@ -33,8 +33,9 @@
     MAIN_LAYER_ORDER, MAIN_LAYER_META, MAIN_LAYER_LABELS, MAIN_LAYER_INFO,
     MAIN_LAYER_SUBS, SUB_LAYER_DEFS,
     makeInitialMainLayerEnabled, makeInitialSubLayerEnabled,
-    type MainLayerId, type HistCartLayerKey,
+    type MainLayerId,
   } from '$lib/artemis/layerConfig';
+  import type { HistCartLayerKey } from '$lib/artemis/map/mapInit';
   import type {
     ToponymIndexItem, RawToponymIndexItem, ManifestSearchItem,
     IiifMapInfo, ParcelClickInfo, PinnedCard, UILog, MassartItem, PreviewBubbleItem,
@@ -106,7 +107,7 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
-  const DEFAULT_BASE_URL = 'https://ghentcdh.github.io/Artemis-RnD-Data/build';
+  const DEFAULT_BASE_URL = 'https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/dev/build';
   const FEATURE_FLAGS: { startupPreloadScreen: boolean; debugMenu: boolean } = {
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
@@ -134,7 +135,7 @@
   }
 
   function primitiveGeojsonUrl(): string {
-    return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/Primitive/index.geojson`;
+    return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/PrimitiefKadaster/PrimitiefKadasterParcels.geojson`;
   }
 
   function runtimeStaticBaseUrl(): string {
@@ -261,13 +262,24 @@
   }
 
   function resolveLayerMetadataByMainId(rawByKey: Record<string, RuntimeLayerMetadata>): Record<string, RuntimeLayerMetadata> {
+    if (dev) console.log(`[runtime-metadata] resolveLayerMetadataByMainId called with rawByKey keys: ${Object.keys(rawByKey).join(', ')}`);
+
     return Object.fromEntries(
       mainLayerOrder.map((mainId) => {
         const candidates = layerMetadataCandidates(mainId);
+        if (dev) console.log(`[runtime-metadata] mainId="${mainId}" candidates: [${candidates.join(', ')}]`);
+
         const resolved = candidates.map((key) => rawByKey[key]).find(Boolean);
-        if (!resolved && dev) {
-          console.warn(`[runtime-metadata] missing layer metadata key(s)=${candidates.join(', ')} label="${MAIN_LAYER_LABELS[mainId] ?? mainId}"`);
+
+        if (dev) {
+          if (resolved) {
+            const foundKey = candidates.find((key) => rawByKey[key]);
+            console.log(`[runtime-metadata] mainId="${mainId}" resolved with key="${foundKey}"`);
+          } else {
+            console.warn(`[runtime-metadata] mainId="${mainId}" FAILED to resolve - missing layer metadata key(s)=${candidates.join(', ')} label="${MAIN_LAYER_LABELS[mainId] ?? mainId}". Available keys in rawByKey: [${Object.keys(rawByKey).join(', ')}]`);
+          }
         }
+
         return [mainId, resolved ?? fallbackLayerMetadata(mainId)];
       })
     );
@@ -275,19 +287,30 @@
 
   async function loadRuntimeMetadata() {
     const staticBaseUrl = runtimeStaticBaseUrl();
+    if (dev) console.log(`[runtime-metadata] constructed staticBaseUrl="${staticBaseUrl}"`);
+
     if (!staticBaseUrl) {
+      if (dev) console.warn(`[runtime-metadata] staticBaseUrl is empty, using fallback metadata`);
       siteMetadata = normalizeSiteMetadata(null);
       layerMetadataByMainId = resolveLayerMetadataByMainId({});
       return;
     }
 
+    const siteJsonUrl = `${staticBaseUrl}/site.json`;
+    const layersJsonUrl = `${staticBaseUrl}/layers.json?t=${Date.now()}`;
+    if (dev) {
+      console.log(`[runtime-metadata] fetching site.json from "${siteJsonUrl}"`);
+      console.log(`[runtime-metadata] fetching layers.json from "${layersJsonUrl}"`);
+    }
+
     const [siteResult, layerResult] = await Promise.allSettled([
-      fetchRuntimeJson<unknown>(`${staticBaseUrl}/site.json`),
-      fetchRuntimeJson<unknown>(`${staticBaseUrl}/layers.json`),
+      fetchRuntimeJson<unknown>(siteJsonUrl),
+      fetchRuntimeJson<unknown>(layersJsonUrl),
     ]);
 
     const repoRoot = staticBaseUrl.replace(/\/static\/?$/i, '');
     if (siteResult.status === 'fulfilled') {
+      if (dev) console.log(`[runtime-metadata] site.json fetch succeeded`);
       siteMetadata = normalizeSiteMetadata(siteResult.value, repoRoot);
     } else {
       if (dev) console.warn(`[runtime-metadata] site.json unavailable: ${siteResult.reason?.message ?? String(siteResult.reason)}`);
@@ -295,8 +318,14 @@
     }
 
     const rawLayers = layerResult.status === 'fulfilled' ? normalizeLayerMetadataMap(layerResult.value) : {};
-    if (layerResult.status === 'rejected' && dev) {
-      console.warn(`[runtime-metadata] layers.json unavailable: ${layerResult.reason?.message ?? String(layerResult.reason)}`);
+    if (layerResult.status === 'fulfilled') {
+      if (dev) {
+        console.log(`[runtime-metadata] layers.json fetch succeeded`);
+        console.log(`[runtime-metadata] raw layers.json keys: ${Object.keys(layerResult.value as Record<string, unknown>).join(', ')}`);
+        console.log(`[runtime-metadata] normalized rawLayers keys: ${Object.keys(rawLayers).join(', ')}`);
+      }
+    } else {
+      if (dev) console.warn(`[runtime-metadata] layers.json unavailable: ${layerResult.reason?.message ?? String(layerResult.reason)}`);
     }
     layerMetadataByMainId = resolveLayerMetadataByMainId(rawLayers);
   }
@@ -307,16 +336,16 @@
   const MASSART_YEAR_MIN = 1904;
   const MASSART_YEAR_MAX = 1912;
   const MAIN_LAYER_TIMELINE_YEAR: Partial<Record<MainLayerId, number>> = {
-    handdrawn: 1707,
-    frickx: 1712,
-    villaret: 1746,
-    ferraris: 1774,
-    primitief: 1814,
-    vandermaelen: 1850,
-    gereduceerd: 1851,
-    popp: 1860,
-    ngi1873: 1873,
-    ngi1904: 1904,
+    HanddrawnCollection: 1707,
+    Frickx: 1712,
+    Villaret: 1746,
+    Ferraris: 1774,
+    PrimitiefKadaster: 1814,
+    Vandermaelen: 1850,
+    GereduceerdeKadaster: 1851,
+    Popp: 1860,
+    NGI1873: 1873,
+    NGI1904: 1904,
   };
   let massartItems: MassartItem[] = [];
   let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
@@ -324,7 +353,7 @@
 
   async function loadMassartData() {
     try {
-      const url = `${cfg().datasetBaseUrl}/Massart/index.json`;
+      const url = `${cfg().datasetBaseUrl}/Image collections/Massart/index.json`;
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -334,13 +363,24 @@
 
   function onMassartYearChange(e: CustomEvent<{ year: number; pane?: 'left' | 'right' }>) {
     const pane = e.detail.pane ?? 'left';
+    if (dev) console.log(`[timeline-debug] onMassartYearChange — ${pane} pane scrubber moved to year=${e.detail.year}`);
     if (pane === 'right') {
+      const prevYear = rightTimelineYear;
       rightTimelineYear = e.detail.year;
-      if (rightMap?.isStyleLoaded()) updateMassartActiveYear(rightMap, rightTimelineYear, MASSART_LEEWAY);
+      if (dev) console.log(`[timeline-debug] onMassartYearChange(right) — ${prevYear} → ${rightTimelineYear}, mapReady=${rightMap?.isStyleLoaded()}`);
+      if (rightMap?.isStyleLoaded()) {
+        if (dev) console.log(`[timeline-debug] onMassartYearChange(right) — calling updateMassartActiveYear(rightMap, ${rightTimelineYear}, ${MASSART_LEEWAY})`);
+        updateMassartActiveYear(rightMap, rightTimelineYear, MASSART_LEEWAY);
+      }
       return;
     }
+    const prevYear = massartYear;
     massartYear = e.detail.year;
-    if (map?.isStyleLoaded()) updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
+    if (dev) console.log(`[timeline-debug] onMassartYearChange(left) — ${prevYear} → ${massartYear}, mapReady=${map?.isStyleLoaded()}`);
+    if (map?.isStyleLoaded()) {
+      if (dev) console.log(`[timeline-debug] onMassartYearChange(left) — calling updateMassartActiveYear(map, ${massartYear}, ${MASSART_LEEWAY})`);
+      updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
+    }
   }
 
   function onTimelineImageFocus(e: CustomEvent<{ pane: PaneId; title: string; lon: number; lat: number }>) {
@@ -611,26 +651,26 @@
   }
 
   function getIiifInfoForSub(subId: string): UILayerInfo | undefined {
-    if (subId === 'primitief-iiif')  return findIiifLayer('primitief',  'default');
-    if (subId === 'gereduceerd-iiif') return findIiifLayer('gereduceerd', 'default');
-    if (subId === 'handdrawn-iiif')   return findIiifLayer('handdrawn',   'default');
+    if (subId === 'PrimitiefKadaster-iiif')  return findIiifLayer('PrimitiefKadaster',  'default');
+    if (subId === 'GereduceerdeKadaster-iiif') return findIiifLayer('GereduceerdeKadaster', 'default');
+    if (subId === 'HanddrawnCollection-iiif')   return findIiifLayer('HanddrawnCollection',   'default');
     return undefined;
   }
 
   function getMainWmtsKey(mainId: string): HistCartLayerKey | undefined {
-    if (mainId === 'ngi1904')      return 'ngi1904';
-    if (mainId === 'ngi1873')      return 'ngi1873';
-    if (mainId === 'popp')         return 'popp';
-    if (mainId === 'ferraris')     return 'ferraris';
-    if (mainId === 'villaret')     return 'villaret';
-    if (mainId === 'frickx')       return 'frickx';
-    if (mainId === 'vandermaelen') return 'vandermaelen';
+    if (mainId === 'NGI1904')      return 'ngi1904';
+    if (mainId === 'NGI1873')      return 'ngi1873';
+    if (mainId === 'Popp')         return 'popp';
+    if (mainId === 'Ferraris')     return 'ferraris';
+    if (mainId === 'Villaret')     return 'villaret';
+    if (mainId === 'Frickx')       return 'frickx';
+    if (mainId === 'Vandermaelen') return 'vandermaelen';
     return undefined;
   }
 
   function getLandUsageKey(mainId: string): 'ferraris' | 'vandermaelen' | undefined {
-    if (mainId === 'ferraris') return 'ferraris';
-    if (mainId === 'vandermaelen') return 'vandermaelen';
+    if (mainId === 'Ferraris') return 'ferraris';
+    if (mainId === 'Vandermaelen') return 'vandermaelen';
     return undefined;
   }
 
@@ -1023,38 +1063,55 @@
   async function toggleMainLayer(mainId: string, enabled: boolean) {
     if (mainLayerEnabled[mainId] === enabled) {
       log('INFO', `[toggleMain] ${mainId} already ${enabled} — skip`);
+      if (dev) console.log(`[layer-debug] toggleMainLayer(${mainId}, ${enabled}) — already in that state, skip`);
       return;
     }
+    const prevState = mainLayerEnabled[mainId];
     mainLayerEnabled = { ...mainLayerEnabled, [mainId]: enabled };
+    if (dev) console.log(`[layer-debug] toggleMainLayer(${mainId}) — ${prevState} → ${enabled}`, { mainLayerEnabled });
 
     const wmtsKey = getMainWmtsKey(mainId);
     if (wmtsKey) {
       // WMTS tile visibility is owned by the wmts sublayer (ferraris-wmts / vandermaelen-wmts).
       // The sublayerChange events that fire alongside this mainToggle will show/hide the tiles.
+      if (dev) console.log(`[layer-debug] toggleMainLayer(${mainId}) — WMTS layer, applyZOrder (sublayers will handle visibility)`);
       applyZOrder();
       return;
     }
 
     const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
-    if (!iiifSubId) { log('WARN', `[toggleMain] ${mainId} no iiif sublayer`); return; }
+    if (!iiifSubId) {
+      log('WARN', `[toggleMain] ${mainId} no iiif sublayer`);
+      if (dev) console.log(`[layer-debug] toggleMainLayer(${mainId}) — no iiif sublayer found`);
+      return;
+    }
     log('INFO', `[toggleMain] ${mainId} ${enabled ? 'ENABLE' : 'DISABLE'}`);
+    if (dev) console.log(`[layer-debug] toggleMainLayer(${mainId}) — IIIF layer, scheduling sync for iiifSubId=${iiifSubId}`);
     await scheduleIiifMainLayerSync(mainId);
   }
 
   async function toggleSubLayer(subId: string, enabled: boolean) {
     if (subLayerEnabled[subId] === enabled) {
       log('INFO', `[toggleSub] ${subId} already ${enabled} — skip`);
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}, ${enabled}) — already in that state, skip`);
       return;
     }
+    const prevState = subLayerEnabled[subId];
     subLayerEnabled = { ...subLayerEnabled, [subId]: enabled };
+    if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — ${prevState} → ${enabled}`, { subLayerEnabled });
 
     const subDef = SUB_LAYER_DEFS[subId];
-    if (!subDef || subDef.kind === 'searchable') return;
+    if (!subDef || subDef.kind === 'searchable') {
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — not a renderable sublayer (kind=${subDef?.kind}), skip`);
+      return;
+    }
 
     const mainId = Object.keys(MAIN_LAYER_SUBS).find(k => MAIN_LAYER_SUBS[k].includes(subId)) ?? '';
     const opacity = mainLayerOpacity[mainId] ?? 1;
+    if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}, kind=${subDef.kind}) — mainId=${mainId}, opacity=${opacity}`);
 
     if (subDef.kind === 'wmts') {
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — WMTS type, calling setHistCartLayerVisible(${mainId}, ${enabled})`);
       setHistCartLayerVisible(map, mainId as HistCartLayerKey, enabled);
       if (enabled) setHistCartLayerOpacity(map, mainId as HistCartLayerKey, opacity);
       applyZOrder();
@@ -1062,6 +1119,7 @@
     }
     if (subDef.kind === 'wms') {
       const landUsageKey = getLandUsageKey(mainId);
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — WMS type, landUsageKey=${landUsageKey}, enabled=${enabled}`);
       if (landUsageKey) {
         setLandUsageLayerVisible(map, landUsageKey, enabled);
         if (enabled) setLandUsageLayerOpacity(map, landUsageKey, opacity);
@@ -1070,6 +1128,7 @@
       return;
     }
     if (subDef.kind === 'geojson') {
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — GeoJSON type, enabled=${enabled}`);
       if (subId === 'primitief-parcels') {
         setPrimitiveLayerVisible(map, enabled, primitiveGeojsonUrl());
         if (enabled) setPrimitiveLayerOpacity(map, opacity);
@@ -1079,8 +1138,13 @@
     }
 
     // IIIF sublayer
-    if (!getIiifInfoForSub(subId)) { log('WARN', `[toggleSub] ${subId} getIiifInfoForSub returned undefined (layers.length=${layers.length})`); return; }
+    if (!getIiifInfoForSub(subId)) {
+      log('WARN', `[toggleSub] ${subId} getIiifInfoForSub returned undefined (layers.length=${layers.length})`);
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — IIIF but getIiifInfoForSub returned undefined`);
+      return;
+    }
     log('INFO', `[toggleSub] ${subId} ${enabled ? 'ENABLE' : 'DISABLE'} sync`);
+    if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — IIIF type, scheduling sync for mainId=${mainId}`);
     await scheduleIiifMainLayerSync(mainId);
   }
 
@@ -1092,40 +1156,78 @@
     features?: Array<{ id?: string | number; properties?: Record<string, unknown>; geometry?: unknown }>;
   };
 
-  async function loadToponymIndex() {
+  async function loadToponymIndex(buildIndex: CompiledIndex) {
     toponymLoading = true;
     toponymError = null;
     try {
-      const url = `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Toponyms/index.json`;
-      const res = await fetch(url, { redirect: 'follow' });
-      if (!res.ok) throw new Error(`Toponyms index fetch failed (${res.status})`);
+      // Discover available maps from build/index.json domains array
+      // Note: domains is a flat array of map IDs (or nested with .toponyms.maps for future compatibility)
+      const knownMaps = Array.isArray(buildIndex.domains) ? buildIndex.domains : (buildIndex.domains as any)?.toponyms?.maps || [];
 
-      const json = (await res.json()) as ToponymIndexPayload;
-      const rawItems: RawToponymIndexItem[] = Array.isArray(json.items)
-        ? json.items
-        : Array.isArray(json.features)
-          ? json.features.map((f, i) => {
-              const p = (f?.properties ?? {}) as Record<string, unknown>;
-              return {
-                id: typeof f?.id === 'string' ? f.id : undefined,
-                text: typeof p.text === 'string' ? p.text : undefined,
-                textNormalized: typeof p.textNormalized === 'string' ? p.textNormalized : undefined,
-                sourceGroup: typeof p.sourceGroup === 'string' ? p.sourceGroup : undefined,
-                sourceFile: typeof p.sourceFile === 'string' ? p.sourceFile : undefined,
-                mapId: typeof p.mapId === 'string' ? p.mapId : undefined,
-                mapName: typeof p.mapName === 'string' ? p.mapName : undefined,
-                featureIndex: Number.isFinite(p.featureIndex) ? Number(p.featureIndex) : i,
-                lon: asFiniteNumber(p.lon) ?? undefined,
-                lat: asFiniteNumber(p.lat) ?? undefined,
-                centroid: Array.isArray(p.centroid) ? (p.centroid as [number, number]) : undefined,
-                bounds: Array.isArray(p.bounds) ? (p.bounds as [number, number, number, number]) : undefined,
-                geometry: f?.geometry,
-              } as RawToponymIndexItem;
-            })
-          : [];
+      if (!knownMaps || knownMaps.length === 0) {
+        log?.('WARN', 'No toponym maps found in build/index.json domains');
+        toponymIndex = [];
+        return;
+      }
 
-      toponymIndex = rawItems.map(normalizeRawToponym).filter((x): x is ToponymIndexItem => !!x);
-      log('INFO', `Toponyms loaded: ${toponymIndex.length}`);
+      // Fetch all per-map toponym files
+      const allItems: unknown[] = [];
+      const loadedMaps: string[] = [];
+      for (const mapId of knownMaps) {
+        try {
+          // Toponym files use descriptive naming: <mapId>/<mapId>Toponyms.json
+          const url = `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Toponyms/${mapId}/${mapId}Toponyms.json`;
+          const res = await fetch(url, { redirect: 'follow' });
+          if (!res.ok) {
+            log?.('INFO', `No toponyms available for ${mapId} (${res.status})`);
+            continue;
+          }
+
+          const json = (await res.json()) as ToponymIndexPayload;
+          const items: RawToponymIndexItem[] = Array.isArray(json.items)
+            ? json.items
+            : Array.isArray(json.features)
+              ? json.features.map((f, i) => {
+                  const p = (f?.properties ?? {}) as Record<string, unknown>;
+                  return {
+                    id: typeof f?.id === 'string' ? f.id : undefined,
+                    text: typeof p.text === 'string' ? p.text : undefined,
+                    textNormalized: typeof p.textNormalized === 'string' ? p.textNormalized : undefined,
+                    sourceGroup: typeof p.sourceGroup === 'string' ? p.sourceGroup : undefined,
+                    sourceFile: typeof p.sourceFile === 'string' ? p.sourceFile : undefined,
+                    mapId: typeof p.mapId === 'string' ? p.mapId : mapId, // Use mapId from loop if not in data
+                    mapName: typeof p.mapName === 'string' ? p.mapName : undefined,
+                    featureIndex: Number.isFinite(p.featureIndex) ? Number(p.featureIndex) : i,
+                    lon: asFiniteNumber(p.lon) ?? undefined,
+                    lat: asFiniteNumber(p.lat) ?? undefined,
+                    centroid: Array.isArray(p.centroid) ? (p.centroid as [number, number]) : undefined,
+                    bounds: Array.isArray(p.bounds) ? (p.bounds as [number, number, number, number]) : undefined,
+                    geometry: f?.geometry,
+                  } as RawToponymIndexItem;
+                })
+              : [];
+
+          if (items.length > 0) {
+            // Ensure all items from items array also have mapId set from the filename
+            const itemsWithMapId = Array.isArray(json.items)
+              ? items.map(item => ({ ...item, mapId: item.mapId || mapId }))
+              : items;
+            allItems.push(...itemsWithMapId);
+            loadedMaps.push(mapId);
+            log?.('INFO', `Toponyms loaded for ${mapId}: ${items.length} items`);
+          }
+        } catch (err) {
+          // Silently skip maps without toponyms (normal case, not an error)
+          log?.('INFO', `Failed to load toponyms for ${mapId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      toponymIndex = allItems.map(item => normalizeRawToponym(item as RawToponymIndexItem)).filter((x): x is ToponymIndexItem => !!x);
+      if (toponymIndex.length === 0) {
+        log?.('WARN', `Toponyms index unavailable: no items loaded from ${loadedMaps.length} maps`);
+      } else {
+        log?.('INFO', `Total toponyms loaded: ${toponymIndex.length} items from maps: ${loadedMaps.join(', ')}`);
+      }
     } catch (e: any) {
       toponymIndex = [];
       toponymError = e?.message ?? String(e);
@@ -1200,7 +1302,7 @@
         await syncRightPaneState();
       }
 
-      await loadToponymIndex();
+      await loadToponymIndex(index);
     } catch (e: any) {
       manifestSearchIndex = [];
       indexError = e?.message ?? String(e);
@@ -1399,41 +1501,68 @@
 
   async function onTimesliderMainToggle(e: CustomEvent<{ mainId: string; enabled: boolean }>) {
     log('INFO', `[TS→] mainToggle ${e.detail.mainId} enabled=${e.detail.enabled}`);
+    if (dev) console.log(`[layer-debug] onTimesliderMainToggle — Event from Timeslider:`, e.detail);
     await toggleMainLayer(e.detail.mainId, e.detail.enabled);
   }
 
   async function onTimesliderSublayerChange(e: CustomEvent<{ subId: string; enabled: boolean }>) {
     log('INFO', `[TS→] sublayerChange ${e.detail.subId} enabled=${e.detail.enabled}`);
+    if (dev) console.log(`[layer-debug] onTimesliderSublayerChange — Event from Timeslider (left pane):`, e.detail);
     await toggleSubLayer(e.detail.subId, e.detail.enabled);
   }
 
   async function onTimesliderPaneMainToggle(e: CustomEvent<{ pane: PaneId; mainId: string; enabled: boolean }>) {
-    if (e.detail.pane !== 'right') return;
+    if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — Event from Timeslider (${e.detail.pane} pane):`, e.detail);
+    if (e.detail.pane !== 'right') {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — ignoring left pane event`);
+      return;
+    }
     rightMainLayerVisible = { ...rightMainLayerVisible, [e.detail.mainId]: e.detail.enabled };
-    if (!rightMap) return;
+    if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — rightMainLayerVisible updated:`, { [e.detail.mainId]: e.detail.enabled });
+    if (!rightMap) {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — rightMap not ready, skip`);
+      return;
+    }
 
     const wmtsKey = getMainWmtsKey(e.detail.mainId);
     if (wmtsKey) {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — WMTS layer, applyZOrderForPane(right)`);
       applyZOrderForPane(rightMap, 'right');
       return;
     }
 
     const iiifSubId = MAIN_LAYER_SUBS[e.detail.mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
-    if (!iiifSubId) return;
+    if (!iiifSubId) {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — no IIIF sublayer found for ${e.detail.mainId}`);
+      return;
+    }
+    if (dev) console.log(`[layer-debug] onTimesliderPaneMainToggle — scheduling right IIIF sync for mainId=${e.detail.mainId}`);
     await scheduleRightIiifMainLayerSync(e.detail.mainId);
   }
 
   async function onTimesliderPaneSublayerChange(e: CustomEvent<{ pane: PaneId; subId: string; enabled: boolean }>) {
-    if (e.detail.pane !== 'right') return;
+    if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — Event from Timeslider (${e.detail.pane} pane):`, e.detail);
+    if (e.detail.pane !== 'right') {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — ignoring left pane event`);
+      return;
+    }
     rightSubLayerVisible = { ...rightSubLayerVisible, [e.detail.subId]: e.detail.enabled };
-    if (!rightMap) return;
+    if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — rightSubLayerVisible updated:`, { [e.detail.subId]: e.detail.enabled });
+    if (!rightMap) {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — rightMap not ready, skip`);
+      return;
+    }
 
     const subDef = SUB_LAYER_DEFS[e.detail.subId];
-    if (!subDef || subDef.kind === 'searchable') return;
+    if (!subDef || subDef.kind === 'searchable') {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — not a renderable sublayer (kind=${subDef?.kind})`);
+      return;
+    }
     const mainId = Object.keys(MAIN_LAYER_SUBS).find(k => MAIN_LAYER_SUBS[k].includes(e.detail.subId)) ?? '';
     const opacity = mainLayerOpacity[mainId] ?? 1;
 
     if (subDef.kind === 'wmts') {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — WMTS sublayer ${e.detail.subId}, calling setHistCartLayerVisible(right, ${mainId}, ${e.detail.enabled})`);
       setHistCartLayerVisible(rightMap, mainId as HistCartLayerKey, e.detail.enabled);
       if (e.detail.enabled) setHistCartLayerOpacity(rightMap, mainId as HistCartLayerKey, opacity);
       applyZOrderForPane(rightMap, 'right');
@@ -1441,6 +1570,7 @@
     }
     if (subDef.kind === 'wms') {
       const landUsageKey = getLandUsageKey(mainId);
+      if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — WMS sublayer ${e.detail.subId}, landUsageKey=${landUsageKey}, enabled=${e.detail.enabled}`);
       if (landUsageKey) {
         setLandUsageLayerVisible(rightMap, landUsageKey, e.detail.enabled);
         if (e.detail.enabled) setLandUsageLayerOpacity(rightMap, landUsageKey, opacity);
@@ -1449,6 +1579,7 @@
       return;
     }
     if (subDef.kind === 'geojson') {
+      if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — GeoJSON sublayer ${e.detail.subId}, enabled=${e.detail.enabled}`);
       if (e.detail.subId === 'primitief-parcels') {
         setPrimitiveLayerVisible(rightMap, e.detail.enabled, primitiveGeojsonUrl());
         if (e.detail.enabled) setPrimitiveLayerOpacity(rightMap, opacity);
@@ -1457,6 +1588,7 @@
       return;
     }
 
+    if (dev) console.log(`[layer-debug] onTimesliderPaneSublayerChange — IIIF sublayer ${e.detail.subId}, scheduling right IIIF sync for mainId=${mainId}`);
     await scheduleRightIiifMainLayerSync(mainId);
   }
 
