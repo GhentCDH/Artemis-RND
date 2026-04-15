@@ -222,9 +222,19 @@
   }
 
   function paneSourcesForYear(year: number): SourceDef[] {
-    return SOURCES.filter(
+    const visible = SOURCES.filter(
       s => year >= s.start - halfKnobYears && year <= s.end + halfKnobYears
     );
+    if (dev) {
+      const sources = SOURCES.map(s => {
+        const inRange = year >= s.start - halfKnobYears && year <= s.end + halfKnobYears;
+        return `${s.key}(${s.start}-${s.end}):${inRange ? '✓' : '✗'}`;
+      }).join(', ');
+      if (visible.length > 0 || year % 10 === 0) { // Log every 10 years to avoid spam
+        console.log(`[timeline-debug] paneSourcesForYear(${year}): [${sources}] → visible=${visible.map(s => s.key).join(', ')}`);
+      }
+    }
+    return visible;
   }
 
   function setPaneYear(pane: PaneId, year: number, emit = true) {
@@ -835,16 +845,22 @@
     for (const src of SOURCES) {
       const nowVisible = leftActiveVisibility[src.key];
       if (prevVisible[src.key] !== undefined && prevVisible[src.key] !== nowVisible) {
+        if (dev) console.log(`[timeline-debug] Year change detected for ${src.key} (${src.mainId}): ${prevVisible[src.key]} → ${nowVisible} (year=${sliderYear})`);
         dispatch('mainToggle', { mainId: src.mainId, enabled: nowVisible });
         if (!nowVisible) {
+          if (dev) console.log(`[timeline-debug]   Dispatching sublayerChange events to HIDE all sublayers for ${src.key}`);
           for (const sub of src.sublayers) {
+            if (dev) console.log(`[timeline-debug]     Dispatching sublayerChange: ${sub.subId} = false`);
             dispatch('sublayerChange', { subId: sub.subId, enabled: false });
           }
         } else {
+          if (dev) console.log(`[timeline-debug]   Dispatching sublayerChange events to SHOW sublayers for ${src.key}`);
           for (const sub of src.sublayers) {
+            const shouldBeOn = leftSublayerState[src.key]?.[sub.id] ?? sub.defaultOn;
+            if (dev) console.log(`[timeline-debug]     Dispatching sublayerChange: ${sub.subId} = ${shouldBeOn}`);
             dispatch('sublayerChange', {
               subId: sub.subId,
-              enabled: leftSublayerState[src.key]?.[sub.id] ?? sub.defaultOn,
+              enabled: shouldBeOn,
             });
           }
         }
