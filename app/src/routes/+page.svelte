@@ -1256,20 +1256,25 @@
     const out: ManifestSearchItem[] = [];
     const seen = new Set<string>();
     for (const entry of index.index ?? []) {
-      const lon = asFiniteNumber((entry as any).centerLon);
-      const lat = asFiniteNumber((entry as any).centerLat);
-      if (lon === null || lat === null) continue;
       const label = String(entry.label ?? '').trim();
       if (!label) continue;
       const sourceManifestUrl = String(entry.sourceManifestUrl ?? '').trim();
       const compiledManifestPath = String(entry.compiledManifestPath ?? '').trim();
       if (!sourceManifestUrl || !compiledManifestPath) continue;
-      const mapName = sourceLabelByUrl.get(entry.sourceCollectionUrl) || 'IIIF';
+
+      // Coordinates are optional - manifests should be searchable even without georeferencing
+      const lon = asFiniteNumber((entry as any).centerLon);
+      const lat = asFiniteNumber((entry as any).centerLat);
+
+      const mapName = sourceLabelByUrl.get(entry.sourceCollectionUrl) || (entry as any).sourceCollectionLabel || 'IIIF';
       const text = `${mapName} - ${label}`;
       const id = String(entry.manifestAllmapsId ?? '').trim() || compiledManifestPath || sourceManifestUrl;
       if (seen.has(id)) continue;
       seen.add(id);
-      out.push({ id, label, text, textNormalized: normalizeSearchText(text), mapName, sourceManifestUrl, compiledManifestPath, centerLon: lon, centerLat: lat });
+      out.push({
+        id, label, text, textNormalized: normalizeSearchText(text), mapName, sourceManifestUrl, compiledManifestPath,
+        centerLon: lon ?? undefined, centerLat: lat ?? undefined
+      });
     }
     return out;
   }

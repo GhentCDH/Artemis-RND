@@ -53,6 +53,13 @@ export type CompiledIndex = {
   layers: LayerInfo[];
   renderLayers?: LayerInfo[];
   index: CompiledIndexEntry[];
+  domains?: {
+    iiif?: { available: boolean; maps?: string[] };
+    toponyms?: { available: boolean; maps?: string[] };
+    parcels?: { available: boolean; maps?: string[] };
+    imageCollections?: { available: boolean; collections?: any[] };
+  };
+  imageServices?: Record<string, any>;
 };
 
 export type CompiledRunnerConfig = {
@@ -231,15 +238,24 @@ export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<Comp
   return cachedIndex;
 }
 
-export async function loadCanvasInfoIndex(cfg: CompiledRunnerConfig): Promise<Map<string, any>> {
+// Phase 3: Image services are now consolidated into build/index.json.
+// Previously: separate fetch from iiif/info/index.json
+// Now: use buildIndex.imageServices directly in runLayerGroup
+// This reduces HTTP requests at startup by one.
+export async function loadCanvasInfoIndex(cfg: CompiledRunnerConfig, imageServices?: Record<string, any>): Promise<Map<string, any>> {
   if (cachedInfoByServiceUrl) return cachedInfoByServiceUrl;
 
-  let raw: Record<string, any> = {};
-  try {
-    const url = joinUrl(cfg.datasetBaseUrl, "iiif/info/index.json");
-    raw = await fetchJson<Record<string, any>>(url, cfg.fetchTimeoutMs ?? 30000);
-  } catch {
-    // Graceful degradation — fall back to individual info.json fetches.
+  // Use consolidated imageServices from build/index.json if available
+  let raw: Record<string, any> = imageServices || {};
+
+  // Fallback: if no imageServices provided, try to load the old separate file (for compatibility)
+  if (!imageServices || Object.keys(imageServices).length === 0) {
+    try {
+      const url = joinUrl(cfg.datasetBaseUrl, "iiif/info/index.json");
+      raw = await fetchJson<Record<string, any>>(url, cfg.fetchTimeoutMs ?? 30000);
+    } catch {
+      // Graceful degradation — fall back to individual info.json fetches.
+    }
   }
 
   // Index is keyed by image service URL (exact string used to fetch {serviceUrl}/info.json).
@@ -517,10 +533,8 @@ export async function runLayerGroup(opts: {
   await removeLayerGroup(map, groupId, paneId);
   log?.("INFO", `[runLayerGroup] removed stale group label="${layerLabel}" groupId=${groupId}`);
 
-  const [index, infoByServiceUrl] = await Promise.all([
-    loadCompiledIndex(cfg),
-    loadCanvasInfoIndex(cfg)
-  ]);
+  const index = await loadCompiledIndex(cfg);
+  const infoByServiceUrl = await loadCanvasInfoIndex(cfg, index.imageServices);
   const timeout = cfg.fetchTimeoutMs ?? 30000;
   const compiledCollectionUrl = joinUrl(cfg.datasetBaseUrl, layerInfo.compiledCollectionPath);
   log?.("INFO", `[runLayerGroup] fetching compiled collection label="${layerLabel}" url=${compiledCollectionUrl}`);

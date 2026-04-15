@@ -118,7 +118,442 @@ Reactivity fix applied (2026-04-03):
 - A machine-specific IIIF drift/parallax bug was traced to GNOME fractional display scaling on X11, not to Artemis data or annotation content. On Ubuntu 24.04 with NVIDIA (`Quadro RTX 4000`, driver `580.126.09`), a 4K display (`3840x2160` at `100 Hz`) configured at `125%` scale caused Mutter/XRandR to apply an effective transform of about `1.599991`, producing a `6144x3456` framebuffer. In that state, single-view mode showed warped IIIF layers drifting relative to the basemap, while compare mode appeared stable. Setting the display scale back to `100%` fixed the bug immediately without code changes or logout.
 - Practical takeaway: if single-view IIIF layers appear to pan independently of the basemap on one machine only, check `xrandr --verbose` for a non-identity transform and GNOME monitor scaling before debugging Artemis code.
 
-## 10. Next Actions
+## 10. Build/Data Refactor Implementation Guide
+
+**Status**: Refactored and implemented on 2026-04-15. Viewer code updates needed.
+
+**Current Build Output Structure** (what you're consuming):
+```
+build/
+├── index.json                                      # Entrypoint: domains array, image service mapping
+├── IIIF/
+│   ├── PrimitiefKadaster_manifests.json           # IIIF manifest objects keyed by label
+│   ├── PrimitiefKadaster_info.json                # IIIF Image API responses by service URL
+│   ├── GereduceerdeKadaster_manifests.json
+│   ├── GereduceerdeKadaster_info.json
+│   └── georef/
+│       ├── PrimitiefKadaster.json                 # Canvas-level georeferencing (client-side lookup)
+│       └── GereduceerdeKadaster.json
+├── Image collections/Massart/index.json           # Jean Massart photograph metadata
+├── Toponyms/
+│   ├── PrimitiefKadaster/PrimitiefKadasterToponyms.json    # Filtered toponyms (2,514 items)
+│   └── Ferraris/FerrarisToponyms.json             # Historical map toponyms
+└── Parcels/
+    └── PrimitiefKadaster/PrimitiefKadasterParcels.geojson  # GeoJSON polygons (28,207)
+```
+
+**Key Points**:
+- Map IDs are PascalCase: `PrimitiefKadaster`, `GereduceerdeKadaster`, `Ferraris`
+- Filenames are descriptive: `<mapId>Toponyms.json`, `<mapId>Parcels.geojson`
+- IIIF bundles are per-map, not scattered across many files
+- Canvas annotations consolidated in `georef/<mapId>.json` (keyed by canvas ID)
+- `buildIndex.domains` shows maps with IIIF georeferencing
+
+**Reference Documents** (in `/home/alexander/Documents/Artemis-RnD/`):
+- VIEWER_CODE_AUDIT.md — Complete audit of all viewer changes
+- PATH_MIGRATION_TABLE.md — Current → new path mappings
+- MAP_ID_CANONICAL.md — Map ID conversion table
+- BUILD_INDEX_SPECIFICATION.md — build/index.json schema details
+
+### Dataset Selection: Development vs. Live
+
+**Problem**: After a large refactor, you need to test extensively before deploying to production. Pointing the viewer at the live GitHub Pages version risks breaking the published site.
+
+**Solution**: Use branch-specific URLs to test against development data without affecting the live version.
+
+**Live Production** (stable, published):
+```
+https://ghentcdh.github.io/Artemis-RnD-Data/
+```
+This points to the `master` branch compiled to GitHub Pages.
+
+**Development Testing** (in-progress, test refactors):
+```
+https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/dev/build
+```
+This points to the raw GitHub content from the `dev` branch.
+
+**How to Switch**:
+
+Find the dataset base URL configuration in `app/src/routes/+page.svelte` (line ~8-10):
+
+```typescript
+// Current (live):
+const DEFAULT_DATASET_BASE_URL = 'https://ghentcdh.github.io/Artemis-RnD-Data/build';
+
+// For development (test against dev branch):
+const DEFAULT_DATASET_BASE_URL = 'https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/dev/build';
+```
+
+Or pass it as a URL parameter when running locally:
+```bash
+npm run dev  # uses default
+# Then in browser, paste this in the data URL input:
+https://raw.githubusercontent.com/GhentCDH/Artemis-RnD-Data/dev/build
+```
+
+**Workflow for Large Refactors**:
+1. Push data changes to `dev` branch
+2. Update viewer CONTEXT.md and code pointing to `dev` branch URL
+3. Test thoroughly in viewer against `dev` branch build output
+4. Once stable, merge `dev` → `master`
+5. GitHub Pages auto-publishes `master` to live site
+6. Switch viewer configuration back to live (GitHub Pages) URL
+
+This ensures you never accidentally break the live version while testing substantial changes.
+
+### Phase 1: Critical Path Updates
+
+#### Step 1.1: Update Parcels Path
+
+**File**: `app/src/routes/+page.svelte:137`
+
+**Current Code**:
+```typescript
+return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/Primitive/index.geojson`;
+```
+
+**New Code**:
+```typescript
+// Changed from hardcoded "Primitive" → new map identifier with descriptive filename
+return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/PrimitiefKadaster/PrimitiefKadasterParcels.geojson`;
+```
+
+**Note**: Parcel files now use descriptive naming (`<mapId>Parcels.geojson`) rather than generic `index.geojson` to make the content clear.
+
+**Testing**:
+```bash
+# Point viewer at new data repo
+npm run dev  # or pnpm run dev
+# Navigate to map
+# Verify Parcels overlay loads without 404 in console
+# Verify parcel polygons render
+```
+
+#### Step 1.2: Update Massart URL
+
+**File**: `app/src/routes/+page.svelte:327`
+
+**Current Code**:
+```typescript
+const url = `${cfg().datasetBaseUrl}/Massart/index.json`;
+```
+
+**New Code**:
+```typescript
+const url = `${cfg().datasetBaseUrl}/Image collections/Massart/index.json`;
+```
+
+**Testing**:
+```bash
+# Verify Massart pins load
+# Check console for no 404 errors
+# Verify pins display on map with correct years
+```
+
+#### Step 1.3: Update Toponyms Fetch Logic (HIGH PRIORITY - Logic Change)
+
+**File**: `app/src/routes/+page.svelte:1099-1128`
+
+**Current Code**:
+```typescript
+const url = `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Toponyms/index.json`;
+const res = await fetchRuntimeJson(url);
+const toponymIndex = res.items || res.features || [];
+```
+
+**New Code** (data-driven per-map discovery):
+```typescript
+// Discover available maps from build/index.json domains array
+// Note: domains lists maps with IIIF georeferencing, but some maps have toponyms without IIIF (e.g., Ferraris)
+const knownMaps = buildIndex.domains || [];
+
+if (!knownMaps || knownMaps.length === 0) {
+  log?.('WARN', 'No domains found in build/index.json');
+  return [];
+}
+
+// Known maps that have toponyms (may not all be in domains if no IIIF georeferencing)
+const toponymMaps = knownMaps.concat(['Ferraris']); // Ferraris has toponyms but no IIIF
+
+// Fetch all per-map toponym files
+const allItems: unknown[] = [];
+const loadedMaps: string[] = [];
+for (const mapId of toponymMaps) {
+  try {
+    // Toponym files use descriptive naming: <mapId>/<mapId>Toponyms.json
+    const url = `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Toponyms/${mapId}/${mapId}Toponyms.json`;
+    const res = await fetchRuntimeJson(url);
+    const items = res.items || res.features || [];
+    if (items.length > 0) {
+      allItems.push(...items);
+      loadedMaps.push(mapId);
+      log?.('INFO', `Toponyms loaded for ${mapId}: ${items.length} items`);
+    }
+  } catch (err) {
+    // Silently skip maps without toponyms (normal case, not an error)
+    log?.('DEBUG', `No toponyms available for ${mapId}`);
+  }
+}
+
+const toponymIndex = allItems;
+if (toponymIndex.length === 0) {
+  log?.('WARN', `Toponyms index unavailable: no items loaded from ${loadedMaps.length} maps`);
+} else {
+  log?.('INFO', `Total toponyms loaded: ${toponymIndex.length} items from maps: ${loadedMaps.join(', ')}`);
+}
+```
+
+**Implementation Notes**:
+- The `buildIndex.domains` array contains maps with IIIF georeferencing: `["PrimitiefKadaster", "GereduceerdeKadaster"]`
+- Additional maps may have toponyms data: e.g., `Ferraris` (historical map with OCR toponyms but no modern IIIF)
+- The viewer should try all known maps and gracefully handle 404s (map doesn't have toponyms)
+- Toponym files use descriptive names: `<mapId>Toponyms.json` (not generic `index.json`)
+- Each toponym item includes `map` and `mapLabel` fields for filtering/display
+
+**Testing**:
+```bash
+# Verify search loads all per-map toponym files
+# Search for a toponym from PrimitiefKadaster (should work)
+# Search for a toponym from Ferraris (should work)
+# Check console for proper load messages and no 404 errors in console
+# Verify result labels show correct map (from mapLabel field in item)
+```
+
+### Phase 2: Configuration Updates
+
+#### Step 2.1: Update layerConfig.ts IDs to PascalCase
+
+**File**: `app/src/lib/artemis/layerConfig.ts`
+
+**Changes**:
+1. Update `MainLayerId` type (lines 4-14):
+
+```typescript
+export type MainLayerId =
+  | 'PrimitiefKadaster'      // was 'primitief'
+  | 'GereduceerdeKadaster'   // was 'gereduceerd'
+  | 'HanddrawnCollection'    // was 'handdrawn'
+  | 'NGI1904'                // was 'ngi1904'
+  | 'NGI1873'                // was 'ngi1873'
+  | 'Popp'                   // was 'popp'
+  | 'Vandermaelen'           // was 'vandermaelen'
+  | 'Ferraris'               // was 'ferraris'
+  | 'Villaret'               // was 'villaret'
+  | 'Frickx';                // was 'frickx'
+```
+
+2. Update `MAIN_LAYER_ORDER` array (lines 28-32):
+
+```typescript
+export const MAIN_LAYER_ORDER: MainLayerId[] = [
+  'HanddrawnCollection', 'Frickx', 'Villaret', 'Ferraris',
+  'GereduceerdeKadaster', 'Popp', 'Vandermaelen', 'PrimitiefKadaster',
+  'NGI1873', 'NGI1904',
+];
+```
+
+3. Update `MAIN_LAYER_LABELS` map (lines 34-45):
+```typescript
+export const MAIN_LAYER_LABELS: Record<string, string> = {
+  'PrimitiefKadaster':      'Primitief Kadaster',
+  'GereduceerdeKadaster':   'Gereduceerde Kadaster',
+  'HanddrawnCollection':    'Hand drawn collection',
+  // ... etc for all layers
+};
+```
+
+4. Update `MAIN_LAYER_SHORT_LABELS` (similar changes)
+
+5. Update `MAIN_LAYER_META` (similar changes)
+
+6. Update `MAIN_LAYER_INFO` (similar changes)
+
+7. Update `MAIN_LAYER_SOURCE` (similar changes)
+
+**Validation**:
+```bash
+npm run check  # or pnpm run check
+# Should show: 0 errors, 0 warnings
+```
+
+#### Step 2.2: Update Runtime Metadata Keys in static/layers.json
+
+**File**: `static/layers.json`
+
+**Current Keys** (based on hash values or hardcoded IDs):
+```json
+{
+  "d5443d67bd8c69ec": { "title": "...", "info": "..." },
+  "gereduceerd-iiif": { "title": "...", "info": "..." }
+}
+```
+
+**New Keys** (must match `renderLayers[].layerId` from new build/index.json):
+```json
+{
+  "primitief-iiif": { "title": "Primitief Kadaster", "info": "..." },
+  "gereduceerd-iiif": { "title": "Gereduceerde Kadaster", "info": "..." },
+  "handdrawn-iiif": { "title": "Hand drawn collection", "info": "..." },
+  "ferraris-toponyms": { "title": "Ferraris Toponyms", "info": "..." },
+  "vandermaelen-toponyms": { "title": "Vandermaelen Toponyms", "info": "..." },
+  "primitief-parcels": { "title": "Primitief Parcels", "info": "..." }
+}
+```
+
+**How to get correct keys**:
+- After data repo refactor is deployed, fetch new `build/index.json`
+- Read `renderLayers[].layerId` for all IIIF layers
+- Read `domains.toponyms.maps` and append `-toponyms` for toponym sublayers
+- Read `domains.parcels.maps` and append `-parcels` for parcel sublayers
+
+**Testing**:
+```bash
+# Verify no 404s for metadata lookups
+# Check browser console for metadata load messages
+# Verify layer info cards display correct titles from metadata
+```
+
+### Phase 3: Image Services Consolidation
+
+#### Step 3.1: Remove Separate iiif/info Fetch
+
+**File**: `app/src/lib/artemis/runner.ts:239`
+
+**Current Code**:
+```typescript
+const url = joinUrl(cfg.datasetBaseUrl, "iiif/info/index.json");
+const iiifInfoIndex = await fetchJson<{ /* type */ }>(url, "IiifInfoIndex");
+```
+
+**New Code**:
+```typescript
+// Image services are now consolidated into build/index.json
+// No separate fetch needed; imageServices already loaded
+const iiifServices = buildIndex.imageServices || {};
+// Continue with same serviceUrl lookup logic using iiifServices
+```
+
+**Impact**: One fewer HTTP fetch at startup
+
+**Testing**:
+```bash
+# Monitor network tab: should see no request to iiif/info/index.json
+# Verify IIIF tiles still load correctly (rendering unchanged)
+```
+
+### Phase 4: Testing & Validation
+
+#### Step 4.1: Comprehensive Integration Test
+
+```bash
+# Point viewer at new data:
+# 1. Start dev server
+npm run dev
+
+# 2. Verify all maps load
+#    - Check rendered tiles display
+#    - Verify no console errors
+#    - Check network for no 404s
+
+# 3. Test search
+#    - Search for "Appels" (Gereduceerd)
+#    - Should find result
+#    - Check console for proper per-map load messages
+
+# 4. Test parcels
+#    - Enable parcel overlay for Primitief
+#    - Should see parcel polygons
+#    - No 404 for Parcels/PrimitiefKadaster/index.geojson
+
+# 5. Test Massart
+#    - Check timeline for Massart pins
+#    - Verify pins display correctly
+#    - No 404 for Image collections/Massart/index.json
+
+# 6. Test metadata
+#    - Open layer info cards
+#    - Verify titles and info from static/layers.json
+#    - No missing metadata warnings in console
+
+# 7. Test compare mode
+#    - Split screen
+#    - Verify both panes load independently
+#    - All features work in both panes
+```
+
+#### Step 4.2: Regression Testing
+
+```bash
+# Verify existing features still work:
+- [ ] Map pan/zoom
+- [ ] Layer visibility toggles
+- [ ] Timeline interaction
+- [ ] Split mode
+- [ ] Search functionality
+- [ ] IIIF warp rendering
+- [ ] Parcel overlay
+- [ ] Massart pins
+- [ ] Runtime metadata display
+- [ ] No console errors
+```
+
+### Phase 5: Type Definitions (if applicable)
+
+#### Step 5.1: Update Type Definitions
+
+**File**: `app/src/lib/artemis/types.ts`
+
+If custom types use old layer IDs, update them:
+
+```typescript
+// Before
+export type LayerId = 'primitief' | 'gereduceerd' | ...;
+
+// After
+export type LayerId = 'PrimitiefKadaster' | 'GereduceerdeKadaster' | ...;
+```
+
+**Validation**:
+```bash
+npm run check  # Type check should pass
+```
+
+### Phase 6: Timeline/Timeslider Updates (if needed)
+
+**File**: `app/src/lib/components/Timeslider.svelte`
+
+Check if any hardcoded layer references exist and update:
+
+```bash
+# Search for old IDs:
+grep -n "primitief\|gereduceerd\|handdrawn" app/src/lib/components/Timeslider.svelte
+
+# Update any found references to use new PascalCase IDs
+```
+
+### Troubleshooting
+
+| Issue | Diagnosis | Fix |
+|-------|-----------|-----|
+| "Parcels 404" | Hardcoded path still uses old name | Update +page.svelte:137 to new path |
+| "Massart 404" | Path not updated to Image collections | Update +page.svelte:327 |
+| "Toponyms empty" | Per-map files not discovered | Check buildIndex.domains.toponyms.maps exists |
+| "Type errors in layerConfig" | IDs not updated to PascalCase | Update MainLayerId type and all references |
+| "Metadata missing" | static/layers.json keys wrong | Update keys to match new layerId values |
+| "Render errors" | Image services not loading | Verify imageServices in buildIndex consolidated |
+
+### Files Modified Summary
+
+| File | Changes | Lines |
+|------|---------|-------|
+| `+page.svelte` | Paths: Parcels, Massart, Toponyms fetch | 137, 327, 1099-1128 |
+| `layerConfig.ts` | IDs: MainLayerId type, all label maps | 4-14, 28-45, etc. |
+| `static/layers.json` | Keys: Update to match new layerId values | All |
+| `runner.ts` | Remove: iiif/info fetch | 239 |
+| `Timeslider.svelte` | Review: Update any hardcoded refs | (search for old IDs) |
+
+## 10. Next Actions (Original)
 
 1. Verify pill expand tab works in the live browser after the reactivity fix.
 2. Restyle the site-info modal in `app/src/routes/+page.svelte` so it matches the rest of the Artemis UI rather than reading like a separate generic overlay.
@@ -218,3 +653,23 @@ The map stage and timeline should remain custom surfaces:
 - Changing a few token values should update the whole UI consistently.
 - The app should become easier to restyle without editing many separate components.
 - This should improve clarity and consistency without forcing the map/timeline UI into generic framework patterns.
+
+## 15. Data Refactor Implementation (Next Priority)
+
+**All decisions finalized on 2026-04-15.** Follow the step-by-step implementation guide in Section 10 above.
+
+**Execution Order**:
+1. **Phase 1** (Critical paths): Steps 1.1-1.3 — Update Parcels, Massart, Toponyms
+2. **Phase 2** (Configuration): Steps 2.1-2.2 — Update layerConfig.ts IDs and static/layers.json keys
+3. **Phase 3** (Data consolidation): Step 3.1 — Remove separate iiif/info fetch
+4. **Phase 4** (Testing): Steps 4.1-4.2 — Integration and regression testing
+5. **Phase 5-6** (Types/Timeline): Only if needed
+
+**Prerequisite**: Data repo must complete its refactor and deploy new `build/index.json` with new schemas first.
+
+**Parallel Effort**: These viewer changes should happen in parallel with (or immediately after) data repo deployment.
+
+**Reference**:
+- Section 10 "Build/Data Refactor Implementation Guide" — Full step-by-step instructions
+- `/home/alexander/Documents/Artemis-RnD/VIEWER_CODE_AUDIT.md` — Complete viewer changes list
+- Artemis-RnD-Data/CONTEXT.md Section 10 — Data repo implementation guide

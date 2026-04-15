@@ -1,5 +1,6 @@
 <!-- app/src/lib/components/Timeslider.svelte -->
 <script lang="ts">
+  import { dev } from '$app/environment';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { MassartItem } from '$lib/artemis/types';
@@ -49,81 +50,81 @@
 
   const SOURCES = [
     {
-      key: 'hand', mainId: 'handdrawn', label: MAIN_LAYER_LABELS.handdrawn,
+      key: 'hand', mainId: 'HanddrawnCollection', label: MAIN_LAYER_LABELS.HanddrawnCollection,
       start: 1700, end: 1715, repr: 1707, color: 'var(--layer-hand-color)', lane: 1,
       sublayers: [
-        { id: 'iiif', subId: 'handdrawn-iiif', label: 'Map', defaultOn: true },
-        { id: 'parcels', subId: 'handdrawn-parcels', label: 'Parcels', defaultOn: false },
-        { id: 'water', subId: 'handdrawn-water', label: 'Water infrastructure', defaultOn: false },
+        { id: 'iiif', subId: 'HanddrawnCollection-iiif', label: 'Map', defaultOn: true },
+        { id: 'parcels', subId: 'HanddrawnCollection-parcels', label: 'Parcels', defaultOn: false },
+        { id: 'water', subId: 'HanddrawnCollection-water', label: 'Water infrastructure', defaultOn: false },
       ],
     },
     {
-      key: 'frickx', mainId: 'frickx', label: MAIN_LAYER_LABELS.frickx,
+      key: 'frickx', mainId: 'Frickx', label: MAIN_LAYER_LABELS.Frickx,
       start: 1712, end: 1712, repr: 1712, color: 'var(--layer-frickx-color)', lane: 3,
       sublayers: [
-        { id: 'wmts', subId: 'frickx-wmts', label: 'Map', defaultOn: true },
+        { id: 'wmts', subId: 'Frickx-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'villaret', mainId: 'villaret', label: MAIN_LAYER_LABELS.villaret,
+      key: 'villaret', mainId: 'Villaret', label: MAIN_LAYER_LABELS.Villaret,
       start: 1745, end: 1748, repr: 1746, color: 'var(--layer-villaret-color)', lane: 4,
       sublayers: [
-        { id: 'wmts', subId: 'villaret-wmts', label: 'Map', defaultOn: true },
+        { id: 'wmts', subId: 'Villaret-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'ferraris', mainId: 'ferraris', label: MAIN_LAYER_LABELS.ferraris,
+      key: 'ferraris', mainId: 'Ferraris', label: MAIN_LAYER_LABELS.Ferraris,
       start: 1770, end: 1778, repr: 1774, color: 'var(--layer-ferraris-color)', lane: 2,
       sublayers: [
-        { id: 'wmts', subId: 'ferraris-wmts', label: 'Map', defaultOn: true },
-        { id: 'landuse', subId: 'ferraris-landusage', label: 'Land use', defaultOn: false },
+        { id: 'wmts', subId: 'Ferraris-wmts', label: 'Map', defaultOn: true },
+        { id: 'landuse', subId: 'Ferraris-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
-      key: 'primitief', mainId: 'primitief', label: MAIN_LAYER_LABELS.primitief,
+      key: 'primitief', mainId: 'PrimitiefKadaster', label: MAIN_LAYER_LABELS.PrimitiefKadaster,
       start: 1808, end: 1834, repr: 1814, color: 'var(--layer-primitief-color)', lane: 3,
       sublayers: [
-        { id: 'iiif', subId: 'primitief-iiif', label: 'Map', defaultOn: true },
-        { id: 'parcels', subId: 'primitief-parcels', label: 'Parcels', defaultOn: false },
-        { id: 'landuse', subId: 'primitief-landusage', label: 'Land use', defaultOn: false },
+        { id: 'iiif', subId: 'PrimitiefKadaster-iiif', label: 'Map', defaultOn: true },
+        { id: 'parcels', subId: 'PrimitiefKadaster-parcels', label: 'Parcels', defaultOn: false },
+        { id: 'landuse', subId: 'PrimitiefKadaster-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
-      key: 'vander', mainId: 'vandermaelen', label: MAIN_LAYER_LABELS.vandermaelen,
+      key: 'vander', mainId: 'Vandermaelen', label: MAIN_LAYER_LABELS.Vandermaelen,
       start: 1846, end: 1854, repr: 1850, color: 'var(--layer-vander-color)', lane: 4,
       sublayers: [
-        { id: 'wmts', subId: 'vandermaelen-wmts', label: 'Map', defaultOn: true },
-        { id: 'landuse', subId: 'vandermaelen-landusage', label: 'Land use', defaultOn: false },
+        { id: 'wmts', subId: 'Vandermaelen-wmts', label: 'Map', defaultOn: true },
+        { id: 'landuse', subId: 'Vandermaelen-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
-      key: 'gered', mainId: 'gereduceerd', label: MAIN_LAYER_LABELS.gereduceerd,
+      key: 'gered', mainId: 'GereduceerdeKadaster', label: MAIN_LAYER_LABELS.GereduceerdeKadaster,
       start: 1847, end: 1855, repr: 1851, color: 'var(--layer-gereduceerd-color)', lane: 1,
       sublayers: [
-        { id: 'iiif', subId: 'gereduceerd-iiif', label: 'Map', defaultOn: true },
-        { id: 'parcels', subId: 'gereduceerd-parcels', label: 'Parcels', defaultOn: false },
-        { id: 'landuse', subId: 'gereduceerd-landusage', label: 'Land use', defaultOn: false },
+        { id: 'iiif', subId: 'GereduceerdeKadaster-iiif', label: 'Map', defaultOn: true },
+        { id: 'parcels', subId: 'GereduceerdeKadaster-parcels', label: 'Parcels', defaultOn: false },
+        { id: 'landuse', subId: 'GereduceerdeKadaster-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
-      key: 'popp', mainId: 'popp', label: MAIN_LAYER_LABELS.popp,
+      key: 'popp', mainId: 'Popp', label: MAIN_LAYER_LABELS.Popp,
       start: 1842, end: 1879, repr: 1860, color: 'var(--layer-popp-color)', lane: 2,
       sublayers: [
-        { id: 'wmts', subId: 'popp-wmts', label: 'Map', defaultOn: true },
+        { id: 'wmts', subId: 'Popp-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'ngi1873', mainId: 'ngi1873', label: MAIN_LAYER_LABELS.ngi1873,
+      key: 'ngi1873', mainId: 'NGI1873', label: MAIN_LAYER_LABELS.NGI1873,
       start: 1873, end: 1873, repr: 1873, color: 'var(--layer-ngi1873-color)', lane: 3,
       sublayers: [
-        { id: 'wmts', subId: 'ngi1873-wmts', label: 'Map', defaultOn: true },
+        { id: 'wmts', subId: 'NGI1873-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
-      key: 'ngi1904', mainId: 'ngi1904', label: MAIN_LAYER_LABELS.ngi1904,
+      key: 'ngi1904', mainId: 'NGI1904', label: MAIN_LAYER_LABELS.NGI1904,
       start: 1904, end: 1904, repr: 1904, color: 'var(--layer-ngi1904-color)', lane: 1,
       sublayers: [
-        { id: 'wmts', subId: 'ngi1904-wmts', label: 'Map', defaultOn: true },
+        { id: 'wmts', subId: 'NGI1904-wmts', label: 'Map', defaultOn: true },
       ],
     },
   ] as const;
@@ -227,12 +228,17 @@
   }
 
   function setPaneYear(pane: PaneId, year: number, emit = true) {
+    const prevYear = pane === 'left' ? localLeftYear : localRightYear;
     if (pane === 'left') {
       localLeftYear = year;
     } else {
       localRightYear = year;
     }
-    if (emit) dispatch('year-change', { pane, year });
+    if (dev) console.log(`[timeline-debug] setPaneYear(${pane}, ${year}, emit=${emit}) — ${prevYear} → ${year}`);
+    if (emit) {
+      if (dev) console.log(`[timeline-debug] setPaneYear(${pane}, ${year}) — dispatching year-change`);
+      dispatch('year-change', { pane, year });
+    }
   }
 
   function yearForPane(pane: PaneId): number {
@@ -297,15 +303,19 @@
 
   function onSliderInput(pane: PaneId, e: Event) {
     const year = parseFloat((e.target as HTMLInputElement).value);
+    if (dev) console.log(`[timeline-debug] onSliderInput(${pane}) — User scrubbed timeline — year=${year}`);
     if (!dualPaneEnabled) {
       sliderYear = year;
+      if (dev) console.log(`[timeline-debug] onSliderInput(left, single mode) — dispatching year-change, sliderYear=${sliderYear}`);
       dispatch('year-change', { pane: 'left', year });
       return;
     }
+    if (dev) console.log(`[timeline-debug] onSliderInput(${pane}, dual mode) — calling setPaneYear(${pane}, ${year})`);
     setPaneYear(pane, year);
   }
 
   function setSingleYear(year: number) {
+    if (dev) console.log(`[timeline-debug] setSingleYear(${year}) — external year update, dispatching year-change`);
     sliderYear = year;
     dispatch('year-change', { pane: 'left', year });
   }
@@ -479,28 +489,43 @@
     const singleSub = src.sublayers.length === 1 ? src.sublayers[0] : null;
 
     if (pane === 'right') {
-      if (rightEnabledLayers[key] === enabled && (!singleSub || rightSublayerState[key]?.[singleSub.id] === enabled)) return;
+      if (rightEnabledLayers[key] === enabled && (!singleSub || rightSublayerState[key]?.[singleSub.id] === enabled)) {
+        if (dev) console.log(`[timeline-debug] setLayerEnabled(right, ${key}, ${enabled}) — already set, skip`);
+        return;
+      }
+      const prevState = rightEnabledLayers[key];
       rightEnabledLayers = { ...rightEnabledLayers, [key]: enabled };
+      if (dev) console.log(`[timeline-debug] setLayerEnabled(right, ${key}) — ${prevState} → ${enabled}`, { rightEnabledLayers });
       if (singleSub) {
         rightSublayerState = {
           ...rightSublayerState,
           [key]: { ...rightSublayerState[key], [singleSub.id]: enabled },
         };
+        if (dev) console.log(`[timeline-debug] setLayerEnabled(right, ${key}) — single sub updated:`, { [key]: rightSublayerState[key] });
       }
       return;
     }
-    if (leftEnabledLayers[key] === enabled && (!singleSub || leftSublayerState[key]?.[singleSub.id] === enabled)) return;
+    if (leftEnabledLayers[key] === enabled && (!singleSub || leftSublayerState[key]?.[singleSub.id] === enabled)) {
+      if (dev) console.log(`[timeline-debug] setLayerEnabled(left, ${key}, ${enabled}) — already set, skip`);
+      return;
+    }
+    const prevState = leftEnabledLayers[key];
     leftEnabledLayers = { ...leftEnabledLayers, [key]: enabled };
+    if (dev) console.log(`[timeline-debug] setLayerEnabled(left, ${key}) — ${prevState} → ${enabled}`, { leftEnabledLayers });
     if (singleSub) {
       leftSublayerState = {
         ...leftSublayerState,
         [key]: { ...leftSublayerState[key], [singleSub.id]: enabled },
       };
+      if (dev) console.log(`[timeline-debug] setLayerEnabled(left, ${key}) — single sub updated:`, { [key]: leftSublayerState[key] });
     }
   }
 
   function toggleLayerEnabled(pane: PaneId, key: SourceKey) {
+    const src = sourceByKey(key);
+    const prevState = pane === 'right' ? rightEnabledLayers[key] : leftEnabledLayers[key];
     const nextEnabled = pane === 'right' ? !rightEnabledLayers[key] : !leftEnabledLayers[key];
+    if (dev) console.log(`[timeline-debug] toggleLayerEnabled(${pane}, ${key}) — User clicked ${src.label} toggle — ${prevState} → ${nextEnabled}`);
     setLayerEnabled(pane, key, nextEnabled);
   }
 
@@ -513,14 +538,24 @@
   }
 
   function toggleSublayer(pane: PaneId, key: SourceKey, subId: string, localId: string) {
+    const src = sourceByKey(key);
+    const sub = src.sublayers.find(s => s.id === localId);
     const cur = isSublayerEnabled(pane, key, localId);
+    if (dev) console.log(`[timeline-debug] toggleSublayer(${pane}, ${key}, ${subId}, ${localId}) — User clicked ${src.label} → ${sub?.label} toggle — ${cur} → ${!cur}`);
+
     if (pane === 'right') {
       rightSublayerState = {
         ...rightSublayerState,
         [key]: { ...rightSublayerState[key], [localId]: !cur },
       };
+      if (dev) console.log(`[timeline-debug] toggleSublayer(right, ${subId}) — state updated:`, { [localId]: rightSublayerState[key]?.[localId] });
       const rightVisible = rightEnabledLayers[key] && rightVisibleSourceKeys.has(key);
-      if (rightVisible) dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
+      if (rightVisible) {
+        if (dev) console.log(`[timeline-debug] toggleSublayer(right, ${subId}) — dispatching paneSublayerChange, enabled=${!cur}`);
+        dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
+      } else {
+        if (dev) console.log(`[timeline-debug] toggleSublayer(right, ${subId}) — NOT dispatching (parentVisible=${rightVisible})`);
+      }
       return;
     }
 
@@ -528,9 +563,15 @@
       ...leftSublayerState,
       [key]: { ...leftSublayerState[key], [localId]: !cur },
     };
+    if (dev) console.log(`[timeline-debug] toggleSublayer(left, ${subId}) — state updated:`, { [localId]: leftSublayerState[key]?.[localId] });
     const leftVisible = leftEnabledLayers[key] && leftVisibleSourceKeys.has(key);
-    if (leftVisible) dispatch('sublayerChange', { subId, enabled: !cur });
-    if (leftVisible) dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
+    if (leftVisible) {
+      if (dev) console.log(`[timeline-debug] toggleSublayer(left, ${subId}) — dispatching sublayerChange + paneSublayerChange, enabled=${!cur}`);
+      dispatch('sublayerChange', { subId, enabled: !cur });
+      dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
+    } else {
+      if (dev) console.log(`[timeline-debug] toggleSublayer(left, ${subId}) — NOT dispatching (parentVisible=${leftVisible})`);
+    }
   }
 
   function sourcePattern(key: SourceKey): string {

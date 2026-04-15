@@ -65,8 +65,8 @@ export type ManifestSearchItem = {
   mapName: string;
   sourceManifestUrl: string;
   compiledManifestPath: string;
-  centerLon: number;
-  centerLat: number;
+  centerLon?: number;
+  centerLat?: number;
 };
 
 // --- UI panel types ---

@@ -1,0 +1,94 @@
+{
+  "HanddrawnCollection": {
+    "title": "Hand drawn collection",
+    "info": "Hand-drawn historical map collection with warped IIIF sheets and related overlays."
+  },
+  "Frickx": {
+    "title": "Frickx",
+    "info": "Frickx map of the Low Countries, connected as historical raster base map."
+  },
+  "Villaret": {
+    "title": "Villaret",
+    "info": "Villaret map of the southern Low Countries, currently connected as WMS-backed raster layer."
+  },
+  "Ferraris": {
+    "title": "Ferraris",
+    "info": "Ferraris cabinet map of the Austrian Netherlands, georeferenced as historical raster base map."
+  },
+  "GereduceerdeKadaster": {
+    "title": "Gereduceerd kadaster",
+    "info": "Gereduceerd kadaster layer with warped IIIF sheets plus cadastral overlays."
+  },
+  "Popp": {
+    "title": "Poppkaart",
+    "info": "Popp cadastral atlas mosaic for Belgium, shown here as historical raster base map."
+  },
+  "Vandermaelen": {
+    "title": "Vandermaelen",
+    "info": "Vandermaelen topographic map of Belgium, connected as historical raster base map."
+  },
+  "PrimitiefKadaster": {
+    "title": "Primitief kadaster",
+    "info": "Primitief kadaster layer with warped IIIF sheets plus cadastral overlays."
+  },
+  "NGI1873": {
+    "title": "NGI Basemap 1873",
+    "info": "Topographic NGI basemap from 1873, exposed as raster tile service."
+  },
+  "NGI1904": {
+    "title": "NGI Basemap 1904",
+    "info": "Topographic NGI basemap from 1904, exposed as raster tile service."
+  },
+  "PrimitiefKadaster-iiif": {
+    "title": "Primitief Kadaster",
+    "info": "Primitief kadaster layer with warped IIIF sheets plus cadastral overlays."
+  },
+  "PrimitiefKadaster-parcels": {
+    "title": "Primitief Parcels",
+    "info": "Cadastral parcel overlays for Primitief kadaster."
+  },
+  "PrimitiefKadaster-landusage": {
+    "title": "Primitief Land Use",
+    "info": "Land use classification layer for Primitief kadaster."
+  },
+  "GereduceerdeKadaster-iiif": {
+    "title": "Gereduceerde Kadaster",
+    "info": "Gereduceerd kadaster layer with warped IIIF sheets plus cadastral overlays."
+  },
+  "GereduceerdeKadaster-parcels": {
+    "title": "Gereduceerde Parcels",
+    "info": "Cadastral parcel overlays for Gereduceerd kadaster."
+  },
+  "GereduceerdeKadaster-landusage": {
+    "title": "Gereduceerde Land Use",
+    "info": "Land use classification layer for Gereduceerd kadaster."
+  },
+  "HanddrawnCollection-iiif": {
+    "title": "Hand drawn collection",
+    "info": "Hand-drawn historical map collection with warped IIIF sheets and related overlays."
+  },
+  "HanddrawnCollection-parcels": {
+    "title": "Hand drawn Parcels",
+    "info": "Cadastral parcel overlays for hand-drawn collection."
+  },
+  "HanddrawnCollection-water": {
+    "title": "Water infrastructure",
+    "info": "Water infrastructure features for hand-drawn collection."
+  },
+  "Ferraris-toponyms": {
+    "title": "Ferraris Toponyms",
+    "info": "Historical place names and geographical features from Ferraris cabinet map."
+  },
+  "Vandermaelen-toponyms": {
+    "title": "Vandermaelen Toponyms",
+    "info": "Historical place names and geographical features from Vandermaelen topographic map."
+  },
+  "Ferraris-landusage": {
+    "title": "Ferraris Land Use",
+    "info": "Land use classification from Ferraris map."
+  },
+  "Vandermaelen-landusage": {
+    "title": "Vandermaelen Land Use",
+    "info": "Land use classification from Vandermaelen map."
+  }
+}
