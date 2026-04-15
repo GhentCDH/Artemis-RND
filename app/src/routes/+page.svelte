@@ -1091,6 +1091,8 @@
   }
 
   async function toggleSubLayer(subId: string, enabled: boolean) {
+    if (dev) console.log(`[layer-debug] toggleSubLayer ENTER: subId=${subId}, enabled=${enabled}, map.isStyleLoaded()=${map?.isStyleLoaded()}`);
+
     if (subLayerEnabled[subId] === enabled) {
       log('INFO', `[toggleSub] ${subId} already ${enabled} — skip`);
       if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}, ${enabled}) — already in that state, skip`);
@@ -1111,20 +1113,36 @@
     if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}, kind=${subDef.kind}) — mainId=${mainId}, opacity=${opacity}`);
 
     if (subDef.kind === 'wmts') {
-      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — WMTS type, calling setHistCartLayerVisible(${mainId}, ${enabled})`);
-      setHistCartLayerVisible(map, mainId as HistCartLayerKey, enabled);
-      if (enabled) setHistCartLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+      if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — WMTS type, calling setHistCartLayerVisible(map, ${mainId}, ${enabled})`);
+      const histKey = mainId as HistCartLayerKey;
+      if (dev) console.log(`[layer-debug]   About to call setHistCartLayerVisible with histKey=${histKey}`);
+      setHistCartLayerVisible(map, histKey, enabled);
+      if (dev) console.log(`[layer-debug]   setHistCartLayerVisible called, enabled=${enabled}`);
+      if (enabled) {
+        if (dev) console.log(`[layer-debug]   Setting opacity to ${opacity}`);
+        setHistCartLayerOpacity(map, histKey, opacity);
+      }
+      if (dev) console.log(`[layer-debug]   Calling applyZOrder()`);
       applyZOrder();
+      if (dev) console.log(`[layer-debug] toggleSubLayer EXIT: ${subId} is now ${enabled}`);
       return;
     }
     if (subDef.kind === 'wms') {
       const landUsageKey = getLandUsageKey(mainId);
       if (dev) console.log(`[layer-debug] toggleSubLayer(${subId}) — WMS type, landUsageKey=${landUsageKey}, enabled=${enabled}`);
       if (landUsageKey) {
+        if (dev) console.log(`[layer-debug]   Calling setLandUsageLayerVisible(map, ${landUsageKey}, ${enabled})`);
         setLandUsageLayerVisible(map, landUsageKey, enabled);
-        if (enabled) setLandUsageLayerOpacity(map, landUsageKey, opacity);
+        if (enabled) {
+          if (dev) console.log(`[layer-debug]   Setting opacity to ${opacity}`);
+          setLandUsageLayerOpacity(map, landUsageKey, opacity);
+        }
+      } else {
+        if (dev) console.log(`[layer-debug]   WARNING: landUsageKey is null/undefined, skipping WMS visibility change`);
       }
+      if (dev) console.log(`[layer-debug]   Calling applyZOrder()`);
       applyZOrder();
+      if (dev) console.log(`[layer-debug] toggleSubLayer EXIT: ${subId} is now ${enabled}`);
       return;
     }
     if (subDef.kind === 'geojson') {
