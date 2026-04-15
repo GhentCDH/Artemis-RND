@@ -1212,15 +1212,15 @@
 
           if (items.length > 0) {
             // Ensure all items have mapId, sourceFile, sourceGroup, and mapName set from the filename
-            const itemsWithMetadata = Array.isArray(json.items)
-              ? items.map(item => ({
-                  ...item,
-                  mapId: item.mapId || mapId,
-                  sourceFile: item.sourceFile || `${mapId}/${mapId}Toponyms.json`,
-                  sourceGroup: item.sourceGroup || mapId,
-                  mapName: item.mapName || mapLabel,
-                }))
-              : items;
+            // Also prefix ID with mapId to ensure uniqueness across all loaded maps
+            const itemsWithMetadata = items.map(item => ({
+              ...item,
+              id: item.id ? `${mapId}::${item.id}` : `${mapId}::unknown-${Math.random()}`,
+              mapId: item.mapId || mapId,
+              sourceFile: item.sourceFile || `${mapId}/${mapId}Toponyms.json`,
+              sourceGroup: item.sourceGroup || mapId,
+              mapName: item.mapName || mapLabel,
+            }));
             allItems.push(...itemsWithMetadata);
             loadedMaps.push(mapId);
             log?.('INFO', `Toponyms loaded for ${mapId}: ${items.length} items`);
