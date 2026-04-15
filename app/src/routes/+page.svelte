@@ -1184,6 +1184,9 @@
           }
 
           const json = (await res.json()) as ToponymIndexPayload;
+          // Get friendly map name from top-level field if available
+          const mapLabel = typeof (json as any)?.mapLabel === 'string' ? (json as any).mapLabel : mapId;
+
           const items: RawToponymIndexItem[] = Array.isArray(json.items)
             ? json.items
             : Array.isArray(json.features)
@@ -1193,10 +1196,10 @@
                     id: typeof f?.id === 'string' ? f.id : undefined,
                     text: typeof p.text === 'string' ? p.text : undefined,
                     textNormalized: typeof p.textNormalized === 'string' ? p.textNormalized : undefined,
-                    sourceGroup: typeof p.sourceGroup === 'string' ? p.sourceGroup : undefined,
-                    sourceFile: typeof p.sourceFile === 'string' ? p.sourceFile : undefined,
-                    mapId: typeof p.mapId === 'string' ? p.mapId : mapId, // Use mapId from loop if not in data
-                    mapName: typeof p.mapName === 'string' ? p.mapName : undefined,
+                    sourceGroup: typeof p.sourceGroup === 'string' ? p.sourceGroup : mapId,
+                    sourceFile: typeof p.sourceFile === 'string' ? p.sourceFile : `${mapId}/${mapId}Toponyms.json`,
+                    mapId: typeof p.mapId === 'string' ? p.mapId : mapId,
+                    mapName: typeof p.mapName === 'string' ? p.mapName : mapLabel,
                     featureIndex: Number.isFinite(p.featureIndex) ? Number(p.featureIndex) : i,
                     lon: asFiniteNumber(p.lon) ?? undefined,
                     lat: asFiniteNumber(p.lat) ?? undefined,
@@ -1208,11 +1211,17 @@
               : [];
 
           if (items.length > 0) {
-            // Ensure all items from items array also have mapId set from the filename
-            const itemsWithMapId = Array.isArray(json.items)
-              ? items.map(item => ({ ...item, mapId: item.mapId || mapId }))
+            // Ensure all items have mapId, sourceFile, sourceGroup, and mapName set from the filename
+            const itemsWithMetadata = Array.isArray(json.items)
+              ? items.map(item => ({
+                  ...item,
+                  mapId: item.mapId || mapId,
+                  sourceFile: item.sourceFile || `${mapId}/${mapId}Toponyms.json`,
+                  sourceGroup: item.sourceGroup || mapId,
+                  mapName: item.mapName || mapLabel,
+                }))
               : items;
-            allItems.push(...itemsWithMapId);
+            allItems.push(...itemsWithMetadata);
             loadedMaps.push(mapId);
             log?.('INFO', `Toponyms loaded for ${mapId}: ${items.length} items`);
           }
