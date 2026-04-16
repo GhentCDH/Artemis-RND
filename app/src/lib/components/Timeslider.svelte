@@ -139,6 +139,7 @@
   const defaultYear = 1774;
 
   let sliderYear = defaultYear;
+  let trackEl: HTMLDivElement | null = null;
   let trackWidth = 0;
   let localLeftYear = defaultYear;
   let localRightYear = defaultYear;
@@ -225,15 +226,6 @@
     const visible = SOURCES.filter(
       s => year >= s.start - halfKnobYears && year <= s.end + halfKnobYears
     );
-    if (dev) {
-      const sources = SOURCES.map(s => {
-        const inRange = year >= s.start - halfKnobYears && year <= s.end + halfKnobYears;
-        return `${s.key}(${s.start}-${s.end}):${inRange ? '✓' : '✗'}`;
-      }).join(', ');
-      if (visible.length > 0 || year % 10 === 0) { // Log every 10 years to avoid spam
-        console.log(`[timeline-debug] paneSourcesForYear(${year}): [${sources}] → visible=${visible.map(s => s.key).join(', ')}`);
-      }
-    }
     return visible;
   }
 
@@ -244,9 +236,7 @@
     } else {
       localRightYear = year;
     }
-    if (dev) console.log(`[timeline-debug] setPaneYear(${pane}, ${year}, emit=${emit}) — ${prevYear} → ${year}`);
     if (emit) {
-      if (dev) console.log(`[timeline-debug] setPaneYear(${pane}, ${year}) — dispatching year-change`);
       dispatch('year-change', { pane, year });
     }
   }
@@ -313,19 +303,15 @@
 
   function onSliderInput(pane: PaneId, e: Event) {
     const year = parseFloat((e.target as HTMLInputElement).value);
-    if (dev) console.log(`[timeline-debug] onSliderInput(${pane}) — User scrubbed timeline — year=${year}`);
     if (!dualPaneEnabled) {
       sliderYear = year;
-      if (dev) console.log(`[timeline-debug] onSliderInput(left, single mode) — dispatching year-change, sliderYear=${sliderYear}`);
       dispatch('year-change', { pane: 'left', year });
       return;
     }
-    if (dev) console.log(`[timeline-debug] onSliderInput(${pane}, dual mode) — calling setPaneYear(${pane}, ${year})`);
     setPaneYear(pane, year);
   }
 
   function setSingleYear(year: number) {
-    if (dev) console.log(`[timeline-debug] setSingleYear(${year}) — external year update, dispatching year-change`);
     sliderYear = year;
     dispatch('year-change', { pane: 'left', year });
   }
@@ -442,6 +428,10 @@
     return subId ? `${pane}:${key}:${subId}` : `${pane}:${key}`;
   }
 
+  function layerInfoKey(pane: PaneId, mainId: string): string {
+    return `${pane}:${mainId}`;
+  }
+
   function toggleInfo(key: string) {
     openInfoKey = openInfoKey === key ? null : key;
   }
@@ -453,6 +443,12 @@
   function onInfoButtonClick(event: MouseEvent, key: string) {
     event.stopPropagation();
     layerInfoModalKey = layerInfoModalKey === key ? null : key;
+  }
+
+  function closeLayerInfo(event?: MouseEvent | KeyboardEvent) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    layerInfoModalKey = null;
   }
 
   function toggleMenu(event: MouseEvent, key: SourceKey) {
@@ -500,42 +496,31 @@
 
     if (pane === 'right') {
       if (rightEnabledLayers[key] === enabled && (!singleSub || rightSublayerState[key]?.[singleSub.id] === enabled)) {
-        if (dev) console.log(`[timeline-debug] setLayerEnabled(right, ${key}, ${enabled}) — already set, skip`);
         return;
       }
-      const prevState = rightEnabledLayers[key];
       rightEnabledLayers = { ...rightEnabledLayers, [key]: enabled };
-      if (dev) console.log(`[timeline-debug] setLayerEnabled(right, ${key}) — ${prevState} → ${enabled}`, { rightEnabledLayers });
       if (singleSub) {
         rightSublayerState = {
           ...rightSublayerState,
           [key]: { ...rightSublayerState[key], [singleSub.id]: enabled },
         };
-        if (dev) console.log(`[timeline-debug] setLayerEnabled(right, ${key}) — single sub updated:`, { [key]: rightSublayerState[key] });
       }
       return;
     }
     if (leftEnabledLayers[key] === enabled && (!singleSub || leftSublayerState[key]?.[singleSub.id] === enabled)) {
-      if (dev) console.log(`[timeline-debug] setLayerEnabled(left, ${key}, ${enabled}) — already set, skip`);
       return;
     }
-    const prevState = leftEnabledLayers[key];
     leftEnabledLayers = { ...leftEnabledLayers, [key]: enabled };
-    if (dev) console.log(`[timeline-debug] setLayerEnabled(left, ${key}) — ${prevState} → ${enabled}`, { leftEnabledLayers });
     if (singleSub) {
       leftSublayerState = {
         ...leftSublayerState,
         [key]: { ...leftSublayerState[key], [singleSub.id]: enabled },
       };
-      if (dev) console.log(`[timeline-debug] setLayerEnabled(left, ${key}) — single sub updated:`, { [key]: leftSublayerState[key] });
     }
   }
 
   function toggleLayerEnabled(pane: PaneId, key: SourceKey) {
-    const src = sourceByKey(key);
-    const prevState = pane === 'right' ? rightEnabledLayers[key] : leftEnabledLayers[key];
     const nextEnabled = pane === 'right' ? !rightEnabledLayers[key] : !leftEnabledLayers[key];
-    if (dev) console.log(`[timeline-debug] toggleLayerEnabled(${pane}, ${key}) — User clicked ${src.label} toggle — ${prevState} → ${nextEnabled}`);
     setLayerEnabled(pane, key, nextEnabled);
   }
 
@@ -548,23 +533,16 @@
   }
 
   function toggleSublayer(pane: PaneId, key: SourceKey, subId: string, localId: string) {
-    const src = sourceByKey(key);
-    const sub = src.sublayers.find(s => s.id === localId);
     const cur = isSublayerEnabled(pane, key, localId);
-    if (dev) console.log(`[timeline-debug] toggleSublayer(${pane}, ${key}, ${subId}, ${localId}) — User clicked ${src.label} → ${sub?.label} toggle — ${cur} → ${!cur}`);
 
     if (pane === 'right') {
       rightSublayerState = {
         ...rightSublayerState,
         [key]: { ...rightSublayerState[key], [localId]: !cur },
       };
-      if (dev) console.log(`[timeline-debug] toggleSublayer(right, ${subId}) — state updated:`, { [localId]: rightSublayerState[key]?.[localId] });
       const rightVisible = rightEnabledLayers[key] && rightVisibleSourceKeys.has(key);
       if (rightVisible) {
-        if (dev) console.log(`[timeline-debug] toggleSublayer(right, ${subId}) — dispatching paneSublayerChange, enabled=${!cur}`);
         dispatch('paneSublayerChange', { pane: 'right', subId, enabled: !cur });
-      } else {
-        if (dev) console.log(`[timeline-debug] toggleSublayer(right, ${subId}) — NOT dispatching (parentVisible=${rightVisible})`);
       }
       return;
     }
@@ -573,14 +551,10 @@
       ...leftSublayerState,
       [key]: { ...leftSublayerState[key], [localId]: !cur },
     };
-    if (dev) console.log(`[timeline-debug] toggleSublayer(left, ${subId}) — state updated:`, { [localId]: leftSublayerState[key]?.[localId] });
     const leftVisible = leftEnabledLayers[key] && leftVisibleSourceKeys.has(key);
     if (leftVisible) {
-      if (dev) console.log(`[timeline-debug] toggleSublayer(left, ${subId}) — dispatching sublayerChange + paneSublayerChange, enabled=${!cur}`);
       dispatch('sublayerChange', { subId, enabled: !cur });
       dispatch('paneSublayerChange', { pane: 'left', subId, enabled: !cur });
-    } else {
-      if (dev) console.log(`[timeline-debug] toggleSublayer(left, ${subId}) — NOT dispatching (parentVisible=${leftVisible})`);
     }
   }
 
@@ -721,6 +695,22 @@
   }
 
   onMount(() => {
+    let trackRaf = 0;
+    let trackResizeObserver: ResizeObserver | null = null;
+    const syncTrackWidth = () => {
+      trackWidth = trackEl?.clientWidth ?? 0;
+    };
+    const scheduleTrackWidthSync = () => {
+      if (trackRaf) cancelAnimationFrame(trackRaf);
+      trackRaf = requestAnimationFrame(syncTrackWidth);
+    };
+
+    scheduleTrackWidthSync();
+    if (trackEl) {
+      trackResizeObserver = new ResizeObserver(scheduleTrackWidthSync);
+      trackResizeObserver.observe(trackEl);
+    }
+
     for (const src of SOURCES) {
       const visible = leftEnabledLayers[src.key] && leftVisibleSourceKeys.has(src.key);
       prevVisible[src.key] = visible;
@@ -748,6 +738,11 @@
         }
       }
     }
+
+    return () => {
+      if (trackRaf) cancelAnimationFrame(trackRaf);
+      trackResizeObserver?.disconnect();
+    };
   });
 
   onDestroy(() => {
@@ -845,19 +840,14 @@
     for (const src of SOURCES) {
       const nowVisible = leftActiveVisibility[src.key];
       if (prevVisible[src.key] !== undefined && prevVisible[src.key] !== nowVisible) {
-        if (dev) console.log(`[timeline-debug] Year change detected for ${src.key} (${src.mainId}): ${prevVisible[src.key]} → ${nowVisible} (year=${sliderYear})`);
         dispatch('mainToggle', { mainId: src.mainId, enabled: nowVisible });
         if (!nowVisible) {
-          if (dev) console.log(`[timeline-debug]   Dispatching sublayerChange events to HIDE all sublayers for ${src.key}`);
           for (const sub of src.sublayers) {
-            if (dev) console.log(`[timeline-debug]     Dispatching sublayerChange: ${sub.subId} = false`);
             dispatch('sublayerChange', { subId: sub.subId, enabled: false });
           }
         } else {
-          if (dev) console.log(`[timeline-debug]   Dispatching sublayerChange events to SHOW sublayers for ${src.key}`);
           for (const sub of src.sublayers) {
             const shouldBeOn = leftSublayerState[src.key]?.[sub.id] ?? sub.defaultOn;
-            if (dev) console.log(`[timeline-debug]     Dispatching sublayerChange: ${sub.subId} = ${shouldBeOn}`);
             dispatch('sublayerChange', {
               subId: sub.subId,
               enabled: shouldBeOn,
@@ -914,7 +904,7 @@
 <svelte:window on:keydown={(e) => { if (e.key === 'Escape' && layerInfoModalKey) { layerInfoModalKey = null; } }} />
 
 <div class="timeslider">
-  <div class="ts-track" bind:clientWidth={trackWidth}>
+  <div class="ts-track" bind:this={trackEl}>
     {#if dualPaneEnabled}
       {#each visiblePanes as pane}
         <span
@@ -1025,8 +1015,8 @@
                           type="button"
                           aria-label="{src.label} info"
                           title="{src.label} info"
-                          aria-expanded={isInfoOpen(infoKey('left', src.key))}
-                          on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
+                          aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
+                          on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}
                         >i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
@@ -1108,8 +1098,8 @@
                         type="button"
                         aria-label="{src.label} info"
                         title="{src.label} info"
-                        aria-expanded={isInfoOpen(infoKey('left', src.key))}
-                        on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}
+                        aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
+                        on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}
                       >i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
@@ -1194,7 +1184,7 @@
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
                       <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
-                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)} on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}>i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
                             <div class="sub-menu-info-title">{layerMeta.title}</div>
@@ -1236,7 +1226,7 @@
                     </button>
                     <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
                     <div class="sub-menu-info-anchor">
-                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)} on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}>i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
                           <div class="sub-menu-info-title">{layerMeta.title}</div>
@@ -1292,7 +1282,7 @@
             min={axisStart}
             max={axisEnd}
             step="1"
-            value={yearForPane(pane.id)}
+            value={pane.id === 'left' ? localLeftYear : localRightYear}
             disabled={disabledPane === pane.id}
             on:input={(e) => onSliderInput(pane.id, e)}
             aria-label="{pane.label} timeline year"
@@ -1305,7 +1295,7 @@
           min={axisStart}
           max={axisEnd}
           step="1"
-          value={sliderYear}
+          bind:value={sliderYear}
           on:input={(e) => onSliderInput('left', e)}
           aria-label="Timeline year"
         />
@@ -1362,7 +1352,7 @@
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
                       <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
-                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)} on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}>i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
                             <div class="sub-menu-info-title">{layerMeta.title}</div>
@@ -1404,7 +1394,7 @@
                     </button>
                     <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
                     <div class="sub-menu-info-anchor">
-                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)} on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}>i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
                           <div class="sub-menu-info-title">{layerMeta.title}</div>
@@ -1480,7 +1470,7 @@
                         <span class="sub-menu-title-meta">{MAIN_LAYER_META[src.mainId]?.date}</span>
                       </span>
                       <div class="sub-menu-info-anchor sub-menu-info-anchor--compare">
-                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                        <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)} on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}>i</button>
                         {#if isInfoOpen(infoKey('left', src.key))}
                           <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
                             <div class="sub-menu-info-title">{layerMeta.title}</div>
@@ -1522,7 +1512,7 @@
                     </button>
                     <input class="sub-menu-checkbox-input" type="checkbox" checked={leftEnabledLayers[src.key]} aria-label="{src.label} layer visible in left pane" on:click|stopPropagation on:change={() => toggleLayerEnabled('left', src.key)} />
                     <div class="sub-menu-info-anchor">
-                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={isInfoOpen(infoKey('left', src.key))} on:click={(event) => onInfoButtonClick(event, infoKey('left', src.key))}>i</button>
+                      <button class="sub-menu-info-button" type="button" aria-label="{src.label} info" title="{src.label} info" aria-expanded={layerInfoModalKey === layerInfoKey('left', src.mainId)} on:click={(event) => onInfoButtonClick(event, layerInfoKey('left', src.mainId))}>i</button>
                       {#if isInfoOpen(infoKey('left', src.key))}
                         <div class="sub-menu-info-card" transition:fade={{ duration: 120 }}>
                           <div class="sub-menu-info-title">{layerMeta.title}</div>
@@ -1582,13 +1572,15 @@
         tabindex="-1"
         aria-modal="true"
         aria-label={layerMeta.title}
+        on:click|stopPropagation
+        on:keydown|stopPropagation
       >
         <div class="layer-info-head">
           <div>
             <div class="ui-label">Layer Info</div>
             <h2>{layerMeta.title}</h2>
           </div>
-          <button class="ui-btn layer-info-close" type="button" on:click={() => (layerInfoModalKey = null)}>Close</button>
+          <button class="ui-btn layer-info-close" type="button" on:click={closeLayerInfo}>Close</button>
         </div>
         <div class="layer-info-body">
           {#each layerMeta.info as paragraph}

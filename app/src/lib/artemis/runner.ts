@@ -34,7 +34,11 @@ export type CompiledIndexEntry = {
 export type LayerInfo = {
   sourceCollectionUrl: string;
   sourceCollectionLabel: string;
-  compiledCollectionPath: string;
+  compiledCollectionPath?: string;
+  map?: string;
+  layerId?: string;
+  geomapsPath?: string;
+  spritesPath?: string;
   manifestCount: number;
   georefCount: number;
   singleCanvasGeorefCount?: number;
@@ -50,8 +54,9 @@ export type CompiledIndex = {
   totalManifests: number;
   georefManifests: number;
   compiledOk: number;
-  layers: LayerInfo[];
+  layers?: LayerInfo[];
   renderLayers?: LayerInfo[];
+  iiifLayers?: LayerInfo[];
   index: CompiledIndexEntry[];
   domains?: {
     iiif?: { available: boolean; maps?: string[] };
@@ -82,11 +87,26 @@ export type LayerRenderStats = {
   subLayers?: SubLayerRenderStats[]; // only present when layer was split (chunkCount > 1)
 };
 
+type RuntimeLayerEntry = {
+  label: string;
+  sourceManifestUrl: string;
+  compiledManifestPath: string;
+  isVerzamelblad?: boolean;
+  annotSource?: "single" | "multi";
+  inlineAnnotations?: Array<{ url: string; raw: unknown }>;
+  manifestAllmapsUrl?: string;
+};
+
 type RunnerLog = (level: "INFO" | "WARN" | "ERROR", msg: string) => void;
 type PaneRuntimeId = string;
 
 export function getLayerGroupId(layerInfo: LayerInfo): string {
-  return `${layerInfo.compiledCollectionPath}::${layerInfo.renderLayerKey ?? "all"}`;
+  const base =
+    layerInfo.compiledCollectionPath ||
+    layerInfo.geomapsPath ||
+    layerInfo.map ||
+    layerInfo.sourceCollectionLabel;
+  return `${base}::${layerInfo.renderLayerKey ?? "all"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,19 +147,7 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
 // ---------------------------------------------------------------------------
 
 let cachedIndex: CompiledIndex | null = null;
-// Annotation JSON cache — shared across all panes and layer groups for the page lifetime.
-// Keyed by absolute annotation URL. Prevents duplicate network fetches when the same
-// layer is loaded into two panes simultaneously.
-const annotationJsonCache = new Map<string, Promise<unknown>>();
-// Canvas info.json index: keyed by canvasId (IIIF canvas URL) → full info.json content.
-// Built by Artemis-RnD-Data pipeline; committed to build/iiif/info/index.json.
-// Values have @id = image service URL, so we build a serviceUrl lookup on load.
-// serviceUrl → infoJson, keyed by the exact image service base URL.
-let cachedInfoByServiceUrl: Map<string, any> | null = null;
-// Entry lookup maps derived from cachedIndex — cached to avoid O(n) rebuild per runLayerGroup call.
-let cachedEntryByAbsoluteUrl: Map<string, CompiledIndexEntry> | null = null;
-let cachedEntryByRelativePath: Map<string, CompiledIndexEntry> | null = null;
-let cachedEntryMapsBaseUrl: string | null = null;
+const cachedNewIiifBundles = new Map<string, Promise<{ entries: RuntimeLayerEntry[]; infoByServiceUrl: Map<string, any> }>>();
 type ManifestInfo = {
   sourceManifestUrl: string;
   label: string;
@@ -185,11 +193,7 @@ function getPaneRuntime(paneId: PaneRuntimeId = "main"): PaneRuntime {
 
 export function resetCompiledIndexCache() {
   cachedIndex = null;
-  cachedInfoByServiceUrl = null;
-  cachedEntryByAbsoluteUrl = null;
-  cachedEntryByRelativePath = null;
-  cachedEntryMapsBaseUrl = null;
-  annotationJsonCache.clear();
+  cachedNewIiifBundles.clear();
   iiifTileCache.clear();
   iiifCacheHits = 0;
   iiifCacheMisses = 0;
@@ -236,32 +240,6 @@ export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<Comp
   const indexUrl = joinUrl(cfg.datasetBaseUrl, cfg.indexPath ?? "index.json");
   cachedIndex = await fetchJson<CompiledIndex>(indexUrl, cfg.fetchTimeoutMs ?? 30000);
   return cachedIndex;
-}
-
-// Phase 3: Image services are now consolidated into build/index.json.
-// Previously: separate fetch from iiif/info/index.json
-// Now: use buildIndex.imageServices directly in runLayerGroup
-// This reduces HTTP requests at startup by one.
-export async function loadCanvasInfoIndex(cfg: CompiledRunnerConfig, imageServices?: Record<string, any>): Promise<Map<string, any>> {
-  if (cachedInfoByServiceUrl) return cachedInfoByServiceUrl;
-
-  // Use consolidated imageServices from build/index.json if available
-  let raw: Record<string, any> = imageServices || {};
-
-  // Fallback: if no imageServices provided, try to load the old separate file (for compatibility)
-  if (!imageServices || Object.keys(imageServices).length === 0) {
-    try {
-      const url = joinUrl(cfg.datasetBaseUrl, "iiif/info/index.json");
-      raw = await fetchJson<Record<string, any>>(url, cfg.fetchTimeoutMs ?? 30000);
-    } catch {
-      // Graceful degradation — fall back to individual info.json fetches.
-    }
-  }
-
-  // Index is keyed by image service URL (exact string used to fetch {serviceUrl}/info.json).
-  // Direct Map construction — no bridge needed.
-  cachedInfoByServiceUrl = new Map(Object.entries(raw));
-  return cachedInfoByServiceUrl;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,31 +327,81 @@ function normalizeAllmapsPayload(raw: unknown): unknown {
   return raw;
 }
 
-type AnnotationRequest = {
-  path: string;
-};
-
-function getMirroredAnnotationRequests(entry: CompiledIndexEntry): AnnotationRequest[] {
-  // All annotations are canvas-level only (build/allmaps/canvases/<id>.json).
-  // Collect unique canvas paths from canvasAllmapsHits.
-  const canvasPaths: string[] = [];
-  const seenCanvasPaths = new Set<string>();
-  for (const hit of entry.canvasAllmapsHits ?? []) {
-    const canvasPath = hit.mirroredAllmapsAnnotationPath.trim();
-    if (!canvasPath || seenCanvasPaths.has(canvasPath)) continue;
-    canvasPaths.push(canvasPath);
-    seenCanvasPaths.add(canvasPath);
-  }
-  return canvasPaths.map((path) => ({ path }));
-}
-
-function deriveAllmapsManifestUrl(entry: CompiledIndexEntry): string | undefined {
+function deriveAllmapsManifestUrl(entry: { manifestAllmapsUrl?: string; manifestAllmapsId?: string }): string | undefined {
+  if (entry.manifestAllmapsUrl) return entry.manifestAllmapsUrl;
   if (!entry.manifestAllmapsId) return undefined;
   return `https://annotations.allmaps.org/manifests/${entry.manifestAllmapsId}`;
 }
 
-function normalizePath(path: string): string {
-  return path.replace(/^[./]+/, "");
+async function loadNewIiifEntries(
+  cfg: CompiledRunnerConfig,
+  layerInfo: LayerInfo,
+  timeout: number,
+  log?: RunnerLog
+): Promise<{
+  entries: RuntimeLayerEntry[];
+  infoByServiceUrl: Map<string, any>;
+}> {
+  const cacheKey = [
+    cfg.datasetBaseUrl.replace(/\/+$/, ""),
+    layerInfo.geomapsPath,
+  ].join("::");
+  const cached = cachedNewIiifBundles.get(cacheKey);
+  if (cached) return cached;
+
+  const bundlePromise = (async () => {
+    const geomapsUrl = joinUrl(cfg.datasetBaseUrl, layerInfo.geomapsPath!);
+    log?.("INFO", `[runLayerGroup] fetching IIIF geomaps bundle ${geomapsUrl}`);
+
+    const bundle = await fetchJson<any>(geomapsUrl, timeout);
+    const maps = (bundle?.maps ?? []) as any[];
+    const entries: RuntimeLayerEntry[] = [];
+    const infoByServiceUrl = new Map<string, any>();
+
+    for (const map of maps) {
+      const sourceManifestUrl = String(map.id ?? "").trim();
+      const label = String(map.label ?? sourceManifestUrl).trim();
+      const canvases = Array.isArray(map.canvases) ? map.canvases : [];
+
+      const inlineAnnotations = canvases.flatMap((canvas: any) => {
+        if (!canvas.georef) return [];
+        return [{ url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`, raw: canvas.georef }];
+      });
+
+      if (inlineAnnotations.length === 0) continue;
+
+      // Collect info by service URL
+      for (const canvas of canvases) {
+        if (canvas.info) {
+          const serviceUrl = String(canvas.info["@id"] ?? canvas.info.id ?? "").replace(/\/+$/, "");
+          if (serviceUrl) infoByServiceUrl.set(serviceUrl, canvas.info);
+        }
+      }
+
+      const firstItem = (inlineAnnotations[0]?.raw as any)?.items?.[0];
+      const manifestPartOf = firstItem?.target?.source?.partOf?.[0]?.partOf?.[0];
+      const manifestAllmapsUrl = typeof manifestPartOf?.id === "string" ? manifestPartOf.id : undefined;
+
+      entries.push({
+        label,
+        sourceManifestUrl,
+        compiledManifestPath: sourceManifestUrl || `${layerInfo.geomapsPath}#${encodeURIComponent(label)}`,
+        isVerzamelblad: map.isVerzamelblad ?? false,
+        annotSource: inlineAnnotations.length > 1 ? "multi" : "single",
+        inlineAnnotations,
+        manifestAllmapsUrl,
+      });
+    }
+
+    log?.("INFO", `[runLayerGroup] geomaps parsed: ${entries.length} entries, ${infoByServiceUrl.size} info services`);
+    return { entries, infoByServiceUrl };
+  })().catch((err) => {
+    cachedNewIiifBundles.delete(cacheKey);
+    throw err;
+  });
+
+  cachedNewIiifBundles.set(cacheKey, bundlePromise);
+  return bundlePromise;
 }
 
 function toAbsoluteUrl(baseUrl: string, maybePathOrUrl: string): string {
@@ -391,6 +419,14 @@ async function removeMaplibreLayer(map: maplibregl.Map, layerId: string) {
     if (map.getLayer(layerId)) map.removeLayer(layerId);
   } catch {
     // ignore
+  }
+}
+
+function safeHasMapLayer(map: maplibregl.Map, layerId: string): boolean {
+  try {
+    return Boolean(map?.getLayer?.(layerId));
+  } catch {
+    return false;
   }
 }
 
@@ -510,7 +546,10 @@ export async function runLayerGroup(opts: {
   const { map, cfg, layerInfo, log, debug = false, paneId = "main" } = opts;
   const runtime = getPaneRuntime(paneId);
   const layerLabel = layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel;
-  log?.("INFO", `[runLayerGroup] start pane=${paneId} label="${layerLabel}" path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? "all"}`);
+  log?.(
+    "INFO",
+    `[runLayerGroup] start pane=${paneId} label="${layerLabel}" compiledCollectionPath=${layerInfo.compiledCollectionPath ?? "n/a"} geomapsPath=${layerInfo.geomapsPath ?? "n/a"} renderKey=${layerInfo.renderLayerKey ?? "all"}`
+  );
 
   log?.("INFO", `[runLayerGroup] waiting for map ready label="${layerLabel}"`);
   await waitForMapReady(map);
@@ -533,43 +572,15 @@ export async function runLayerGroup(opts: {
   await removeLayerGroup(map, groupId, paneId);
   log?.("INFO", `[runLayerGroup] removed stale group label="${layerLabel}" groupId=${groupId}`);
 
-  const index = await loadCompiledIndex(cfg);
-  const infoByServiceUrl = await loadCanvasInfoIndex(cfg, index.imageServices);
+  if (!layerInfo.geomapsPath) {
+    log?.("ERROR", `[runLayerGroup] missing geomapsPath for "${layerLabel}"`);
+    throw new Error(`IIIF layer "${layerLabel}" has no geomapsPath`);
+  }
+
   const timeout = cfg.fetchTimeoutMs ?? 30000;
-  const compiledCollectionUrl = joinUrl(cfg.datasetBaseUrl, layerInfo.compiledCollectionPath);
-  log?.("INFO", `[runLayerGroup] fetching compiled collection label="${layerLabel}" url=${compiledCollectionUrl}`);
-  const compiledCollection = await fetchJson<{ manifests?: Array<{ "@id"?: string }> }>(
-    compiledCollectionUrl,
-    timeout
-  );
-  log?.("INFO", `[runLayerGroup] compiled collection fetched label="${layerLabel}" manifests=${compiledCollection.manifests?.length ?? 0}`);
-
-  // Build (or reuse) entry lookup maps — O(n) over the full index, cached per base URL.
-  if (!cachedEntryByAbsoluteUrl || cachedEntryMapsBaseUrl !== cfg.datasetBaseUrl) {
-    cachedEntryByAbsoluteUrl = new Map<string, CompiledIndexEntry>();
-    cachedEntryByRelativePath = new Map<string, CompiledIndexEntry>();
-    cachedEntryMapsBaseUrl = cfg.datasetBaseUrl;
-    for (const entry of index.index) {
-      const absoluteUrl = toAbsoluteUrl(cfg.datasetBaseUrl, entry.compiledManifestPath);
-      cachedEntryByAbsoluteUrl.set(absoluteUrl, entry);
-      cachedEntryByRelativePath.set(normalizePath(entry.compiledManifestPath), entry);
-    }
-  }
-  const entryByAbsoluteManifestUrl = cachedEntryByAbsoluteUrl;
-  const entryByRelativeManifestPath = cachedEntryByRelativePath!;
-
-  const entriesUnfiltered: CompiledIndexEntry[] = [];
-  for (const m of compiledCollection.manifests ?? []) {
-    const id = m?.["@id"]?.trim();
-    if (!id) continue;
-    const byAbsolute = entryByAbsoluteManifestUrl.get(id);
-    if (byAbsolute) {
-      entriesUnfiltered.push(byAbsolute);
-      continue;
-    }
-    const byRelative = entryByRelativeManifestPath.get(normalizePath(id));
-    if (byRelative) entriesUnfiltered.push(byRelative);
-  }
+  const loaded = await loadNewIiifEntries(cfg, layerInfo, timeout, log);
+  const infoByServiceUrl = loaded.infoByServiceUrl;
+  const entriesUnfiltered = loaded.entries;
 
   const entries = entriesUnfiltered.filter((entry) => {
     if (layerInfo.renderLayerKey === "verzamelblad") return entry.isVerzamelblad === true;
@@ -597,17 +608,6 @@ export async function runLayerGroup(opts: {
 
   const results: RunResult[] = [];
   const mapMetaByMapId = new Map<string, { label: string; manifestAllmapsUrl?: string }>();
-
-  // Prefetch all annotation JSONs in parallel, reusing module-level cache so a second
-  // pane loading the same layer group shares in-flight and completed fetches.
-  for (const entry of entries) {
-    for (const req of getMirroredAnnotationRequests(entry)) {
-      const url = joinUrl(cfg.datasetBaseUrl, req.path);
-      if (!annotationJsonCache.has(url)) {
-        annotationJsonCache.set(url, fetchJson<unknown>(url, timeout).catch(() => null));
-      }
-    }
-  }
 
   // Keep a single layer for stability. Multi-layer splitting can leave one
   // sub-layer permanently non-fetchable on dense Primitief runs.
@@ -829,171 +829,147 @@ export async function runLayerGroup(opts: {
     log?.("INFO", `[${label}] cleanup: removed ${mapHandlers.length} handlers`);
   });
 
-  // Phase 1: fetch all annotation JSONs in parallel
+  // Phase 1: collect inlined annotations from the geomaps bundle
   type FetchedAnnotation =
     | { url: string; raw: unknown; fetchMs: number }
     | { url: string; error: string };
   type Fetched =
-    | { entry: CompiledIndexEntry; annotations: FetchedAnnotation[] }
-    | { entry: CompiledIndexEntry; error: string };
+    | { entry: RuntimeLayerEntry; annotations: FetchedAnnotation[] }
+    | { entry: RuntimeLayerEntry; error: string };
 
   const fetchedAll = await Promise.all(
     entries.map(async (entry): Promise<Fetched> => {
-      const requests = getMirroredAnnotationRequests(entry);
-      if (requests.length === 0) {
+      if (!entry.inlineAnnotations?.length) {
         return { entry, error: "noAnnotation" };
       }
-      const annotations = await Promise.all(
-        requests.map(async (req): Promise<FetchedAnnotation> => {
-          const url = joinUrl(cfg.datasetBaseUrl, req.path);
-          const ts = nowMs();
-          try {
-            const raw = await (annotationJsonCache.get(url) ?? fetchJson<unknown>(url, timeout));
-            if (!raw) return { url, error: "fetch returned null" };
-            return { url, raw, fetchMs: nowMs() - ts };
-          } catch (e: any) {
-            return { url, error: String(e?.message ?? e) };
-          }
-        })
-      );
-
-      return { entry, annotations };
+      return {
+        entry,
+        annotations: entry.inlineAnnotations.map((a) => ({
+          url: a.url,
+          raw: a.raw,
+          fetchMs: 0,
+        })),
+      };
     })
   );
 
-  // Phase 2: serialize addGeoreferenceAnnotation — concurrent calls on the same
-  // WarpedMapLayer cause interleaved internal state mutations that produce flicker.
-  // Round-robin across sub-layers by GEOREF entry order (not total entry index).
-  // The full entry list includes many no-annotation entries at arbitrary positions;
-  // interleaving by total idx creates uneven georef distribution (geographic clusters
-  // land disproportionately in one layer). Counting only georef entries guarantees
-  // exactly ⌊georefTotal/chunkCount⌋ annotated entries per layer.
+  // Phase 2: apply georeference annotations concurrently.
   let done = 0;
-  let georefIdx = 0;
+  const processed = await Promise.all(
+    fetchedAll.map((item, idx) =>
+      (async (): Promise<RunResult> => {
+        const targetLayer = layers[idx % layers.length];
+        const compiledManifestUrl = toAbsoluteUrl(cfg.datasetBaseUrl, item.entry.compiledManifestPath);
+        const startedAtISO = new Date().toISOString();
+        const t0 = nowMs();
 
-  for (let idx = 0; idx < fetchedAll.length; idx++) {
-    const item = fetchedAll[idx];
-    // Assign layer before checking error so no-annotation entries don't consume a slot
-    const targetLayer = "error" in item ? layers[0] : layers[georefIdx % layers.length];
-    const compiledManifestUrl = joinUrl(cfg.datasetBaseUrl, item.entry.compiledManifestPath);
-    const startedAtISO = new Date().toISOString();
-    const t0 = nowMs();
+        if ("error" in item) {
+          return {
+            manifestUrl: compiledManifestUrl,
+            manifestLabel: item.entry.label,
+            sourceManifestUrl: item.entry.sourceManifestUrl,
+            allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
+            startedAtISO,
+            totalMs: 0,
+            steps: [{ step: "fetch_annotation", ms: 0, ok: item.error === "noAnnotation", detail: item.error }],
+            ok: item.error === "noAnnotation",
+            error: item.error === "noAnnotation" ? undefined : item.error
+          };
+        }
 
-    if ("error" in item) {
-      const result: RunResult = {
-        manifestUrl: compiledManifestUrl,
-        manifestLabel: item.entry.label,
-        sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
-        startedAtISO,
-        totalMs: 0,
-        steps: [{ step: "fetch_annotation", ms: 0, ok: item.error === "noAnnotation", detail: item.error }],
-        ok: item.error === "noAnnotation",
-        error: item.error === "noAnnotation" ? undefined : item.error
-      };
-      done++;
-      opts.onProgress?.(done, entries.length, result);
-      results.push(result);
-      continue;
-    }
+        const okAnnotations = item.annotations.filter((a): a is { url: string; raw: unknown; fetchMs: number } => "raw" in a);
+        const failedAnnotations = item.annotations.filter((a): a is { url: string; error: string } => "error" in a);
 
-    const okAnnotations = item.annotations.filter((a): a is { url: string; raw: unknown; fetchMs: number } => "raw" in a);
-    const failedAnnotations = item.annotations.filter((a): a is { url: string; error: string } => "error" in a);
+        const totalFetchMs = okAnnotations.reduce((sum, a) => sum + a.fetchMs, 0);
+        const steps: StepTiming[] = [
+          {
+            step: "fetch_annotation",
+            ms: totalFetchMs,
+            ok: okAnnotations.length > 0,
+            detail: `ok=${okAnnotations.length}/${item.annotations.length}`
+          }
+        ];
 
-    const totalFetchMs = okAnnotations.reduce((sum, a) => sum + a.fetchMs, 0);
-    const steps: StepTiming[] = [
-      {
-        step: "fetch_annotation",
-        ms: totalFetchMs,
-        ok: okAnnotations.length > 0,
-        detail: `ok=${okAnnotations.length}/${item.annotations.length}`
-      }
-    ];
+        if (okAnnotations.length === 0) {
+          return {
+            manifestUrl: compiledManifestUrl,
+            manifestLabel: item.entry.label,
+            sourceManifestUrl: item.entry.sourceManifestUrl,
+            allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
+            startedAtISO,
+            totalMs: nowMs() - t0,
+            steps,
+            ok: false,
+            error: `All annotation fetches failed (${failedAnnotations.length})`
+          };
+        }
 
-    if (okAnnotations.length === 0) {
-      const result: RunResult = {
-        manifestUrl: compiledManifestUrl,
-        manifestLabel: item.entry.label,
-        sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
-        startedAtISO,
-        totalMs: nowMs() - t0,
-        steps,
-        ok: false,
-        error: `All annotation fetches failed (${failedAnnotations.length})`
-      };
-      done++;
-      opts.onProgress?.(done, entries.length, result);
-      results.push(result);
-      continue;
-    }
+        try {
+          const ts2 = nowMs();
+          const annoResults: Array<string | Error> = [];
+          const appliedAnnotations = await Promise.all(
+            okAnnotations.map((a) => targetLayer.addGeoreferenceAnnotation(normalizeAllmapsPayload(a.raw)))
+          );
+          for (const result of appliedAnnotations) {
+            annoResults.push(...result);
+          }
+          const failed = annoResults.filter((r): r is Error => r instanceof Error);
+          if (failed.length > 0) {
+            manifestsWithAnnotationErrors++;
+            annotationErrorCount += failed.length;
+          }
+          const failedMessages = failed.map((err) => err.message);
+          for (const err of failed) log?.("ERROR", `annotation error [${item.entry.label} | ${deriveAllmapsManifestUrl(item.entry)}]: ${err.message}`);
+          if (!annoResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from annotation.");
+          const succeeded = annoResults.filter((r): r is string => typeof r === "string");
+          for (const mapId of succeeded) {
+            mapMetaByMapId.set(mapId, {
+              label: item.entry.label,
+              manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
+            });
+            runtime.mapIdToManifestInfo.set(mapId, {
+              sourceManifestUrl: item.entry.sourceManifestUrl,
+              label: item.entry.label,
+              compiledManifestPath: item.entry.compiledManifestPath,
+              manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
+            });
+          }
+          steps.push({
+            step: "allmaps_apply_annotation",
+            ms: nowMs() - ts2,
+            ok: failed.length === 0,
+            detail: `added=${succeeded.join(",")}${failed.length ? `; annotationErrors=${failed.length}` : ""}`
+          });
 
-    try {
-      georefIdx++;
-      const ts2 = nowMs();
-      const annoResults: Array<string | Error> = [];
-      // Important: keep this sequential. Concurrent addGeoreferenceAnnotation calls
-      // on the same WarpedMapLayer can interleave internal mutations.
-      for (const a of okAnnotations) {
-        const r = await targetLayer.addGeoreferenceAnnotation(
-          normalizeAllmapsPayload(a.raw)
-        );
-        annoResults.push(...r);
-      }
-      const failed = annoResults.filter((r): r is Error => r instanceof Error);
-      if (failed.length > 0) {
-        manifestsWithAnnotationErrors++;
-        annotationErrorCount += failed.length;
-      }
-      const failedMessages = failed.map((err) => err.message);
-      for (const err of failed) log?.("ERROR", `annotation error [${item.entry.label} | ${deriveAllmapsManifestUrl(item.entry)}]: ${err.message}`);
-      if (!annoResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from annotation.");
-      const succeeded = annoResults.filter((r): r is string => typeof r === "string");
-      for (const mapId of succeeded) {
-        mapMetaByMapId.set(mapId, {
-          label: item.entry.label,
-          manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
-        });
-        runtime.mapIdToManifestInfo.set(mapId, {
-          sourceManifestUrl: item.entry.sourceManifestUrl,
-          label: item.entry.label,
-          compiledManifestPath: item.entry.compiledManifestPath,
-          manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
-        });
-      }
-      steps.push({
-        step: "allmaps_apply_annotation",
-        ms: nowMs() - ts2,
-        ok: failed.length === 0,
-        detail: `added=${succeeded.join(",")}${failed.length ? `; annotationErrors=${failed.length}` : ""}`
-      });
-
-      const result: RunResult = {
-        manifestUrl: compiledManifestUrl,
-        annotationUrl: okAnnotations[0]?.url,
-        manifestLabel: item.entry.label,
-        sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
-        startedAtISO, totalMs: nowMs() - t0, steps, ok: true,
-        annotationErrorCount: failed.length,
-        annotationErrors: failedMessages
-      };
-      done++; opts.onProgress?.(done, entries.length, result);
-      results.push(result);
-    } catch (err: any) {
-      const result: RunResult = {
-        manifestUrl: compiledManifestUrl,
-        manifestLabel: item.entry.label,
-        sourceManifestUrl: item.entry.sourceManifestUrl,
-        allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
-        startedAtISO,
-        totalMs: nowMs() - t0, steps, ok: false,
-        error: String(err?.message ?? err)
-      };
-      done++; opts.onProgress?.(done, entries.length, result);
-      results.push(result);
-    }
-  }
+          return {
+            manifestUrl: compiledManifestUrl,
+            annotationUrl: okAnnotations[0]?.url,
+            manifestLabel: item.entry.label,
+            sourceManifestUrl: item.entry.sourceManifestUrl,
+            allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
+            startedAtISO, totalMs: nowMs() - t0, steps, ok: true,
+            annotationErrorCount: failed.length,
+            annotationErrors: failedMessages
+          };
+        } catch (err: any) {
+          return {
+            manifestUrl: compiledManifestUrl,
+            manifestLabel: item.entry.label,
+            sourceManifestUrl: item.entry.sourceManifestUrl,
+            allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
+            startedAtISO,
+            totalMs: nowMs() - t0, steps, ok: false,
+            error: String(err?.message ?? err)
+          };
+        }
+      })().then((result) => {
+        done++;
+        opts.onProgress?.(done, entries.length, result);
+        return result;
+      })
+    )
+  );
+  results.push(...processed);
 
   // Pre-warm image infos: fetch all IIIF info.json files concurrently and inject
   // them into all sub-layers' image caches via addImageInfos(). Without this, the render
@@ -1152,7 +1128,7 @@ export async function runLayerGroup(opts: {
   }
 
   const repaintHandle = cleanupRef.interval = setInterval(() => {
-    if (!map.getLayer(layerIds[0])) { clearInterval(repaintHandle); return; }
+    if (!safeHasMapLayer(map, layerIds[0])) { clearInterval(repaintHandle); return; }
     const now = nowMs();
     const elapsed = now - keepaliveStartMs;
     const idleMs = now - lastProgressAtMs;

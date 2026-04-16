@@ -9,7 +9,12 @@ import type { LayerInfo } from "$lib/artemis/runner";
 // --- Group ID ---
 
 export function getLayerGroupId(layerInfo: LayerInfo): string {
-  return `${layerInfo.compiledCollectionPath}::${layerInfo.renderLayerKey ?? "all"}`;
+  const base =
+    layerInfo.compiledCollectionPath ||
+    layerInfo.geomapsPath ||
+    layerInfo.map ||
+    layerInfo.sourceCollectionLabel;
+  return `${base}::${layerInfo.renderLayerKey ?? "all"}`;
 }
 
 // --- Internal state ---
