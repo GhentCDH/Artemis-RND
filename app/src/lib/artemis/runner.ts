@@ -93,7 +93,21 @@ type RuntimeLayerEntry = {
   compiledManifestPath: string;
   isVerzamelblad?: boolean;
   annotSource?: "single" | "multi";
-  inlineAnnotations?: Array<{ url: string; raw: unknown }>;
+  canvasCount?: number;
+  inlineMaps?: Array<{ url: string; raw: unknown }>;
+  inlineSprites?: Array<{
+    imageUrl: string;
+    imageSize: [number, number];
+    sprite: {
+      imageId: string;
+      scaleFactor: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      spriteTileScale?: number;
+    };
+  }>;
   manifestAllmapsUrl?: string;
 };
 
@@ -115,6 +129,53 @@ export function getLayerGroupId(layerInfo: LayerInfo): string {
 
 function nowMs() {
   return performance.now();
+}
+
+function emitIiifStep(log: RunnerLog | undefined, layerLabel: string, step: string, detail?: string) {
+  const message = `[IIIF] ${layerLabel} :: ${step}${detail ? ` :: ${detail}` : ""}`;
+  log?.("INFO", message);
+  console.info(message);
+}
+
+function getEntryGeoCenter(entry: RuntimeLayerEntry): [number, number] | null {
+  const coords: Array<[number, number]> = [];
+  for (const item of entry.inlineMaps ?? []) {
+    const gcps = (item.raw as any)?.gcps;
+    if (!Array.isArray(gcps)) continue;
+    for (const gcp of gcps) {
+      const geo = gcp?.geo;
+      if (!Array.isArray(geo) || geo.length < 2) continue;
+      const lon = Number(geo[0]);
+      const lat = Number(geo[1]);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) coords.push([lon, lat]);
+    }
+  }
+  if (coords.length === 0) return null;
+  const [sumLon, sumLat] = coords.reduce(([accLon, accLat], [lon, lat]) => [accLon + lon, accLat + lat], [0, 0]);
+  return [sumLon / coords.length, sumLat / coords.length];
+}
+
+function scoreEntryForViewport(entry: RuntimeLayerEntry, viewportCenter: [number, number] | null): number {
+  if (!viewportCenter) return Number.POSITIVE_INFINITY;
+  const entryCenter = getEntryGeoCenter(entry);
+  if (!entryCenter) return Number.POSITIVE_INFINITY;
+  const dx = entryCenter[0] - viewportCenter[0];
+  const dy = entryCenter[1] - viewportCenter[1];
+  return dx * dx + dy * dy;
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+// Kept for debug UI compatibility. The custom shared fetch cache was removed
+// because Allmaps sprite workers cannot clone a user-supplied fetch function.
+const iiifTileCache = new Map<string, Promise<ArrayBuffer>>();
+let iiifCacheHits = 0;
+let iiifCacheMisses = 0;
+
+export function getIiifCacheStats() {
+  return { size: iiifTileCache.size, hits: iiifCacheHits, misses: iiifCacheMisses };
 }
 
 function joinUrl(base: string, path: string) {
@@ -280,53 +341,6 @@ function waitForMapReady(map: maplibregl.Map): Promise<void> {
   });
 }
 
-// ---------------------------------------------------------------------------
-// IIIF tile cache — shared across all layers for the page lifetime
-// ---------------------------------------------------------------------------
-
-const iiifTileCache = new Map<string, Promise<ArrayBuffer>>();
-let iiifCacheHits = 0;
-let iiifCacheMisses = 0;
-
-export function getIiifCacheStats() {
-  return { size: iiifTileCache.size, hits: iiifCacheHits, misses: iiifCacheMisses };
-}
-
-function cachedFetch(input: Request | string | URL, init?: RequestInit): Promise<Response> {
-  const url =
-    typeof input === "string" ? input
-    : input instanceof URL ? input.toString()
-    : (input as Request).url;
-
-  if (!iiifTileCache.has(url)) {
-    iiifCacheMisses++;
-    iiifTileCache.set(
-      url,
-      fetch(input, init)
-        .then((r) => {
-          if (!r.ok) { iiifTileCache.delete(url); throw new Error(`HTTP ${r.status}`); }
-          return r.arrayBuffer();
-        })
-        .catch((err) => { iiifTileCache.delete(url); throw err; })
-    );
-  } else {
-    iiifCacheHits++;
-  }
-
-  return iiifTileCache.get(url)!.then((buf) => new Response(buf));
-}
-
-// ---------------------------------------------------------------------------
-// Allmaps payload normalization
-// ---------------------------------------------------------------------------
-
-function normalizeAllmapsPayload(raw: unknown): unknown {
-  if (Array.isArray(raw)) {
-    return { "@context": "http://www.w3.org/ns/anno.jsonld", type: "AnnotationPage", items: raw };
-  }
-  return raw;
-}
-
 function deriveAllmapsManifestUrl(entry: { manifestAllmapsUrl?: string; manifestAllmapsId?: string }): string | undefined {
   if (entry.manifestAllmapsUrl) return entry.manifestAllmapsUrl;
   if (!entry.manifestAllmapsId) return undefined;
@@ -351,7 +365,8 @@ async function loadNewIiifEntries(
 
   const bundlePromise = (async () => {
     const geomapsUrl = joinUrl(cfg.datasetBaseUrl, layerInfo.geomapsPath!);
-    log?.("INFO", `[runLayerGroup] fetching IIIF geomaps bundle ${geomapsUrl}`);
+    const fetchStartedAt = nowMs();
+    emitIiifStep(log, layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel, "fetch-geomaps:start", geomapsUrl);
 
     const bundle = await fetchJson<any>(geomapsUrl, timeout);
     const maps = (bundle?.maps ?? []) as any[];
@@ -363,12 +378,21 @@ async function loadNewIiifEntries(
       const label = String(map.label ?? sourceManifestUrl).trim();
       const canvases = Array.isArray(map.canvases) ? map.canvases : [];
 
-      const inlineAnnotations = canvases.flatMap((canvas: any) => {
-        if (!canvas.georef) return [];
-        return [{ url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`, raw: canvas.georef }];
+      const inlineMaps = canvases.flatMap((canvas: any) => {
+        if (!canvas.georeferencedMap) return [];
+        return [{ url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`, raw: canvas.georeferencedMap }];
+      });
+      const inlineSprites = canvases.flatMap((canvas: any) => {
+        if (!canvas.sprite || !canvas.allmapsSprite || !canvas.spriteWidth || !canvas.spriteHeight) return [];
+        const imageUrl = joinUrl(cfg.datasetBaseUrl, String(canvas.sprite));
+        return [{
+          imageUrl,
+          imageSize: [Number(canvas.spriteWidth), Number(canvas.spriteHeight)] as [number, number],
+          sprite: canvas.allmapsSprite,
+        }];
       });
 
-      if (inlineAnnotations.length === 0) continue;
+      if (inlineMaps.length === 0) continue;
 
       // Collect info by service URL
       for (const canvas of canvases) {
@@ -378,8 +402,8 @@ async function loadNewIiifEntries(
         }
       }
 
-      const firstItem = (inlineAnnotations[0]?.raw as any)?.items?.[0];
-      const manifestPartOf = firstItem?.target?.source?.partOf?.[0]?.partOf?.[0];
+      const firstMap = inlineMaps[0]?.raw as any;
+      const manifestPartOf = firstMap?.resource?.partOf?.[0]?.partOf?.[0];
       const manifestAllmapsUrl = typeof manifestPartOf?.id === "string" ? manifestPartOf.id : undefined;
 
       entries.push({
@@ -387,13 +411,20 @@ async function loadNewIiifEntries(
         sourceManifestUrl,
         compiledManifestPath: sourceManifestUrl || `${layerInfo.geomapsPath}#${encodeURIComponent(label)}`,
         isVerzamelblad: map.isVerzamelblad ?? false,
-        annotSource: inlineAnnotations.length > 1 ? "multi" : "single",
-        inlineAnnotations,
+        annotSource: inlineMaps.length > 1 ? "multi" : "single",
+        canvasCount: canvases.length,
+        inlineMaps,
+        inlineSprites,
         manifestAllmapsUrl,
       });
     }
 
-    log?.("INFO", `[runLayerGroup] geomaps parsed: ${entries.length} entries, ${infoByServiceUrl.size} info services`);
+    emitIiifStep(
+      log,
+      layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel,
+      "fetch-geomaps:done",
+      `${Math.round(nowMs() - fetchStartedAt)}ms maps=${maps.length} entries=${entries.length} info=${infoByServiceUrl.size}`
+    );
     return { entries, infoByServiceUrl };
   })().catch((err) => {
     cachedNewIiifBundles.delete(cacheKey);
@@ -546,14 +577,17 @@ export async function runLayerGroup(opts: {
   const { map, cfg, layerInfo, log, debug = false, paneId = "main" } = opts;
   const runtime = getPaneRuntime(paneId);
   const layerLabel = layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel;
+  const runStartedAt = nowMs();
   log?.(
     "INFO",
     `[runLayerGroup] start pane=${paneId} label="${layerLabel}" compiledCollectionPath=${layerInfo.compiledCollectionPath ?? "n/a"} geomapsPath=${layerInfo.geomapsPath ?? "n/a"} renderKey=${layerInfo.renderLayerKey ?? "all"}`
   );
+  emitIiifStep(log, layerLabel, "run:start", `pane=${paneId} renderKey=${layerInfo.renderLayerKey ?? "all"}`);
 
   log?.("INFO", `[runLayerGroup] waiting for map ready label="${layerLabel}"`);
   await waitForMapReady(map);
   log?.("INFO", `[runLayerGroup] map ready label="${layerLabel}"`);
+  emitIiifStep(log, layerLabel, "map-ready");
 
   const groupId = getLayerGroupId(layerInfo);
 
@@ -591,6 +625,7 @@ export async function runLayerGroup(opts: {
   });
 
   log?.("INFO", `Layer "${layerLabel}": ${entries.length} entries`);
+  emitIiifStep(log, layerLabel, "filter-entries", `total=${entriesUnfiltered.length} active=${entries.length}`);
 
   // Log annotation source strategy for debug visibility
   if (debug) {
@@ -609,17 +644,16 @@ export async function runLayerGroup(opts: {
   const results: RunResult[] = [];
   const mapMetaByMapId = new Map<string, { label: string; manifestAllmapsUrl?: string }>();
 
-  // Keep a single layer for stability. Multi-layer splitting can leave one
-  // sub-layer permanently non-fetchable on dense Primitief runs.
   const chunkCount = 1;
 
   const layerIds = Array.from({ length: chunkCount }, (_, i) =>
     `warped-layer-${groupId.replace(/\//g, "-")}${chunkCount > 1 ? `-${i}` : ""}`
   );
   const layers: WarpedMapLayer[] = [];
+  const layerCreateStartedAt = nowMs();
   for (let i = 0; i < chunkCount; i++) {
     await removeMaplibreLayer(map, layerIds[i]);
-    const l = new WarpedMapLayer({ layerId: layerIds[i], fetchFn: cachedFetch } as any);
+    const l = new WarpedMapLayer({ layerId: layerIds[i], renderMaps: false } as any);
     try {
       map.addLayer(l as any);
       layers.push(l);
@@ -630,6 +664,7 @@ export async function runLayerGroup(opts: {
   }
   runtime.activeLayersByGroup.set(groupId, layerIds);
   runtime.activeWarpedLayersByGroup.set(groupId, layers);
+  emitIiifStep(log, layerLabel, "create-warped-layers", `${Math.round(nowMs() - layerCreateStartedAt)}ms count=${layers.length}`);
 
   // ---------------------------------------------------------------------------
   // Debug event listeners
@@ -647,14 +682,25 @@ export async function runLayerGroup(opts: {
   let manifestsWithAnnotationErrors = 0;
   let warpedMapAddedEvents = 0;
   let firstMapTileLoadedEvents = 0;
+  let spriteTileLoadedEvents = 0;
   const addedMapIds = new Set<string>();
   const imageInfoMapIds = new Set<string>();
   const firstTileMapIds = new Set<string>();
+  const spriteTileMapIds = new Set<string>();
   const inViewportMapIds = new Set<string>();
   let fallbackInViewportCount = 0;
   let peakMapsInViewport = 0;
   let lastProgressAtMs = nowMs();
   let lastStatsEmitAtMs = 0;
+  let resolveBootstrapVisualReady: (() => void) | null = null;
+  let bootstrapVisualReadyResolved = false;
+
+  function markBootstrapVisualReady() {
+    if (bootstrapVisualReadyResolved) return;
+    bootstrapVisualReadyResolved = true;
+    resolveBootstrapVisualReady?.();
+    resolveBootstrapVisualReady = null;
+  }
 
   const layerIdSet = new Set(layerIds);
 
@@ -744,10 +790,20 @@ export async function runLayerGroup(opts: {
     for (const id of ids) firstTileMapIds.add(id);
     firstTilesLoaded = firstTileMapIds.size || firstMapTileLoadedEvents;
     lastProgressAtMs = nowMs();
+    markBootstrapVisualReady();
     emitRenderStats();
     if (firstTilesLoaded <= 5 || firstTilesLoaded % NOISY_LOG_EVERY === 0) {
       log?.("INFO", `[${label}] firstmaptileloaded events:${firstMapTileLoadedEvents} maps:${firstTilesLoaded} ids=[${ids.join(",")}]`);
     }
+  });
+
+  onMap("maptilesloadedfromsprites", (e) => {
+    const ids: string[] = e.mapIds ?? [];
+    spriteTileLoadedEvents++;
+    for (const id of ids) spriteTileMapIds.add(id);
+    lastProgressAtMs = nowMs();
+    markBootstrapVisualReady();
+    log?.("INFO", `[${label}] maptilesloadedfromsprites events:${spriteTileLoadedEvents} maps:${spriteTileMapIds.size || ids.length} ids=[${ids.join(",")}]`);
   });
 
   onMap("allrequestedtilesloaded", () => {
@@ -829,36 +885,118 @@ export async function runLayerGroup(opts: {
     log?.("INFO", `[${label}] cleanup: removed ${mapHandlers.length} handlers`);
   });
 
-  // Phase 1: collect inlined annotations from the geomaps bundle
-  type FetchedAnnotation =
+  // Phase 1: collect inlined georeferenced maps from the geomaps bundle
+  type FetchedGeoreferencedMap =
     | { url: string; raw: unknown; fetchMs: number }
     | { url: string; error: string };
+  type FetchedSprite = {
+    imageUrl: string;
+    imageSize: [number, number];
+    sprite: {
+      imageId: string;
+      scaleFactor: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      spriteTileScale?: number;
+    };
+  };
   type Fetched =
-    | { entry: RuntimeLayerEntry; annotations: FetchedAnnotation[] }
+    | { entry: RuntimeLayerEntry; maps: FetchedGeoreferencedMap[]; sprites: FetchedSprite[] }
     | { entry: RuntimeLayerEntry; error: string };
+
+  // Seed IIIF info before map ingestion so warped maps can resolve images from cache
+  // as soon as they enter the viewport, instead of discovering info.json later.
+  try {
+    const preloadStartedAt = nowMs();
+    const valid = [...infoByServiceUrl.entries()]
+      .map(([serviceUrl, info]) => ({ ...info, "@id": serviceUrl, id: serviceUrl }))
+      .filter(Boolean);
+    if (valid.length > 0) {
+      emitIiifStep(log, layerLabel, "warm-image-info:start", `targets=${valid.length}`);
+      for (const l of layers) (l as any).addImageInfos?.(valid);
+      emitIiifStep(log, layerLabel, "warm-image-info:done", `${Math.round(nowMs() - preloadStartedAt)}ms valid=${valid.length}/${valid.length}`);
+    }
+  } catch (e: any) {
+    log?.("WARN", `[${label}] image info pre-warm failed before map ingest: ${e?.message ?? e}`);
+    emitIiifStep(log, layerLabel, "warm-image-info:error", String(e?.message ?? e));
+  }
 
   const fetchedAll = await Promise.all(
     entries.map(async (entry): Promise<Fetched> => {
-      if (!entry.inlineAnnotations?.length) {
-        return { entry, error: "noAnnotation" };
+      if (!entry.inlineMaps?.length) {
+        return { entry, error: "noGeoreferencedMap" };
       }
       return {
         entry,
-        annotations: entry.inlineAnnotations.map((a) => ({
+        maps: entry.inlineMaps.map((a) => ({
           url: a.url,
           raw: a.raw,
           fetchMs: 0,
         })),
+        sprites: entry.inlineSprites ?? [],
       };
     })
   );
+  emitIiifStep(log, layerLabel, "collect-maps", `entries=${fetchedAll.length}`);
 
-  // Phase 2: apply georeference annotations concurrently.
+  const viewportCenter = (() => {
+    try {
+      const center = map.getCenter();
+      return [center.lng, center.lat] as [number, number];
+    } catch {
+      return null;
+    }
+  })();
+  const BOOTSTRAP_MAP_LIMIT = 24;
+  const prioritizedFetched = [...fetchedAll].sort((a, b) =>
+    scoreEntryForViewport(a.entry, viewportCenter) - scoreEntryForViewport(b.entry, viewportCenter)
+  );
+  const bootstrapFetched: Fetched[] = [];
+  const backgroundFetched: Fetched[] = [];
+  let bootstrapMapBudget = 0;
+  for (const item of prioritizedFetched) {
+    const itemMapCount = "maps" in item ? item.maps.filter((m) => "raw" in m).length : 0;
+    if (bootstrapFetched.length < 1 || bootstrapMapBudget < BOOTSTRAP_MAP_LIMIT) {
+      bootstrapFetched.push(item);
+      bootstrapMapBudget += itemMapCount;
+    } else {
+      backgroundFetched.push(item);
+    }
+  }
+  emitIiifStep(
+    log,
+    layerLabel,
+    "bootstrap-selection",
+    `entries=${bootstrapFetched.length} maps=${bootstrapMapBudget} remaining=${backgroundFetched.length}`
+  );
+
+  // Phase 2: apply georeferenced maps with a bootstrap-first pass so sprites can
+  // appear quickly near the current view instead of waiting for the full ingest.
   let done = 0;
-  const processed = await Promise.all(
-    fetchedAll.map((item, idx) =>
+  const applyStartedAt = nowMs();
+  const slowManifestThresholdMs = 50;
+  const subLayerAssignments = Array.from({ length: layers.length }, () => ({
+    manifests: 0,
+    maps: 0,
+  }));
+  const subLayerCompletionMs = Array.from({ length: layers.length }, () => 0);
+  const applyDiagnostics: Array<{
+    label: string;
+    manifestUrl: string;
+    mapCount: number;
+    canvasCount: number;
+    addedCount: number;
+    failedCount: number;
+    ms: number;
+    subLayerIndex: number;
+  }> = [];
+  async function applyFetchedBatch(batch: Fetched[], startIndex: number, mode: "sequential" | "parallel" | "chunked"): Promise<RunResult[]> {
+    const runOne = async (item: Fetched, idx: number): Promise<RunResult> =>
       (async (): Promise<RunResult> => {
-        const targetLayer = layers[idx % layers.length];
+        const subLayerIndex = idx % layers.length;
+        const targetLayer = layers[subLayerIndex];
         const compiledManifestUrl = toAbsoluteUrl(cfg.datasetBaseUrl, item.entry.compiledManifestPath);
         const startedAtISO = new Date().toISOString();
         const t0 = nowMs();
@@ -871,26 +1009,28 @@ export async function runLayerGroup(opts: {
             allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
             startedAtISO,
             totalMs: 0,
-            steps: [{ step: "fetch_annotation", ms: 0, ok: item.error === "noAnnotation", detail: item.error }],
-            ok: item.error === "noAnnotation",
-            error: item.error === "noAnnotation" ? undefined : item.error
+            steps: [{ step: "fetch_georeferenced_map", ms: 0, ok: item.error === "noGeoreferencedMap", detail: item.error }],
+            ok: item.error === "noGeoreferencedMap",
+            error: item.error === "noGeoreferencedMap" ? undefined : item.error
           };
         }
 
-        const okAnnotations = item.annotations.filter((a): a is { url: string; raw: unknown; fetchMs: number } => "raw" in a);
-        const failedAnnotations = item.annotations.filter((a): a is { url: string; error: string } => "error" in a);
+        const okMaps = item.maps.filter((a): a is { url: string; raw: unknown; fetchMs: number } => "raw" in a);
+        const failedMaps = item.maps.filter((a): a is { url: string; error: string } => "error" in a);
+        subLayerAssignments[subLayerIndex].manifests++;
+        subLayerAssignments[subLayerIndex].maps += okMaps.length;
 
-        const totalFetchMs = okAnnotations.reduce((sum, a) => sum + a.fetchMs, 0);
+        const totalFetchMs = okMaps.reduce((sum, a) => sum + a.fetchMs, 0);
         const steps: StepTiming[] = [
           {
-            step: "fetch_annotation",
+            step: "fetch_georeferenced_map",
             ms: totalFetchMs,
-            ok: okAnnotations.length > 0,
-            detail: `ok=${okAnnotations.length}/${item.annotations.length}`
+            ok: okMaps.length > 0,
+            detail: `ok=${okMaps.length}/${item.maps.length}`
           }
         ];
 
-        if (okAnnotations.length === 0) {
+        if (okMaps.length === 0) {
           return {
             manifestUrl: compiledManifestUrl,
             manifestLabel: item.entry.label,
@@ -900,28 +1040,49 @@ export async function runLayerGroup(opts: {
             totalMs: nowMs() - t0,
             steps,
             ok: false,
-            error: `All annotation fetches failed (${failedAnnotations.length})`
+            error: `All georeferenced map loads failed (${failedMaps.length})`
           };
         }
 
         try {
           const ts2 = nowMs();
-          const annoResults: Array<string | Error> = [];
-          const appliedAnnotations = await Promise.all(
-            okAnnotations.map((a) => targetLayer.addGeoreferenceAnnotation(normalizeAllmapsPayload(a.raw)))
+          const mapResults = await Promise.allSettled(
+            okMaps.map((a) => targetLayer.addGeoreferencedMap(a.raw))
           );
-          for (const result of appliedAnnotations) {
-            annoResults.push(...result);
+          const allmapsResults: Array<string | Error> = [];
+          for (const result of mapResults) {
+            if (result.status === "fulfilled") allmapsResults.push(result.value);
+            else allmapsResults.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
           }
-          const failed = annoResults.filter((r): r is Error => r instanceof Error);
+          const failed = allmapsResults.filter((r): r is Error => r instanceof Error);
           if (failed.length > 0) {
             manifestsWithAnnotationErrors++;
             annotationErrorCount += failed.length;
           }
           const failedMessages = failed.map((err) => err.message);
           for (const err of failed) log?.("ERROR", `annotation error [${item.entry.label} | ${deriveAllmapsManifestUrl(item.entry)}]: ${err.message}`);
-          if (!annoResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from annotation.");
-          const succeeded = annoResults.filter((r): r is string => typeof r === "string");
+          if (!allmapsResults.some((r) => typeof r === "string")) throw new Error("No maps loaded from georeferenced maps.");
+          const succeeded = allmapsResults.filter((r): r is string => typeof r === "string");
+          const applyMs = nowMs() - ts2;
+          applyDiagnostics.push({
+            label: item.entry.label,
+            manifestUrl: item.entry.sourceManifestUrl,
+            mapCount: okMaps.length,
+            canvasCount: item.entry.canvasCount ?? okMaps.length,
+            addedCount: succeeded.length,
+            failedCount: failed.length,
+            ms: applyMs,
+            subLayerIndex,
+          });
+          subLayerCompletionMs[subLayerIndex] = Math.max(subLayerCompletionMs[subLayerIndex], applyMs);
+          if (applyMs >= slowManifestThresholdMs) {
+            emitIiifStep(
+              log,
+              layerLabel,
+              "apply-manifest:slow",
+              `${Math.round(applyMs)}ms layer=${subLayerIndex} label="${item.entry.label}" canvases=${item.entry.canvasCount ?? "?"} maps=${okMaps.length} added=${succeeded.length} failed=${failed.length}`
+            );
+          }
           for (const mapId of succeeded) {
             mapMetaByMapId.set(mapId, {
               label: item.entry.label,
@@ -935,15 +1096,15 @@ export async function runLayerGroup(opts: {
             });
           }
           steps.push({
-            step: "allmaps_apply_annotation",
-            ms: nowMs() - ts2,
+            step: "allmaps_add_georeferenced_map",
+            ms: applyMs,
             ok: failed.length === 0,
             detail: `added=${succeeded.join(",")}${failed.length ? `; annotationErrors=${failed.length}` : ""}`
           });
 
           return {
             manifestUrl: compiledManifestUrl,
-            annotationUrl: okAnnotations[0]?.url,
+            annotationUrl: okMaps[0]?.url,
             manifestLabel: item.entry.label,
             sourceManifestUrl: item.entry.sourceManifestUrl,
             allmapsManifestUrl: deriveAllmapsManifestUrl(item.entry),
@@ -966,75 +1127,143 @@ export async function runLayerGroup(opts: {
         done++;
         opts.onProgress?.(done, entries.length, result);
         return result;
-      })
-    )
-  );
-  results.push(...processed);
+      });
 
-  // Pre-warm image infos: fetch all IIIF info.json files concurrently and inject
-  // them into all sub-layers' image caches via addImageInfos(). Without this, the render
-  // loop discovers maps one batch per frame via loadMissingImagesInViewport(), leaving
-  // many maps "visible but not fetchable" for several render cycles.
-  try {
-    const allWarpedMaps: any[] = [];
-    for (const l of layers) {
-      const wms = Array.from((l as any).renderer?.warpedMapList?.getWarpedMaps?.() ?? []) as any[];
-      allWarpedMaps.push(...wms);
+    if (mode === "sequential") {
+      const out: RunResult[] = [];
+      for (let i = 0; i < batch.length; i++) {
+        out.push(await runOne(batch[i], startIndex + i));
+      }
+      return out;
     }
-    const uniqueImageUrls = [
-      ...new Set(
-        allWarpedMaps
-          .filter((wm) => !wm.hasImage?.())
-          .map((wm) => wm.georeferencedMap?.resource?.id)
-          .filter(Boolean)
-      )
-    ] as string[];
-
-    if (uniqueImageUrls.length > 0) {
-      log?.("INFO", `[${label}] pre-warming ${uniqueImageUrls.length} image infos across ${layers.length} sub-layer(s)...`);
-      const tsWarm = nowMs();
-      let cacheHits = 0;
-      let cacheMisses = 0;
-      const infoJsons = await Promise.all(
-        uniqueImageUrls.map(async (url) => {
-          const normalizedUrl = url.replace(/\/+$/, "");
-          const cached = infoByServiceUrl.get(normalizedUrl);
-          if (cached) {
-            cacheHits++;
-            // Normalize @id / id to the URL the warped map expects, same as the
-            // live-fetch path below.
-            return { ...cached, "@id": url, id: url };
-          }
-          cacheMisses++;
-          try {
-            const res = await fetch(`${url}/info.json`);
-            if (!res.ok) return null;
-            const info = await res.json();
-            // Normalize: addImageInfos matches info["@id"] / info.id against
-            // warpedMap.georeferencedMap.resource.id. If the server returns a
-            // canonical @id that differs from the URL we fetched with (e.g.
-            // http→https, trailing slash), the match fails silently. Force both
-            // fields to the URL we know the map expects.
-            return { ...info, "@id": url, id: url };
-          } catch { return null; }
-        })
-      );
-      log?.("INFO", `[${label}] info.json cache: ${cacheHits} hits / ${cacheMisses} misses (${uniqueImageUrls.length} total)`);
-      const valid = infoJsons.filter(Boolean);
-      if (valid.length > 0) {
-        for (const l of layers) (l as any).addImageInfos?.(valid);
-        // Verify: log per-layer hasImage() coverage so we can tell if addImageInfos matched correctly
-        for (let i = 0; i < layers.length; i++) {
-          const wms = Array.from((layers[i] as any).renderer?.warpedMapList?.getWarpedMaps?.() ?? []) as any[];
-          const withImage = wms.filter((wm) => wm.hasImage?.()).length;
-          log?.("INFO", `[${label}] sub-layer [${i}] post-prewarm: hasImage ${withImage}/${wms.length}`);
+    if (mode === "chunked") {
+      const out: RunResult[] = [];
+      const BACKGROUND_BATCH_SIZE = 6;
+      for (let i = 0; i < batch.length; i += BACKGROUND_BATCH_SIZE) {
+        const slice = batch.slice(i, i + BACKGROUND_BATCH_SIZE);
+        out.push(...await Promise.all(slice.map((item, index) => runOne(item, startIndex + i + index))));
+        if (i + BACKGROUND_BATCH_SIZE < batch.length) {
+          await nextFrame();
         }
-        log?.("INFO", `[${label}] pre-warmed ${valid.length}/${uniqueImageUrls.length} image infos in ${Math.round(nowMs() - tsWarm)}ms`);
+      }
+      return out;
+    }
+    return Promise.all(batch.map((item, index) => runOne(item, startIndex + index)));
+  }
+
+  function getSpriteGroups(items: Fetched[]) {
+    const spriteGroupsByLayer = Array.from({ length: layers.length }, () => new Map<string, { imageUrl: string; imageSize: [number, number]; sprites: FetchedSprite["sprite"][] }>());
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
+      if (!("sprites" in item) || item.sprites.length === 0) continue;
+      const subLayerIndex = idx % layers.length;
+      const groups = spriteGroupsByLayer[subLayerIndex];
+      for (const spriteItem of item.sprites) {
+        const key = `${spriteItem.imageUrl}::${spriteItem.imageSize[0]}x${spriteItem.imageSize[1]}`;
+        const existing = groups.get(key);
+        if (existing) existing.sprites.push(spriteItem.sprite);
+        else groups.set(key, {
+          imageUrl: spriteItem.imageUrl,
+          imageSize: spriteItem.imageSize,
+          sprites: [spriteItem.sprite]
+        });
       }
     }
-  } catch (e: any) {
-    log?.("WARN", `[${label}] image info pre-warm failed: ${e?.message ?? e}`);
+    return spriteGroupsByLayer;
   }
+
+  async function warmSpritesForItems(items: Fetched[], phase: "bootstrap" | "background") {
+    try {
+      const spriteStartedAt = nowMs();
+      const spriteGroupsByLayer = getSpriteGroups(items);
+      const totalSpriteTargets = spriteGroupsByLayer.reduce((sum, groups) => sum + groups.size, 0);
+      const totalSprites = spriteGroupsByLayer.reduce(
+        (sum, groups) => sum + [...groups.values()].reduce((inner, group) => inner + group.sprites.length, 0),
+        0
+      );
+      if (totalSpriteTargets > 0) {
+        emitIiifStep(log, layerLabel, "warm-sprites:start", `phase=${phase} targets=${totalSpriteTargets} sprites=${totalSprites}`);
+        await Promise.all(
+          spriteGroupsByLayer.flatMap((groups, index) =>
+            [...groups.values()].map((group) =>
+              layers[index].addSprites(group.sprites as any, group.imageUrl, group.imageSize)
+            )
+          )
+        );
+        emitIiifStep(log, layerLabel, "warm-sprites:done", `${Math.round(nowMs() - spriteStartedAt)}ms phase=${phase} targets=${totalSpriteTargets} sprites=${totalSprites}`);
+      }
+    } catch (e: any) {
+      log?.("WARN", `[${label}] sprite warm failed (${phase}): ${e?.message ?? e}`);
+      emitIiifStep(log, layerLabel, "warm-sprites:error", `phase=${phase} ${String(e?.message ?? e)}`);
+    }
+  }
+
+  const bootstrapProcessed = await applyFetchedBatch(bootstrapFetched, 0, "sequential");
+  results.push(...bootstrapProcessed);
+  await warmSpritesForItems(bootstrapFetched, "bootstrap");
+  for (const layer of layers) {
+    layer.setLayerOptions({ renderMaps: true } as any);
+  }
+  emitIiifStep(log, layerLabel, "render-maps:enabled", `after=bootstrap`);
+  await Promise.race([
+    new Promise<void>((resolve) => {
+      if (bootstrapVisualReadyResolved) {
+        resolve();
+        return;
+      }
+      resolveBootstrapVisualReady = resolve;
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, 400))
+  ]);
+  emitIiifStep(
+    log,
+    layerLabel,
+    "bootstrap-visual-ready",
+    `spriteTiles=${spriteTileMapIds.size || spriteTileLoadedEvents} firstTiles=${firstTileMapIds.size || firstMapTileLoadedEvents}`
+  );
+  await nextFrame();
+  await nextFrame();
+
+  const processed = await applyFetchedBatch(backgroundFetched, bootstrapFetched.length, "chunked");
+  results.push(...processed);
+  const totalGeoreferencedMaps = fetchedAll.reduce(
+    (sum, item) => sum + ("maps" in item ? item.maps.length : 0),
+    0
+  );
+  const totalCanvasRefs = fetchedAll.reduce(
+    (sum, item) => sum + (item.entry.canvasCount ?? ("maps" in item ? item.maps.length : 0)),
+    0
+  );
+  const slowestDiagnostics = [...applyDiagnostics]
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, 10);
+  emitIiifStep(
+    log,
+    layerLabel,
+    "apply-annotations",
+    `${Math.round(nowMs() - applyStartedAt)}ms ok=${results.filter((r) => r.ok).length}/${results.length} annotationErrors=${annotationErrorCount} maps=${totalGeoreferencedMaps} canvases=${totalCanvasRefs}`
+  );
+  if (layers.length > 1) {
+    emitIiifStep(
+      log,
+      layerLabel,
+      "apply-annotations:sublayers",
+      subLayerAssignments
+        .map((item, index) => `layer${index}=m${item.manifests}/g${item.maps}/t${Math.round(subLayerCompletionMs[index])}ms`)
+        .join(" | ")
+    );
+  }
+  if (slowestDiagnostics.length > 0) {
+    emitIiifStep(
+      log,
+      layerLabel,
+      "apply-annotations:slowest",
+      slowestDiagnostics
+        .map((item) => `${Math.round(item.ms)}ms[l${item.subLayerIndex}] "${item.label}" c=${item.canvasCount} g=${item.mapCount}`)
+        .join(" | ")
+    );
+  }
+  await warmSpritesForItems(backgroundFetched, "background");
 
   // Keep the render loop alive so loadMissingImagesInViewport() keeps running.
   // With a fast IIIF server, allrequestedtilesloaded fires after the first batch
@@ -1177,6 +1406,13 @@ export async function runLayerGroup(opts: {
 
     for (const l of layers) (l as any).nativeUpdate?.();
   }, KEEPALIVE_TICK_MS);
+
+  emitIiifStep(
+    log,
+    layerLabel,
+    "ingestion-ready",
+    `${Math.round(nowMs() - runStartedAt)}ms manifests=${results.length} peakVisible=${peakMapsInViewport} firstTiles=${firstTilesLoaded}`
+  );
 
   emitRenderStats(true);
   if (debug) {
