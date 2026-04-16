@@ -2,193 +2,185 @@
 // Defines all main layers (eras), their sub-layers, labels, and visual metadata.
 
 export type MainLayerId =
-  | 'ngi1904'
-  | 'ngi1873'
-  | 'gereduceerd'
-  | 'popp'
-  | 'vandermaelen'
-  | 'primitief'
-  | 'ferraris'
-  | 'villaret'
-  | 'frickx'
-  | 'handdrawn';
+  | 'NGI1904'
+  | 'NGI1873'
+  | 'GereduceerdeKadaster'
+  | 'Popp'
+  | 'Vandermaelen'
+  | 'PrimitiefKadaster'
+  | 'Ferraris'
+  | 'Villaret'
+  | 'Frickx'
+  | 'HanddrawnCollection';
 export type SubLayerKind = 'iiif' | 'geojson' | 'wmts' | 'wms' | 'searchable';
-export type HistCartLayerKey =
-  | 'ngi1904'
-  | 'ngi1873'
-  | 'popp'
-  | 'vandermaelen'
-  | 'ferraris'
-  | 'villaret'
-  | 'frickx';
 
 // Order is tuned for overlap windows. Gereduceerd should stay above Popp and
 // Vandermaelen in the 1847–1855 zone; later NGI basemaps can sit below older
 // more detailed cadastral layers where ranges overlap.
 export const MAIN_LAYER_ORDER: MainLayerId[] = [
-  'handdrawn', 'frickx', 'villaret', 'ferraris',
-  'gereduceerd', 'popp', 'vandermaelen', 'primitief',
-  'ngi1873', 'ngi1904',
+  'HanddrawnCollection', 'Frickx', 'Villaret', 'Ferraris',
+  'GereduceerdeKadaster', 'Popp', 'Vandermaelen', 'PrimitiefKadaster',
+  'NGI1873', 'NGI1904',
 ];
 
 export const MAIN_LAYER_LABELS: Record<string, string> = {
-  ngi1904:      'NGI Basemap 1904',
-  ngi1873:      'NGI Basemap 1873',
-  popp:         'Poppkaart',
-  ferraris:     'Ferraris',
-  villaret:     'Villaret',
-  frickx:       'Frickx',
-  vandermaelen: 'Vandermaelen',
-  primitief:    'Primitief kadaster',
-  gereduceerd:  'Gereduceerd kadaster',
-  handdrawn:    'Hand drawn collection',
+  NGI1904:      'NGI Basemap 1904',
+  NGI1873:      'NGI Basemap 1873',
+  Popp:         'Poppkaart',
+  Ferraris:     'Ferraris',
+  Villaret:     'Villaret',
+  Frickx:       'Frickx',
+  Vandermaelen: 'Vandermaelen',
+  PrimitiefKadaster:    'Primitief kadaster',
+  GereduceerdeKadaster:  'Gereduceerd kadaster',
+  HanddrawnCollection:    'Hand drawn collection',
 };
 
 export const MAIN_LAYER_SHORT_LABELS: Record<string, string> = {
-  ngi1904:      'N4',
-  ngi1873:      'N7',
-  popp:         'PK',
-  ferraris:     'FE',
-  villaret:     'VI',
-  frickx:       'FX',
-  vandermaelen: 'VM',
-  primitief:    'PR',
-  gereduceerd:  'GR',
-  handdrawn:    'HD',
+  NGI1904:      'N4',
+  NGI1873:      'N7',
+  Popp:         'PK',
+  Ferraris:     'FE',
+  Villaret:     'VI',
+  Frickx:       'FX',
+  Vandermaelen: 'VM',
+  PrimitiefKadaster:    'PR',
+  GereduceerdeKadaster:  'GR',
+  HanddrawnCollection:    'HD',
 };
 
 export const MAIN_LAYER_META: Record<string, { date: string; color: string }> = {
-  ngi1904:      { date: '1904',      color: '#506b8f' },
-  ngi1873:      { date: '1873',      color: '#4f7b66' },
-  popp:         { date: '1842–1879', color: '#7a5c9e' },
-  ferraris:     { date: '1771',      color: '#6aaa5a' },
-  villaret:     { date: '1745–1748', color: '#3f7c85' },
-  frickx:       { date: '1712',      color: '#9d7a43' },
-  vandermaelen: { date: '1846',      color: '#c45000' },
-  primitief:    { date: '1808–1834', color: '#c97a2e' },
-  gereduceerd:  { date: '1847–1855', color: '#a0b020' },
-  handdrawn:    { date: '19th c.',   color: '#888780' },
+  NGI1904:      { date: '1904',      color: '#506b8f' },
+  NGI1873:      { date: '1873',      color: '#4f7b66' },
+  Popp:         { date: '1842–1879', color: '#7a5c9e' },
+  Ferraris:     { date: '1771',      color: '#6aaa5a' },
+  Villaret:     { date: '1745–1748', color: '#3f7c85' },
+  Frickx:       { date: '1712',      color: '#9d7a43' },
+  Vandermaelen: { date: '1846',      color: '#c45000' },
+  PrimitiefKadaster:    { date: '1808–1834', color: '#c97a2e' },
+  GereduceerdeKadaster:  { date: '1847–1855', color: '#a0b020' },
+  HanddrawnCollection:    { date: '19th c.',   color: '#888780' },
 };
 
 export const MAIN_LAYER_INFO: Record<string, string> = {
-  ngi1904:      'Topographic NGI basemap from 1904, exposed as raster tile service.',
-  ngi1873:      'Topographic NGI basemap from 1873, exposed as raster tile service.',
-  popp:         'Popp cadastral atlas mosaic for Belgium, shown here as historical raster base map.',
-  ferraris:     'Ferraris cabinet map of the Austrian Netherlands, georeferenced as historical raster base map.',
-  villaret:     'Villaret map of the southern Low Countries, currently connected as WMS-backed raster layer.',
-  frickx:       'Frickx map of the Low Countries, connected as historical raster base map.',
-  vandermaelen: 'Vandermaelen topographic map of Belgium, connected as historical raster base map.',
-  primitief:    'Primitief kadaster layer with warped IIIF sheets plus cadastral overlays.',
-  gereduceerd:  'Gereduceerd kadaster layer with warped IIIF sheets plus cadastral overlays.',
-  handdrawn:    'Hand-drawn historical map collection with warped IIIF sheets and related overlays.',
+  NGI1904:      'Topographic NGI basemap from 1904, exposed as raster tile service.',
+  NGI1873:      'Topographic NGI basemap from 1873, exposed as raster tile service.',
+  Popp:         'Popp cadastral atlas mosaic for Belgium, shown here as historical raster base map.',
+  Ferraris:     'Ferraris cabinet map of the Austrian Netherlands, georeferenced as historical raster base map.',
+  Villaret:     'Villaret map of the southern Low Countries, currently connected as WMS-backed raster layer.',
+  Frickx:       'Frickx map of the Low Countries, connected as historical raster base map.',
+  Vandermaelen: 'Vandermaelen topographic map of Belgium, connected as historical raster base map.',
+  PrimitiefKadaster:    'Primitief kadaster layer with warped IIIF sheets plus cadastral overlays.',
+  GereduceerdeKadaster:  'Gereduceerd kadaster layer with warped IIIF sheets plus cadastral overlays.',
+  HanddrawnCollection:    'Hand-drawn historical map collection with warped IIIF sheets and related overlays.',
 };
 
 export const MAIN_LAYER_SOURCE: Record<string, { label: string; url: string }> = {
-  ngi1904: {
+  NGI1904: {
     label: 'NGI raster tiles',
     url: 'https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__450/MapServer/tile/{z}/{y}/{x}',
   },
-  ngi1873: {
+  NGI1873: {
     label: 'NGI raster tiles',
     url: 'https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__140/MapServer/tile/{z}/{y}/{x}',
   },
-  popp: {
+  Popp: {
     label: 'Geopunt WMTS',
     url: 'https://geo.api.vlaanderen.be/HISTCART/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=popp&STYLE=&FORMAT=image/png&TILEMATRIXSET=GoogleMapsVL&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
   },
-  ferraris: {
+  Ferraris: {
     label: 'Geopunt WMTS',
     url: 'https://geo.api.vlaanderen.be/HISTCART/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ferraris&STYLE=&FORMAT=image/png&TILEMATRIXSET=GoogleMapsVL&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
   },
-  villaret: {
+  Villaret: {
     label: 'Geopunt WMS',
     url: 'https://geo.api.vlaanderen.be/HISTCART/wms?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=Villaret&STYLES=&FORMAT=image%2Fpng&TRANSPARENT=TRUE&CRS=EPSG%3A3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256',
   },
-  frickx: {
+  Frickx: {
     label: 'Geopunt WMTS',
     url: 'https://geo.api.vlaanderen.be/HISTCART/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=frickx&STYLE=&FORMAT=image/png&TILEMATRIXSET=GoogleMapsVL&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
   },
-  vandermaelen: {
+  Vandermaelen: {
     label: 'Geopunt WMTS',
     url: 'https://geo.api.vlaanderen.be/HISTCART/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vandermaelen&STYLE=&FORMAT=image/png&TILEMATRIXSET=GoogleMapsVL&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
   },
-  primitief: {
+  PrimitiefKadaster: {
     label: 'Compiled IIIF dataset',
     url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
   },
-  gereduceerd: {
+  GereduceerdeKadaster: {
     label: 'Compiled IIIF dataset',
     url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
   },
-  handdrawn: {
+  HanddrawnCollection: {
     label: 'Compiled IIIF dataset',
     url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
   },
 };
 
 export const SUB_LAYER_DEFS: Record<string, { label: string; kind: SubLayerKind }> = {
-  'ngi1904-wmts':           { label: 'Map',             kind: 'wmts'       },
-  'ngi1873-wmts':           { label: 'Map',             kind: 'wmts'       },
-  'popp-wmts':              { label: 'Map',             kind: 'wmts'       },
-  'ferraris-wmts':          { label: 'WMTS',            kind: 'wmts'       },
-  'ferraris-landusage':     { label: 'Land usage',           kind: 'wms'        },
-  'ferraris-toponyms':      { label: 'Toponyms',             kind: 'searchable' },
-  'villaret-wmts':          { label: 'Map',             kind: 'wmts'       },
-  'frickx-wmts':            { label: 'Map',             kind: 'wmts'       },
-  'vandermaelen-wmts':      { label: 'WMTS',            kind: 'wmts'       },
-  'vandermaelen-landusage': { label: 'Land usage',           kind: 'wms'        },
-  'vandermaelen-toponyms':  { label: 'Toponyms',             kind: 'searchable' },
-  'primitief-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
-  'primitief-parcels':      { label: 'Parcels',              kind: 'geojson'    },
-  'primitief-landusage':    { label: 'Land usage',           kind: 'geojson'    },
-  'gereduceerd-iiif':       { label: 'IIIF collection',      kind: 'iiif'       },
-  'gereduceerd-parcels':    { label: 'Parcels',              kind: 'geojson'    },
-  'gereduceerd-landusage':  { label: 'Land usage',           kind: 'geojson'    },
-  'handdrawn-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
-  'handdrawn-parcels':      { label: 'Parcels',              kind: 'geojson'    },
-  'handdrawn-water':        { label: 'Water infrastructure', kind: 'geojson'    },
+  'NGI1904-wmts':           { label: 'Map',             kind: 'wmts'       },
+  'NGI1873-wmts':           { label: 'Map',             kind: 'wmts'       },
+  'Popp-wmts':              { label: 'Map',             kind: 'wmts'       },
+  'Ferraris-wmts':          { label: 'WMTS',            kind: 'wmts'       },
+  'Ferraris-landusage':     { label: 'Land usage',           kind: 'wms'        },
+  'Ferraris-toponyms':      { label: 'Toponyms',             kind: 'searchable' },
+  'Villaret-wmts':          { label: 'Map',             kind: 'wmts'       },
+  'Frickx-wmts':            { label: 'Map',             kind: 'wmts'       },
+  'Vandermaelen-wmts':      { label: 'WMTS',            kind: 'wmts'       },
+  'Vandermaelen-landusage': { label: 'Land usage',           kind: 'wms'        },
+  'Vandermaelen-toponyms':  { label: 'Toponyms',             kind: 'searchable' },
+  'PrimitiefKadaster-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
+  'PrimitiefKadaster-parcels':      { label: 'Parcels',              kind: 'geojson'    },
+  'PrimitiefKadaster-landusage':    { label: 'Land usage',           kind: 'geojson'    },
+  'GereduceerdeKadaster-iiif':       { label: 'IIIF collection',      kind: 'iiif'       },
+  'GereduceerdeKadaster-parcels':    { label: 'Parcels',              kind: 'geojson'    },
+  'GereduceerdeKadaster-landusage':  { label: 'Land usage',           kind: 'geojson'    },
+  'HanddrawnCollection-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
+  'HanddrawnCollection-parcels':      { label: 'Parcels',              kind: 'geojson'    },
+  'HanddrawnCollection-water':        { label: 'Water infrastructure', kind: 'geojson'    },
 };
 
 
 export const MAIN_LAYER_SUBS: Record<string, string[]> = {
-  ngi1904:      ['ngi1904-wmts'],
-  ngi1873:      ['ngi1873-wmts'],
-  popp:         ['popp-wmts'],
-  ferraris:     ['ferraris-wmts', 'ferraris-landusage', 'ferraris-toponyms'],
-  villaret:     ['villaret-wmts'],
-  frickx:       ['frickx-wmts'],
-  vandermaelen: ['vandermaelen-wmts', 'vandermaelen-landusage', 'vandermaelen-toponyms'],
-  primitief:    ['primitief-iiif', 'primitief-parcels', 'primitief-landusage'],
-  gereduceerd:  ['gereduceerd-iiif', 'gereduceerd-parcels', 'gereduceerd-landusage'],
-  handdrawn:    ['handdrawn-iiif', 'handdrawn-parcels', 'handdrawn-water'],
+  NGI1904:      ['NGI1904-wmts'],
+  NGI1873:      ['NGI1873-wmts'],
+  Popp:         ['Popp-wmts'],
+  Ferraris:     ['Ferraris-wmts', 'Ferraris-landusage', 'Ferraris-toponyms'],
+  Villaret:     ['Villaret-wmts'],
+  Frickx:       ['Frickx-wmts'],
+  Vandermaelen: ['Vandermaelen-wmts', 'Vandermaelen-landusage', 'Vandermaelen-toponyms'],
+  PrimitiefKadaster:    ['PrimitiefKadaster-iiif', 'PrimitiefKadaster-parcels', 'PrimitiefKadaster-landusage'],
+  GereduceerdeKadaster:  ['GereduceerdeKadaster-iiif', 'GereduceerdeKadaster-parcels', 'GereduceerdeKadaster-landusage'],
+  HanddrawnCollection:    ['HanddrawnCollection-iiif', 'HanddrawnCollection-parcels', 'HanddrawnCollection-water'],
 };
 
 export function makeInitialMainLayerEnabled(): Record<string, boolean> {
   return {
-    ngi1904: false,
-    ngi1873: false,
-    gereduceerd: false,
-    popp: false,
-    vandermaelen: false,
-    primitief: false,
-    ferraris: false,
-    villaret: false,
-    frickx: false,
-    handdrawn: false,
+    NGI1904: false,
+    NGI1873: false,
+    GereduceerdeKadaster: false,
+    Popp: false,
+    Vandermaelen: false,
+    PrimitiefKadaster: false,
+    Ferraris: false,
+    Villaret: false,
+    Frickx: false,
+    HanddrawnCollection: false,
   };
 }
 
 export function makeInitialSubLayerEnabled(): Record<string, boolean> {
   return {
-    'ngi1904-wmts': false,
-    'ngi1873-wmts': false,
-    'popp-wmts': false,
-    'ferraris-wmts': false,         'ferraris-landusage': false,    'ferraris-toponyms': false,
-    'villaret-wmts': false,
-    'frickx-wmts': false,
-    'vandermaelen-wmts': false,     'vandermaelen-landusage': false, 'vandermaelen-toponyms': false,
-    'primitief-iiif': false,   'primitief-parcels': false,   'primitief-landusage': false,
-    'gereduceerd-iiif': false, 'gereduceerd-parcels': false, 'gereduceerd-landusage': false,
-    'handdrawn-iiif': false,   'handdrawn-parcels': false,   'handdrawn-water': false,
+    'NGI1904-wmts': false,
+    'NGI1873-wmts': false,
+    'Popp-wmts': false,
+    'Ferraris-wmts': false,         'Ferraris-landusage': false,    'Ferraris-toponyms': false,
+    'Villaret-wmts': false,
+    'Frickx-wmts': false,
+    'Vandermaelen-wmts': false,     'Vandermaelen-landusage': false, 'Vandermaelen-toponyms': false,
+    'PrimitiefKadaster-iiif': false,   'PrimitiefKadaster-parcels': false,   'PrimitiefKadaster-landusage': false,
+    'GereduceerdeKadaster-iiif': false, 'GereduceerdeKadaster-parcels': false, 'GereduceerdeKadaster-landusage': false,
+    'HanddrawnCollection-iiif': false,   'HanddrawnCollection-parcels': false,   'HanddrawnCollection-water': false,
   };
 }

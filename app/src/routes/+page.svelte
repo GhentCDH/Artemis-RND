@@ -1,6 +1,5 @@
 <!-- src/routes/+page.svelte — map shell + orchestration -->
 <script lang="ts">
-  import { dev } from '$app/environment';
   import 'maplibre-gl/dist/maplibre-gl.css';
   import '$lib/theme.css';
   import '$lib/ui.css';
@@ -33,8 +32,9 @@
     MAIN_LAYER_ORDER, MAIN_LAYER_META, MAIN_LAYER_LABELS, MAIN_LAYER_INFO,
     MAIN_LAYER_SUBS, SUB_LAYER_DEFS,
     makeInitialMainLayerEnabled, makeInitialSubLayerEnabled,
-    type MainLayerId, type HistCartLayerKey,
+    type MainLayerId,
   } from '$lib/artemis/layerConfig';
+  import type { HistCartLayerKey } from '$lib/artemis/map/mapInit';
   import type {
     ToponymIndexItem, RawToponymIndexItem, ManifestSearchItem,
     IiifMapInfo, ParcelClickInfo, PinnedCard, UILog, MassartItem, PreviewBubbleItem,
@@ -134,7 +134,7 @@
   }
 
   function primitiveGeojsonUrl(): string {
-    return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/Primitive/index.geojson`;
+    return `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Parcels/PrimitiefKadaster/PrimitiefKadasterParcels.geojson`;
   }
 
   function runtimeStaticBaseUrl(): string {
@@ -156,6 +156,10 @@
   }
 
   function normalizeParagraphList(value: unknown): string[] {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed ? [trimmed] : [];
+    }
     if (!Array.isArray(value)) return [];
     return value
       .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
@@ -250,7 +254,13 @@
       ? String((iiifLayer as any).layerId).trim()
       : '';
     const compiledTail = iiifLayer?.compiledCollectionPath?.split('/').filter(Boolean).pop() ?? '';
-    return [...new Set([explicitLayerId, compiledTail, mainId].filter(Boolean))];
+    const iiifMap = typeof (iiifLayer as any)?.map === 'string' ? String((iiifLayer as any).map).trim() : '';
+    const geomapsStem = (iiifLayer as any)?.geomapsPath
+      ?.split('/')
+      .filter(Boolean)
+      .pop()
+      ?.replace(/_geomaps\.json$/i, '') ?? '';
+    return [...new Set([explicitLayerId, compiledTail, iiifMap, geomapsStem, mainId].filter(Boolean))];
   }
 
   function fallbackLayerMetadata(mainId: string): RuntimeLayerMetadata {
@@ -265,9 +275,7 @@
       mainLayerOrder.map((mainId) => {
         const candidates = layerMetadataCandidates(mainId);
         const resolved = candidates.map((key) => rawByKey[key]).find(Boolean);
-        if (!resolved && dev) {
-          console.warn(`[runtime-metadata] missing layer metadata key(s)=${candidates.join(', ')} label="${MAIN_LAYER_LABELS[mainId] ?? mainId}"`);
-        }
+
         return [mainId, resolved ?? fallbackLayerMetadata(mainId)];
       })
     );
@@ -275,29 +283,29 @@
 
   async function loadRuntimeMetadata() {
     const staticBaseUrl = runtimeStaticBaseUrl();
+
     if (!staticBaseUrl) {
       siteMetadata = normalizeSiteMetadata(null);
       layerMetadataByMainId = resolveLayerMetadataByMainId({});
       return;
     }
 
+    const siteJsonUrl = `${staticBaseUrl}/site.json`;
+    const layersJsonUrl = `${staticBaseUrl}/layers.json?t=${Date.now()}`;
+
     const [siteResult, layerResult] = await Promise.allSettled([
-      fetchRuntimeJson<unknown>(`${staticBaseUrl}/site.json`),
-      fetchRuntimeJson<unknown>(`${staticBaseUrl}/layers.json`),
+      fetchRuntimeJson<unknown>(siteJsonUrl),
+      fetchRuntimeJson<unknown>(layersJsonUrl),
     ]);
 
     const repoRoot = staticBaseUrl.replace(/\/static\/?$/i, '');
     if (siteResult.status === 'fulfilled') {
       siteMetadata = normalizeSiteMetadata(siteResult.value, repoRoot);
     } else {
-      if (dev) console.warn(`[runtime-metadata] site.json unavailable: ${siteResult.reason?.message ?? String(siteResult.reason)}`);
       siteMetadata = normalizeSiteMetadata(null);
     }
 
     const rawLayers = layerResult.status === 'fulfilled' ? normalizeLayerMetadataMap(layerResult.value) : {};
-    if (layerResult.status === 'rejected' && dev) {
-      console.warn(`[runtime-metadata] layers.json unavailable: ${layerResult.reason?.message ?? String(layerResult.reason)}`);
-    }
     layerMetadataByMainId = resolveLayerMetadataByMainId(rawLayers);
   }
 
@@ -307,16 +315,16 @@
   const MASSART_YEAR_MIN = 1904;
   const MASSART_YEAR_MAX = 1912;
   const MAIN_LAYER_TIMELINE_YEAR: Partial<Record<MainLayerId, number>> = {
-    handdrawn: 1707,
-    frickx: 1712,
-    villaret: 1746,
-    ferraris: 1774,
-    primitief: 1814,
-    vandermaelen: 1850,
-    gereduceerd: 1851,
-    popp: 1860,
-    ngi1873: 1873,
-    ngi1904: 1904,
+    HanddrawnCollection: 1707,
+    Frickx: 1712,
+    Villaret: 1746,
+    Ferraris: 1774,
+    PrimitiefKadaster: 1814,
+    Vandermaelen: 1850,
+    GereduceerdeKadaster: 1851,
+    Popp: 1860,
+    NGI1873: 1873,
+    NGI1904: 1904,
   };
   let massartItems: MassartItem[] = [];
   let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
@@ -324,7 +332,7 @@
 
   async function loadMassartData() {
     try {
-      const url = `${cfg().datasetBaseUrl}/Massart/index.json`;
+      const url = `${cfg().datasetBaseUrl}/Image collections/Massart/index.json`;
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -336,11 +344,15 @@
     const pane = e.detail.pane ?? 'left';
     if (pane === 'right') {
       rightTimelineYear = e.detail.year;
-      if (rightMap?.isStyleLoaded()) updateMassartActiveYear(rightMap, rightTimelineYear, MASSART_LEEWAY);
+      if (rightMap?.isStyleLoaded()) {
+        updateMassartActiveYear(rightMap, rightTimelineYear, MASSART_LEEWAY);
+      }
       return;
     }
     massartYear = e.detail.year;
-    if (map?.isStyleLoaded()) updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
+    if (map?.isStyleLoaded()) {
+      updateMassartActiveYear(map, massartYear, MASSART_LEEWAY);
+    }
   }
 
   function onTimelineImageFocus(e: CustomEvent<{ pane: PaneId; title: string; lon: number; lat: number }>) {
@@ -542,10 +554,12 @@
   let subLayerEnabled   = makeInitialSubLayerEnabled();
   let subLayerLoading: Record<string, boolean>  = {};
   const iiifSyncByMain = new Map<string, Promise<void>>();
+  const iiifSyncQueuedByMain = new Map<string, boolean>();
   let rightMainLayerVisible = makeInitialMainLayerEnabled();
   let rightMainLayerLoading: Record<string, boolean> = {};
   let rightSubLayerVisible = makeInitialSubLayerEnabled();
   const rightIiifSyncByMain = new Map<string, Promise<void>>();
+  const rightIiifSyncQueuedByMain = new Map<string, boolean>();
   $: combinedMainLayerLoading = Object.fromEntries(
     mainLayerOrder.map((mainId) => [mainId, Boolean(mainLayerLoading[mainId] || rightMainLayerLoading[mainId])])
   );
@@ -603,34 +617,54 @@
     return label.replace(/^\s*artemis\s*[-–—:]\s*/i, '').trim();
   }
 
-  function findIiifLayer(labelMatch: string, renderKey: string): UILayerInfo | undefined {
-    return layers.find(l =>
-      l.sourceCollectionLabel.toLowerCase().includes(labelMatch.toLowerCase()) &&
-      l.renderLayerKey === renderKey
-    );
+  function normalizeLayerLookupKey(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
-  function getIiifInfoForSub(subId: string): UILayerInfo | undefined {
-    if (subId === 'primitief-iiif')  return findIiifLayer('primitief',  'default');
-    if (subId === 'gereduceerd-iiif') return findIiifLayer('gereduceerd', 'default');
-    if (subId === 'handdrawn-iiif')   return findIiifLayer('handdrawn',   'default');
+  function deriveIiifMapId(label: string): string | undefined {
+    const key = normalizeLayerLookupKey(label);
+    if (key === 'primitiefkadaster') return 'PrimitiefKadaster';
+    if (key === 'gereduceerdkadaster' || key === 'gereduceerdekadaster') return 'GereduceerdeKadaster';
+    if (key === 'handdrawncollection') return 'HanddrawnCollection';
     return undefined;
   }
 
+  function findIiifLayer(labelMatch: string, renderKey: string): UILayerInfo | undefined {
+    const normalizedMatch = normalizeLayerLookupKey(labelMatch);
+    const requestedMapId = deriveIiifMapId(labelMatch);
+    const candidates = layers.filter((l) => l.renderLayerKey === renderKey);
+    const match = candidates.find((l) => {
+      const candidateMapId = l.map ?? deriveIiifMapId(l.sourceCollectionLabel);
+      if (requestedMapId && candidateMapId) return candidateMapId === requestedMapId;
+      return normalizeLayerLookupKey(l.sourceCollectionLabel).includes(normalizedMatch);
+    });
+
+    return match;
+  }
+
+  function getIiifInfoForSub(subId: string): UILayerInfo | undefined {
+    let result: UILayerInfo | undefined;
+    if (subId === 'PrimitiefKadaster-iiif') result = findIiifLayer('PrimitiefKadaster', 'default');
+    else if (subId === 'GereduceerdeKadaster-iiif') result = findIiifLayer('GereduceerdeKadaster', 'default');
+    else if (subId === 'HanddrawnCollection-iiif') result = findIiifLayer('HanddrawnCollection', 'default');
+
+    return result;
+  }
+
   function getMainWmtsKey(mainId: string): HistCartLayerKey | undefined {
-    if (mainId === 'ngi1904')      return 'ngi1904';
-    if (mainId === 'ngi1873')      return 'ngi1873';
-    if (mainId === 'popp')         return 'popp';
-    if (mainId === 'ferraris')     return 'ferraris';
-    if (mainId === 'villaret')     return 'villaret';
-    if (mainId === 'frickx')       return 'frickx';
-    if (mainId === 'vandermaelen') return 'vandermaelen';
+    if (mainId === 'NGI1904')      return 'ngi1904';
+    if (mainId === 'NGI1873')      return 'ngi1873';
+    if (mainId === 'Popp')         return 'popp';
+    if (mainId === 'Ferraris')     return 'ferraris';
+    if (mainId === 'Villaret')     return 'villaret';
+    if (mainId === 'Frickx')       return 'frickx';
+    if (mainId === 'Vandermaelen') return 'vandermaelen';
     return undefined;
   }
 
   function getLandUsageKey(mainId: string): 'ferraris' | 'vandermaelen' | undefined {
-    if (mainId === 'ferraris') return 'ferraris';
-    if (mainId === 'vandermaelen') return 'vandermaelen';
+    if (mainId === 'Ferraris') return 'ferraris';
+    if (mainId === 'Vandermaelen') return 'vandermaelen';
     return undefined;
   }
 
@@ -723,15 +757,69 @@
 
   function normalizeSourceLayers(index: CompiledIndex): UILayerInfo[] {
     const baseLayers = index.renderLayers ?? [];
+    const nextIiifLayers = Array.isArray((index as any).iiifLayers) ? (index as any).iiifLayers : [];
+
+    if (baseLayers.length === 0 && nextIiifLayers.length > 0) {
+      const normalized = nextIiifLayers.map((layer: any) => {
+        const sourceCollectionLabel = cleanLayerLabel(
+          String(layer.map ?? layer.label ?? layer.sourceCollectionLabel ?? layer.layerId ?? '')
+        );
+        const normalizedLayer: UILayerInfo = {
+          sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
+          sourceCollectionLabel,
+          compiledCollectionPath: layer.compiledCollectionPath,
+          map: layer.map,
+          layerId: layer.layerId,
+          geomapsPath: (layer as any).geomapsPath,
+          spritesPath: layer.spritesPath,
+          manifestCount: Number(layer.manifestCount ?? 0),
+          georefCount: Number(layer.georefCount ?? 0),
+          renderLayerKey: String(layer.renderLayerKey ?? 'default'),
+          renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
+          hidden: Boolean(layer.hidden),
+          uiLayerId: getLayerGroupId({
+            sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
+            sourceCollectionLabel,
+            compiledCollectionPath: layer.compiledCollectionPath,
+            map: layer.map,
+            layerId: layer.layerId,
+            geomapsPath: (layer as any).geomapsPath,
+            spritesPath: layer.spritesPath,
+            manifestCount: Number(layer.manifestCount ?? 0),
+            georefCount: Number(layer.georefCount ?? 0),
+            renderLayerKey: String(layer.renderLayerKey ?? 'default'),
+            renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
+            hidden: Boolean(layer.hidden),
+          }),
+        };
+        return normalizedLayer;
+      });
+
+      return normalized;
+    }
+
     if (baseLayers.length === 0) {
       throw new Error('index.json has no renderLayers; viewer requires renderLayers for layer toggles.');
     }
-    return baseLayers.map(layer => ({
-      ...layer,
-      sourceCollectionLabel: cleanLayerLabel(layer.sourceCollectionLabel),
-      renderLayerLabel: layer.renderLayerLabel ? cleanLayerLabel(layer.renderLayerLabel) : layer.renderLayerLabel,
-      uiLayerId: getLayerGroupId(layer),
-    }));
+    const normalized = baseLayers.map(layer => {
+      const sourceCollectionLabel = cleanLayerLabel(layer.sourceCollectionLabel);
+      const map = deriveIiifMapId(sourceCollectionLabel);
+      const nextLayer = {
+        ...layer,
+        sourceCollectionLabel,
+        map: map ?? (layer as any).map,
+        geomapsPath: map ? `IIIF/${map}_geomaps.json` : (layer as any).geomapsPath,
+        spritesPath: map ? `IIIF/${map}/sprites/` : (layer as any).spritesPath,
+        compiledCollectionPath: map ? undefined : layer.compiledCollectionPath,
+        renderLayerLabel: layer.renderLayerLabel ? cleanLayerLabel(layer.renderLayerLabel) : layer.renderLayerLabel,
+      };
+      return {
+        ...nextLayer,
+        uiLayerId: getLayerGroupId(nextLayer),
+      };
+    });
+
+    return normalized;
   }
 
   // ─── Z-order + opacity ─────────────────────────────────────────────────────
@@ -830,7 +918,6 @@
 
   async function loadIiifLayer(layerInfo: UILayerInfo) {
     const gid = layerInfo.uiLayerId;
-    log('INFO', `[loadIiif] start gid=${gid} path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? 'all'}`);
     layerProgress = { ...layerProgress, [gid]: { done: 0, total: 0 } };
     startBulkRun('mirror');
     try {
@@ -842,7 +929,6 @@
           ingestRunResult(result);
         },
       });
-      log('INFO', `[loadIiif] done gid=${gid}`);
     } finally {
       layerProgress = { ...layerProgress, [gid]: { done: 0, total: 0 } };
       endBulkRun();
@@ -906,8 +992,6 @@
     const knownLayerIds = getLayerGroupLayerIds(gid);
     const hasLoadedGroup = knownLayerIds.length > 0;
 
-    log('INFO', `[syncIiif] ${mainId} target=${shouldShow} parked=${parked} loaded=${hasLoadedGroup}`);
-
     if (!shouldShow) {
       if (!parked && hasLoadedGroup) {
         await parkLayerGroup(map, gid);
@@ -926,7 +1010,6 @@
     try {
       await loadIiifLayer(info);
       const shouldStillShow = shouldShowIiifGroup(mainId, iiifSubId);
-      log('INFO', `[syncIiif] ${mainId} post-load shouldShow=${shouldStillShow}`);
       if (!shouldStillShow) {
         await parkLayerGroup(map, gid);
         applyZOrder();
@@ -942,30 +1025,34 @@
   }
 
   function scheduleIiifMainLayerSync(mainId: string) {
-    const prev = iiifSyncByMain.get(mainId) ?? Promise.resolve();
-    const next = prev
-      .catch(() => {})
-      .then(() => syncIiifMainLayer(mainId));
-    iiifSyncByMain.set(mainId, next);
-    return next;
+    iiifSyncQueuedByMain.set(mainId, true);
+    const inFlight = iiifSyncByMain.get(mainId);
+    if (inFlight) return inFlight;
+
+    const task = (async () => {
+      while (iiifSyncQueuedByMain.get(mainId)) {
+        iiifSyncQueuedByMain.set(mainId, false);
+        await syncIiifMainLayer(mainId);
+      }
+    })().finally(() => {
+      iiifSyncByMain.delete(mainId);
+      iiifSyncQueuedByMain.delete(mainId);
+    });
+
+    iiifSyncByMain.set(mainId, task);
+    return task;
   }
 
   async function loadIiifLayerForRight(layerInfo: UILayerInfo) {
     if (!rightMap) return;
-    const gid = layerInfo.uiLayerId;
-    log('INFO', `[loadIiif:right] start gid=${gid} path=${layerInfo.compiledCollectionPath} renderKey=${layerInfo.renderLayerKey ?? 'all'}`);
-    try {
-      await runLayerGroup({
-        map: rightMap,
-        paneId: 'right',
-        cfg: cfg(),
-        layerInfo,
-        log,
-        debug: FEATURE_FLAGS.debugMenu,
-      });
-    } finally {
-      log('INFO', `[loadIiif:right] done gid=${gid}`);
-    }
+    await runLayerGroup({
+      map: rightMap,
+      paneId: 'right',
+      cfg: cfg(),
+      layerInfo,
+      log,
+      debug: FEATURE_FLAGS.debugMenu,
+    });
   }
 
   function shouldShowRightIiifGroup(mainId: string, iiifSubId: string): boolean {
@@ -1014,15 +1101,26 @@
   }
 
   function scheduleRightIiifMainLayerSync(mainId: string) {
-    const prev = rightIiifSyncByMain.get(mainId) ?? Promise.resolve();
-    const next = prev.catch(() => {}).then(() => syncRightIiifMainLayer(mainId));
-    rightIiifSyncByMain.set(mainId, next);
-    return next;
+    rightIiifSyncQueuedByMain.set(mainId, true);
+    const inFlight = rightIiifSyncByMain.get(mainId);
+    if (inFlight) return inFlight;
+
+    const task = (async () => {
+      while (rightIiifSyncQueuedByMain.get(mainId)) {
+        rightIiifSyncQueuedByMain.set(mainId, false);
+        await syncRightIiifMainLayer(mainId);
+      }
+    })().finally(() => {
+      rightIiifSyncByMain.delete(mainId);
+      rightIiifSyncQueuedByMain.delete(mainId);
+    });
+
+    rightIiifSyncByMain.set(mainId, task);
+    return task;
   }
 
   async function toggleMainLayer(mainId: string, enabled: boolean) {
     if (mainLayerEnabled[mainId] === enabled) {
-      log('INFO', `[toggleMain] ${mainId} already ${enabled} — skip`);
       return;
     }
     mainLayerEnabled = { ...mainLayerEnabled, [mainId]: enabled };
@@ -1036,27 +1134,32 @@
     }
 
     const iiifSubId = MAIN_LAYER_SUBS[mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
-    if (!iiifSubId) { log('WARN', `[toggleMain] ${mainId} no iiif sublayer`); return; }
-    log('INFO', `[toggleMain] ${mainId} ${enabled ? 'ENABLE' : 'DISABLE'}`);
+    if (!iiifSubId) {
+      log('WARN', `[toggleMain] ${mainId} no iiif sublayer`);
+      return;
+    }
     await scheduleIiifMainLayerSync(mainId);
   }
 
   async function toggleSubLayer(subId: string, enabled: boolean) {
     if (subLayerEnabled[subId] === enabled) {
-      log('INFO', `[toggleSub] ${subId} already ${enabled} — skip`);
       return;
     }
     subLayerEnabled = { ...subLayerEnabled, [subId]: enabled };
 
     const subDef = SUB_LAYER_DEFS[subId];
-    if (!subDef || subDef.kind === 'searchable') return;
+    if (!subDef || subDef.kind === 'searchable') {
+      return;
+    }
 
     const mainId = Object.keys(MAIN_LAYER_SUBS).find(k => MAIN_LAYER_SUBS[k].includes(subId)) ?? '';
     const opacity = mainLayerOpacity[mainId] ?? 1;
 
     if (subDef.kind === 'wmts') {
-      setHistCartLayerVisible(map, mainId as HistCartLayerKey, enabled);
-      if (enabled) setHistCartLayerOpacity(map, mainId as HistCartLayerKey, opacity);
+      const histKey = getMainWmtsKey(mainId);
+      if (!histKey) return;
+      setHistCartLayerVisible(map, histKey, enabled);
+      if (enabled) setHistCartLayerOpacity(map, histKey, opacity);
       applyZOrder();
       return;
     }
@@ -1079,8 +1182,10 @@
     }
 
     // IIIF sublayer
-    if (!getIiifInfoForSub(subId)) { log('WARN', `[toggleSub] ${subId} getIiifInfoForSub returned undefined (layers.length=${layers.length})`); return; }
-    log('INFO', `[toggleSub] ${subId} ${enabled ? 'ENABLE' : 'DISABLE'} sync`);
+    if (!getIiifInfoForSub(subId)) {
+      log('WARN', `[toggleSub] ${subId} getIiifInfoForSub returned undefined (layers.length=${layers.length})`);
+      return;
+    }
     await scheduleIiifMainLayerSync(mainId);
   }
 
@@ -1092,40 +1197,89 @@
     features?: Array<{ id?: string | number; properties?: Record<string, unknown>; geometry?: unknown }>;
   };
 
-  async function loadToponymIndex() {
+  const FALLBACK_TOPONYM_MAPS = ['Ferraris', 'PrimitiefKadaster'];
+
+  async function loadToponymIndex(buildIndex: CompiledIndex) {
     toponymLoading = true;
     toponymError = null;
     try {
-      const url = `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Toponyms/index.json`;
-      const res = await fetch(url, { redirect: 'follow' });
-      if (!res.ok) throw new Error(`Toponyms index fetch failed (${res.status})`);
+      const domains = buildIndex.domains as any;
+      const explicitToponymMaps = Array.isArray(domains?.toponyms?.maps) ? domains.toponyms.maps : [];
+      const knownMaps = explicitToponymMaps.length > 0 ? explicitToponymMaps : FALLBACK_TOPONYM_MAPS;
 
-      const json = (await res.json()) as ToponymIndexPayload;
-      const rawItems: RawToponymIndexItem[] = Array.isArray(json.items)
-        ? json.items
-        : Array.isArray(json.features)
-          ? json.features.map((f, i) => {
-              const p = (f?.properties ?? {}) as Record<string, unknown>;
-              return {
-                id: typeof f?.id === 'string' ? f.id : undefined,
-                text: typeof p.text === 'string' ? p.text : undefined,
-                textNormalized: typeof p.textNormalized === 'string' ? p.textNormalized : undefined,
-                sourceGroup: typeof p.sourceGroup === 'string' ? p.sourceGroup : undefined,
-                sourceFile: typeof p.sourceFile === 'string' ? p.sourceFile : undefined,
-                mapId: typeof p.mapId === 'string' ? p.mapId : undefined,
-                mapName: typeof p.mapName === 'string' ? p.mapName : undefined,
-                featureIndex: Number.isFinite(p.featureIndex) ? Number(p.featureIndex) : i,
-                lon: asFiniteNumber(p.lon) ?? undefined,
-                lat: asFiniteNumber(p.lat) ?? undefined,
-                centroid: Array.isArray(p.centroid) ? (p.centroid as [number, number]) : undefined,
-                bounds: Array.isArray(p.bounds) ? (p.bounds as [number, number, number, number]) : undefined,
-                geometry: f?.geometry,
-              } as RawToponymIndexItem;
-            })
-          : [];
+      if (!knownMaps || knownMaps.length === 0) {
+        log?.('WARN', 'No toponym maps found in build/index.json domains');
+        toponymIndex = [];
+        return;
+      }
 
-      toponymIndex = rawItems.map(normalizeRawToponym).filter((x): x is ToponymIndexItem => !!x);
-      log('INFO', `Toponyms loaded: ${toponymIndex.length}`);
+      // Fetch all per-map toponym files
+      const allItems: unknown[] = [];
+      const loadedMaps: string[] = [];
+      for (const mapId of knownMaps) {
+        try {
+          // Toponym files use descriptive naming: <mapId>/<mapId>Toponyms.json
+          const url = `${normalizeDatasetBaseUrl(datasetBaseUrl.trim())}/Toponyms/${mapId}/${mapId}Toponyms.json`;
+          const res = await fetch(url, { redirect: 'follow' });
+          if (!res.ok) {
+            log?.('INFO', `No toponyms available for ${mapId} (${res.status})`);
+            continue;
+          }
+
+          const json = (await res.json()) as ToponymIndexPayload;
+          // Get friendly map name from top-level field if available
+          const mapLabel = typeof (json as any)?.mapLabel === 'string' ? (json as any).mapLabel : mapId;
+
+          const items: RawToponymIndexItem[] = Array.isArray(json.items)
+            ? json.items
+            : Array.isArray(json.features)
+              ? json.features.map((f, i) => {
+                  const p = (f?.properties ?? {}) as Record<string, unknown>;
+                  return {
+                    id: typeof f?.id === 'string' ? f.id : undefined,
+                    text: typeof p.text === 'string' ? p.text : undefined,
+                    textNormalized: typeof p.textNormalized === 'string' ? p.textNormalized : undefined,
+                    sourceGroup: typeof p.sourceGroup === 'string' ? p.sourceGroup : mapId,
+                    sourceFile: typeof p.sourceFile === 'string' ? p.sourceFile : `${mapId}/${mapId}Toponyms.json`,
+                    mapId: typeof p.mapId === 'string' ? p.mapId : mapId,
+                    mapName: typeof p.mapName === 'string' ? p.mapName : mapLabel,
+                    featureIndex: Number.isFinite(p.featureIndex) ? Number(p.featureIndex) : i,
+                    lon: asFiniteNumber(p.lon) ?? undefined,
+                    lat: asFiniteNumber(p.lat) ?? undefined,
+                    centroid: Array.isArray(p.centroid) ? (p.centroid as [number, number]) : undefined,
+                    bounds: Array.isArray(p.bounds) ? (p.bounds as [number, number, number, number]) : undefined,
+                    geometry: f?.geometry,
+                  } as RawToponymIndexItem;
+                })
+              : [];
+
+          if (items.length > 0) {
+            // Ensure all items have mapId, sourceFile, sourceGroup, and mapName set from the filename
+            // Also prefix ID with mapId to ensure uniqueness across all loaded maps
+            const itemsWithMetadata = items.map(item => ({
+              ...item,
+              id: item.id ? `${mapId}::${item.id}` : `${mapId}::unknown-${Math.random()}`,
+              mapId: item.mapId || mapId,
+              sourceFile: item.sourceFile || `${mapId}/${mapId}Toponyms.json`,
+              sourceGroup: item.sourceGroup || mapId,
+              mapName: item.mapName || mapLabel,
+            }));
+            allItems.push(...itemsWithMetadata);
+            loadedMaps.push(mapId);
+            log?.('INFO', `Toponyms loaded for ${mapId}: ${items.length} items`);
+          }
+        } catch (err) {
+          // Silently skip maps without toponyms (normal case, not an error)
+          log?.('INFO', `Failed to load toponyms for ${mapId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      toponymIndex = allItems.map(item => normalizeRawToponym(item as RawToponymIndexItem)).filter((x): x is ToponymIndexItem => !!x);
+      if (toponymIndex.length === 0) {
+        log?.('WARN', `Toponyms index unavailable: no items loaded from ${loadedMaps.length} maps`);
+      } else {
+        log?.('INFO', `Total toponyms loaded: ${toponymIndex.length} items from maps: ${loadedMaps.join(', ')}`);
+      }
     } catch (e: any) {
       toponymIndex = [];
       toponymError = e?.message ?? String(e);
@@ -1145,20 +1299,25 @@
     const out: ManifestSearchItem[] = [];
     const seen = new Set<string>();
     for (const entry of index.index ?? []) {
-      const lon = asFiniteNumber((entry as any).centerLon);
-      const lat = asFiniteNumber((entry as any).centerLat);
-      if (lon === null || lat === null) continue;
       const label = String(entry.label ?? '').trim();
       if (!label) continue;
       const sourceManifestUrl = String(entry.sourceManifestUrl ?? '').trim();
       const compiledManifestPath = String(entry.compiledManifestPath ?? '').trim();
       if (!sourceManifestUrl || !compiledManifestPath) continue;
-      const mapName = sourceLabelByUrl.get(entry.sourceCollectionUrl) || 'IIIF';
+
+      // Coordinates are optional - manifests should be searchable even without georeferencing
+      const lon = asFiniteNumber((entry as any).centerLon);
+      const lat = asFiniteNumber((entry as any).centerLat);
+
+      const mapName = sourceLabelByUrl.get(entry.sourceCollectionUrl) || (entry as any).sourceCollectionLabel || 'IIIF';
       const text = `${mapName} - ${label}`;
       const id = String(entry.manifestAllmapsId ?? '').trim() || compiledManifestPath || sourceManifestUrl;
       if (seen.has(id)) continue;
       seen.add(id);
-      out.push({ id, label, text, textNormalized: normalizeSearchText(text), mapName, sourceManifestUrl, compiledManifestPath, centerLon: lon, centerLat: lat });
+      out.push({
+        id, label, text, textNormalized: normalizeSearchText(text), mapName, sourceManifestUrl, compiledManifestPath,
+        centerLon: lon ?? undefined, centerLat: lat ?? undefined
+      });
     }
     return out;
   }
@@ -1179,7 +1338,6 @@
         }
       }
       manifestSearchIndex = buildManifestSearchIndex(index, layers);
-      log('INFO', `Manifest search entries loaded: ${manifestSearchIndex.length}`);
 
       await warmInitialIiifLayers();
 
@@ -1191,7 +1349,6 @@
         if (!iiifSubId) continue; // WMTS layers (ferraris, vandermaelen) don't need this
         const info = getIiifInfoForSub(iiifSubId);
         if (!info) continue;
-        log('INFO', `[Init] Triggering deferred load for ${mainId}`);
         mainLayerEnabled = { ...mainLayerEnabled, [mainId]: false };
         await toggleMainLayer(mainId, true);
       }
@@ -1200,7 +1357,7 @@
         await syncRightPaneState();
       }
 
-      await loadToponymIndex();
+      await loadToponymIndex(index);
     } catch (e: any) {
       manifestSearchIndex = [];
       indexError = e?.message ?? String(e);
@@ -1344,13 +1501,15 @@
       applySearchLayerFocus(mainId as MainLayerId);
       await activateLayer(mainId);
     }
-    flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
-    openPreviewBubbleAt({
-      title: result.label,
-      manifestUrl: result.sourceManifestUrl,
-      location: mainId ? MAIN_LAYER_LABELS[mainId] : result.mapName,
-      kicker: 'Map Sheet',
-    }, result.centerLon, result.centerLat);
+    if (result.centerLon != null && result.centerLat != null) {
+      flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
+      openPreviewBubbleAt({
+        title: result.label,
+        manifestUrl: result.sourceManifestUrl,
+        location: mainId ? MAIN_LAYER_LABELS[mainId] : result.mapName,
+        kicker: 'Map Sheet',
+      }, result.centerLon, result.centerLat);
+    }
   }
 
   function pinParcel() {
@@ -1398,19 +1557,21 @@
   // ─── Timeslider wiring ─────────────────────────────────────────────────────
 
   async function onTimesliderMainToggle(e: CustomEvent<{ mainId: string; enabled: boolean }>) {
-    log('INFO', `[TS→] mainToggle ${e.detail.mainId} enabled=${e.detail.enabled}`);
     await toggleMainLayer(e.detail.mainId, e.detail.enabled);
   }
 
   async function onTimesliderSublayerChange(e: CustomEvent<{ subId: string; enabled: boolean }>) {
-    log('INFO', `[TS→] sublayerChange ${e.detail.subId} enabled=${e.detail.enabled}`);
     await toggleSubLayer(e.detail.subId, e.detail.enabled);
   }
 
   async function onTimesliderPaneMainToggle(e: CustomEvent<{ pane: PaneId; mainId: string; enabled: boolean }>) {
-    if (e.detail.pane !== 'right') return;
+    if (e.detail.pane !== 'right') {
+      return;
+    }
     rightMainLayerVisible = { ...rightMainLayerVisible, [e.detail.mainId]: e.detail.enabled };
-    if (!rightMap) return;
+    if (!rightMap) {
+      return;
+    }
 
     const wmtsKey = getMainWmtsKey(e.detail.mainId);
     if (wmtsKey) {
@@ -1419,23 +1580,33 @@
     }
 
     const iiifSubId = MAIN_LAYER_SUBS[e.detail.mainId]?.find(s => SUB_LAYER_DEFS[s]?.kind === 'iiif');
-    if (!iiifSubId) return;
+    if (!iiifSubId) {
+      return;
+    }
     await scheduleRightIiifMainLayerSync(e.detail.mainId);
   }
 
   async function onTimesliderPaneSublayerChange(e: CustomEvent<{ pane: PaneId; subId: string; enabled: boolean }>) {
-    if (e.detail.pane !== 'right') return;
+    if (e.detail.pane !== 'right') {
+      return;
+    }
     rightSubLayerVisible = { ...rightSubLayerVisible, [e.detail.subId]: e.detail.enabled };
-    if (!rightMap) return;
+    if (!rightMap) {
+      return;
+    }
 
     const subDef = SUB_LAYER_DEFS[e.detail.subId];
-    if (!subDef || subDef.kind === 'searchable') return;
+    if (!subDef || subDef.kind === 'searchable') {
+      return;
+    }
     const mainId = Object.keys(MAIN_LAYER_SUBS).find(k => MAIN_LAYER_SUBS[k].includes(e.detail.subId)) ?? '';
     const opacity = mainLayerOpacity[mainId] ?? 1;
 
     if (subDef.kind === 'wmts') {
-      setHistCartLayerVisible(rightMap, mainId as HistCartLayerKey, e.detail.enabled);
-      if (e.detail.enabled) setHistCartLayerOpacity(rightMap, mainId as HistCartLayerKey, opacity);
+      const histKey = getMainWmtsKey(mainId);
+      if (!histKey) return;
+      setHistCartLayerVisible(rightMap, histKey, e.detail.enabled);
+      if (e.detail.enabled) setHistCartLayerOpacity(rightMap, histKey, opacity);
       applyZOrderForPane(rightMap, 'right');
       return;
     }

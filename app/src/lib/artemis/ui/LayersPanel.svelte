@@ -84,26 +84,26 @@
               style="background-color:{meta.color};"
               on:click={() => toggleExpand(mainId)}
               aria-label="Toggle sublayers">
-              {#if mainId === 'ferraris'}
+              {#if mainId === 'Ferraris'}
                 <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
                   {#each [4,9,14,19,24,29] as y}
                     <line x1="0" y1={y} x2="34" y2={y} stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
                   {/each}
                 </svg>
-              {:else if mainId === 'vandermaelen'}
+              {:else if mainId === 'Vandermaelen'}
                 <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
                   {#each [6,12,18,24,30] as v}
                     <line x1={v} y1="0" x2={v} y2="34" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
                     <line x1="0" y1={v} x2="34" y2={v} stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
                   {/each}
                 </svg>
-              {:else if mainId === 'primitief'}
+              {:else if mainId === 'PrimitiefKadaster'}
                 <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
                   {#each [0,8,16,24,32,40] as d}
                     <line x1={d-8} y1="0" x2={d+8} y2="34" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
                   {/each}
                 </svg>
-              {:else if mainId === 'gereduceerd'}
+              {:else if mainId === 'GereduceerdeKadaster'}
                 <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
                   {#each [6,12,18,24,30] as v}
                     <line x1={v} y1="0" x2={v} y2="34" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>

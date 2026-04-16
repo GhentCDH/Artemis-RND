@@ -19,7 +19,7 @@
     'open-viewer': IiifMapInfo;
   }>();
 
-  const PRIMITIEF_COLOR = MAIN_LAYER_META['primitief'].color;
+  const PRIMITIEF_COLOR = MAIN_LAYER_META['PrimitiefKadaster'].color;
 </script>
 
 <div class="info-cards">

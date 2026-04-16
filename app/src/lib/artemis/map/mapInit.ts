@@ -6,7 +6,7 @@ let map: maplibregl.Map | null = null;
 type BaseMapTheme = "light" | "dark";
 const mapThemeByInstance = new WeakMap<maplibregl.Map, BaseMapTheme>();
 
-type HistCartLayerKey =
+export type HistCartLayerKey =
   | "ngi1904"
   | "ngi1873"
   | "popp"
@@ -14,7 +14,7 @@ type HistCartLayerKey =
   | "villaret"
   | "frickx"
   | "vandermaelen";
-type LandUsageLayerKey = "ferraris" | "vandermaelen";
+export type LandUsageLayerKey = "ferraris" | "vandermaelen";
 
 const HISTCART_LAYERS: Record<
   HistCartLayerKey,
