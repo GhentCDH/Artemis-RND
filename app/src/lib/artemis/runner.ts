@@ -183,6 +183,7 @@ function emitIiifStep(log: RunnerLog | undefined, layerLabel: string, step: stri
   console.info(message);
 }
 
+
 function getEntryGeoCenter(entry: RuntimeLayerEntry): [number, number] | null {
   const coords: Array<[number, number]> = [];
   for (const item of entry.inlineMaps ?? []) {
@@ -213,6 +214,7 @@ function scoreEntryForViewport(entry: RuntimeLayerEntry, viewportCenter: [number
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
+
 
 // Kept for debug UI compatibility. The custom shared fetch cache was removed
 // because Allmaps sprite workers cannot clone a user-supplied fetch function.
@@ -442,6 +444,32 @@ async function loadNewIiifEntries(
     const maps = (bundle?.maps ?? []) as any[];
     const entries: RuntimeLayerEntry[] = [];
     const infoByServiceUrl = new Map<string, any>();
+    const bundleSprites = bundle?.sprites;
+    const spriteImageSize =
+      Array.isArray(bundleSprites?.imageSize) && bundleSprites.imageSize.length === 2
+        ? [Number(bundleSprites.imageSize[0]), Number(bundleSprites.imageSize[1])] as [number, number]
+        : null;
+    const spritePath = typeof bundleSprites?.image === "string" ? String(bundleSprites.image) : "";
+    const spriteJsonPath = typeof bundleSprites?.json === "string" ? String(bundleSprites.json) : "";
+    const spriteImageUrl = spritePath
+      ? joinUrl(
+          cfg.datasetBaseUrl,
+          spriteDebugMode
+            ? spritePath.replace(/(\.[^.]+)$/, "_debug$1")
+            : spritePath
+        )
+      : "";
+    const spritesByImageId = new Map<string, BundleSprite>();
+
+    if (spriteJsonPath) {
+      const spritesUrl = joinUrl(cfg.datasetBaseUrl, spriteJsonPath);
+      const sprites = await fetchJson<BundleSprite[]>(spritesUrl, timeout);
+      for (const sprite of Array.isArray(sprites) ? sprites : []) {
+        const imageId = String(sprite?.imageId ?? "").trim();
+        if (!imageId) continue;
+        spritesByImageId.set(imageId, sprite);
+      }
+    }
 
     for (const map of maps) {
       const sourceManifestUrl = String(map.id ?? "").trim();
@@ -453,21 +481,13 @@ async function loadNewIiifEntries(
         return [{ url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`, raw: canvas.georeferencedMap }];
       });
       const inlineSprites = canvases.flatMap((canvas: any) => {
-        if (!canvas.sprite || !canvas.allmapsSprite || !canvas.spriteWidth || !canvas.spriteHeight) return [];
-        let spritePath = String(canvas.sprite);
-        if (spriteDebugMode) {
-          const dotIndex = spritePath.lastIndexOf('.');
-          if (dotIndex > -1) {
-            spritePath = spritePath.slice(0, dotIndex) + '_debug' + spritePath.slice(dotIndex);
-          } else {
-            spritePath += '_debug';
-          }
-        }
-        const imageUrl = joinUrl(cfg.datasetBaseUrl, spritePath);
+        const imageId = String(canvas?.georeferencedMap?.resource?.id ?? "").trim();
+        const sprite = imageId ? spritesByImageId.get(imageId) : undefined;
+        if (!sprite || !spriteImageSize || !spriteImageUrl) return [];
         return [{
-          imageUrl,
-          imageSize: [Number(canvas.spriteWidth), Number(canvas.spriteHeight)] as [number, number],
-          sprite: canvas.allmapsSprite,
+          imageUrl: spriteImageUrl,
+          imageSize: spriteImageSize,
+          sprite,
         }];
       });
 
@@ -736,9 +756,10 @@ export async function runLayerGroup(opts: {
   const layerCreateStartedAt = nowMs();
   for (let i = 0; i < chunkCount; i++) {
     await removeMaplibreLayer(map, layerIds[i]);
-    const l = new WarpedMapLayer({ layerId: layerIds[i], renderMaps: false } as any);
+    const l = new WarpedMapLayer({ layerId: layerIds[i] } as any);
     try {
       map.addLayer(l as any);
+      l.setLayerOptions({ visible: false } as any);
       layers.push(l);
     } catch (e: any) {
       log?.("ERROR", `addLayer failed (${layerIds[i]}): ${e?.message ?? String(e)}`);
@@ -873,7 +894,6 @@ export async function runLayerGroup(opts: {
     for (const id of ids) firstTileMapIds.add(id);
     firstTilesLoaded = firstTileMapIds.size || firstMapTileLoadedEvents;
     lastProgressAtMs = nowMs();
-    markBootstrapVisualReady();
     emitRenderStats();
     if (firstTilesLoaded <= 5 || firstTilesLoaded % NOISY_LOG_EVERY === 0) {
       log?.("INFO", `[${label}] firstmaptileloaded events:${firstMapTileLoadedEvents} maps:${firstTilesLoaded} ids=[${ids.join(",")}]`);
@@ -1054,6 +1074,7 @@ export async function runLayerGroup(opts: {
     "bootstrap-selection",
     `entries=${bootstrapFetched.length} maps=${bootstrapMapBudget} remaining=${backgroundFetched.length}`
   );
+  const hasSprites = fetchedAll.some((item) => "sprites" in item && item.sprites.length > 0);
 
   // Phase 2: apply georeferenced maps with a bootstrap-first pass so sprites can
   // appear quickly near the current view instead of waiting for the full ingest.
@@ -1255,7 +1276,8 @@ export async function runLayerGroup(opts: {
     return spriteGroupsByLayer;
   }
 
-  async function warmSpritesForItems(items: Fetched[], phase: "bootstrap" | "background") {
+  let initializedSpriteTargets = 0;
+  async function initializeSpritesForItems(items: Fetched[]) {
     try {
       const spriteStartedAt = nowMs();
       const spriteGroupsByLayer = getSpriteGroups(items);
@@ -1264,60 +1286,47 @@ export async function runLayerGroup(opts: {
         (sum, groups) => sum + [...groups.values()].reduce((inner, group) => inner + group.sprites.length, 0),
         0
       );
+      initializedSpriteTargets = totalSpriteTargets;
       if (totalSpriteTargets > 0) {
-        emitIiifStep(log, layerLabel, "warm-sprites:start", `phase=${phase} targets=${totalSpriteTargets} sprites=${totalSprites}`);
+        emitIiifStep(log, layerLabel, "init-sprites:start", `targets=${totalSpriteTargets} sprites=${totalSprites}`);
         await Promise.all(
           spriteGroupsByLayer.flatMap((groups, index) =>
-            [...groups.values()].map((group) =>
-              layers[index].addSprites(group.sprites as any, group.imageUrl, group.imageSize)
-            )
+            [...groups.values()].map(async (group, groupIndex) => {
+              const startedAt = nowMs();
+              emitIiifStep(
+                log,
+                layerLabel,
+                "init-sprites:addSprites:start",
+                `layer=${index} group=${groupIndex + 1}/${groups.size} sprites=${group.sprites.length} imageSize=${group.imageSize[0]}x${group.imageSize[1]} imageUrl=${group.imageUrl}`
+              );
+              await layers[index].addSprites(group.sprites as any, group.imageUrl, group.imageSize);
+              emitIiifStep(
+                log,
+                layerLabel,
+                "init-sprites:addSprites:done",
+                `${Math.round(nowMs() - startedAt)}ms layer=${index} group=${groupIndex + 1}/${groups.size} sprites=${group.sprites.length}`
+              );
+            })
           )
         );
-        emitIiifStep(log, layerLabel, "warm-sprites:done", `${Math.round(nowMs() - spriteStartedAt)}ms phase=${phase} targets=${totalSpriteTargets} sprites=${totalSprites}`);
+        emitIiifStep(log, layerLabel, "init-sprites:done", `${Math.round(nowMs() - spriteStartedAt)}ms targets=${totalSpriteTargets} sprites=${totalSprites}`);
       }
     } catch (e: any) {
-      log?.("WARN", `[${label}] sprite warm failed (${phase}): ${e?.message ?? e}`);
-      emitIiifStep(log, layerLabel, "warm-sprites:error", `phase=${phase} ${String(e?.message ?? e)}`);
+      log?.("WARN", `[${label}] sprite init failed: ${e?.message ?? e}`);
+      emitIiifStep(log, layerLabel, "init-sprites:error", String(e?.message ?? e));
     }
   }
 
-  if (parallelLoading) {
+  if (parallelLoading || hasSprites) {
     // Parallel mode: Load all maps at once
-    emitIiifStep(log, layerLabel, "load-mode", "parallel");
+    emitIiifStep(log, layerLabel, "load-mode", parallelLoading ? "parallel" : "sprites-unified");
     const allProcessed = await applyFetchedBatch(fetchedAll, 0, "parallel");
     results.push(...allProcessed);
-    for (const layer of layers) {
-      layer.setLayerOptions({ renderMaps: true } as any);
-    }
-    emitIiifStep(log, layerLabel, "render-maps:enabled", `after=all`);
   } else {
     // Phased mode: Bootstrap → Background (default)
     emitIiifStep(log, layerLabel, "load-mode", "phased");
     const bootstrapProcessed = await applyFetchedBatch(bootstrapFetched, 0, "sequential");
     results.push(...bootstrapProcessed);
-    for (const layer of layers) {
-      layer.setLayerOptions({ renderMaps: true } as any);
-    }
-    emitIiifStep(log, layerLabel, "render-maps:enabled", `after=bootstrap`);
-    await Promise.race([
-      new Promise<void>((resolve) => {
-        if (bootstrapVisualReadyResolved) {
-          resolve();
-          return;
-        }
-        resolveBootstrapVisualReady = resolve;
-      }),
-      new Promise<void>((resolve) => setTimeout(resolve, 400))
-    ]);
-    emitIiifStep(
-      log,
-      layerLabel,
-      "bootstrap-visual-ready",
-      `spriteTiles=${spriteTileMapIds.size || spriteTileLoadedEvents} firstTiles=${firstTileMapIds.size || firstMapTileLoadedEvents}`
-    );
-    await nextFrame();
-    await nextFrame();
-
     const processed = await applyFetchedBatch(backgroundFetched, bootstrapFetched.length, "chunked");
     results.push(...processed);
   }
@@ -1358,8 +1367,15 @@ export async function runLayerGroup(opts: {
         .join(" | ")
     );
   }
-  // Warm all sprites at once (consolidated approach for both parallel and phased modes)
-  await warmSpritesForItems(fetchedAll, "all");
+  await initializeSpritesForItems(fetchedAll);
+
+  if (initialRenderMaps && !spriteOnly) {
+    for (const layer of layers) {
+      layer.setLayerOptions({ visible: true } as any);
+      (layer as any).nativeUpdate?.();
+    }
+    emitIiifStep(log, layerLabel, "init-layer:visible", `layers=${layers.length}`);
+  }
 
   // Keep the render loop alive so loadMissingImagesInViewport() keeps running.
   // With a fast IIIF server, allrequestedtilesloaded fires after the first batch
@@ -1452,56 +1468,60 @@ export async function runLayerGroup(opts: {
     );
   }
 
-  const repaintHandle = cleanupRef.interval = setInterval(() => {
-    if (!safeHasMapLayer(map, layerIds[0])) { clearInterval(repaintHandle); return; }
-    const now = nowMs();
-    const elapsed = now - keepaliveStartMs;
-    const idleMs = now - lastProgressAtMs;
-    const expectedVisibleMaps = Math.max(
-      1,
-      Math.min(expectedMaps, Math.max(mapsInViewport, peakMapsInViewport, firstTilesLoaded))
-    );
+  if (initializedSpriteTargets === 0) {
+    const repaintHandle = cleanupRef.interval = setInterval(() => {
+      if (!safeHasMapLayer(map, layerIds[0])) { clearInterval(repaintHandle); return; }
+      const now = nowMs();
+      const elapsed = now - keepaliveStartMs;
+      const idleMs = now - lastProgressAtMs;
+      const expectedVisibleMaps = Math.max(
+        1,
+        Math.min(expectedMaps, Math.max(mapsInViewport, peakMapsInViewport, firstTilesLoaded))
+      );
 
-    const snapshot = `${firstTilesLoaded}|${imageInfosAdded}|${tilesLoaded}|${mapsInViewport}`;
-    if (snapshot !== lastProgressSnapshot) {
-      lastProgressSnapshot = snapshot;
-      lastProgressAtMs = now;
-    }
-
-    if (firstTilesLoaded >= expectedMaps && expectedMaps > 0) {
-      if (debug) {
-        logViewportVsFetchable("viewport-diff(full)");
-        logVisibleNotFetchableReasons("viewport-reasons(full)");
+      const snapshot = `${firstTilesLoaded}|${imageInfosAdded}|${tilesLoaded}|${mapsInViewport}`;
+      if (snapshot !== lastProgressSnapshot) {
+        lastProgressSnapshot = snapshot;
+        lastProgressAtMs = now;
       }
-      log?.("INFO", `[${label}] keepalive done(full) — firstTiles:${firstTilesLoaded}/${expectedMaps} inViewport:${mapsInViewport} peakViewport:${peakMapsInViewport} active:${tilesLoaded - tilesDeleted}`);
-      clearInterval(repaintHandle);
-      return;
-    }
 
-    if (firstTilesLoaded >= expectedVisibleMaps && idleMs >= KEEPALIVE_IDLE_STOP_MS && elapsed >= 1500) {
-      const likelyViewportLimited = expectedMaps > peakMapsInViewport;
-      if (debug) {
-        logViewportVsFetchable("viewport-diff(viewport)");
-        logVisibleNotFetchableReasons("viewport-reasons(viewport)");
+      if (firstTilesLoaded >= expectedMaps && expectedMaps > 0) {
+        if (debug) {
+          logViewportVsFetchable("viewport-diff(full)");
+          logVisibleNotFetchableReasons("viewport-reasons(full)");
+        }
+        log?.("INFO", `[${label}] keepalive done(full) — firstTiles:${firstTilesLoaded}/${expectedMaps} inViewport:${mapsInViewport} peakViewport:${peakMapsInViewport} active:${tilesLoaded - tilesDeleted}`);
+        clearInterval(repaintHandle);
+        return;
       }
-      log?.("INFO", `[${label}] keepalive done(viewport) — firstTiles:${firstTilesLoaded}/${expectedMaps} expectedVisible:${expectedVisibleMaps} peakViewport:${peakMapsInViewport} likelyViewportLimited:${likelyViewportLimited}`);
-      clearInterval(repaintHandle);
-      return;
-    }
 
-    if (elapsed >= keepaliveBudgetMs) {
-      const likelyViewportLimited = expectedMaps > peakMapsInViewport;
-      if (debug) {
-        logViewportVsFetchable("viewport-diff(timeout)");
-        logVisibleNotFetchableReasons("viewport-reasons(timeout)");
+      if (firstTilesLoaded >= expectedVisibleMaps && idleMs >= KEEPALIVE_IDLE_STOP_MS && elapsed >= 1500) {
+        const likelyViewportLimited = expectedMaps > peakMapsInViewport;
+        if (debug) {
+          logViewportVsFetchable("viewport-diff(viewport)");
+          logVisibleNotFetchableReasons("viewport-reasons(viewport)");
+        }
+        log?.("INFO", `[${label}] keepalive done(viewport) — firstTiles:${firstTilesLoaded}/${expectedMaps} expectedVisible:${expectedVisibleMaps} peakViewport:${peakMapsInViewport} likelyViewportLimited:${likelyViewportLimited}`);
+        clearInterval(repaintHandle);
+        return;
       }
-      log?.("WARN", `[${label}] keepalive timeout — firstTiles:${firstTilesLoaded}/${expectedMaps} imgInfos:${imageInfosAdded} inViewport:${mapsInViewport} peakViewport:${peakMapsInViewport} idleMs:${Math.round(idleMs)} likelyViewportLimited:${likelyViewportLimited}`);
-      clearInterval(repaintHandle);
-      return;
-    }
 
-    for (const l of layers) (l as any).nativeUpdate?.();
-  }, KEEPALIVE_TICK_MS);
+      if (elapsed >= keepaliveBudgetMs) {
+        const likelyViewportLimited = expectedMaps > peakMapsInViewport;
+        if (debug) {
+          logViewportVsFetchable("viewport-diff(timeout)");
+          logVisibleNotFetchableReasons("viewport-reasons(timeout)");
+        }
+        log?.("WARN", `[${label}] keepalive timeout — firstTiles:${firstTilesLoaded}/${expectedMaps} imgInfos:${imageInfosAdded} inViewport:${mapsInViewport} peakViewport:${peakMapsInViewport} idleMs:${Math.round(idleMs)} likelyViewportLimited:${likelyViewportLimited}`);
+        clearInterval(repaintHandle);
+        return;
+      }
+
+      for (const l of layers) (l as any).nativeUpdate?.();
+    }, KEEPALIVE_TICK_MS);
+  } else {
+    emitIiifStep(log, layerLabel, "init-render-loop:skip", `reason=sprites targets=${initializedSpriteTargets}`);
+  }
 
   emitIiifStep(
     log,

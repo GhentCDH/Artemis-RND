@@ -113,9 +113,9 @@
     // Internal-only debug surface. Flip to true when needed locally.
     debugMenu: false,
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
-    parallelIiifLoading: false,
+    parallelIiifLoading: true,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
-    spriteDebugMode: false,
+    spriteDebugMode: true,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 

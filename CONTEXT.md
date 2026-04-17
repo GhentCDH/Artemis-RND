@@ -95,9 +95,217 @@ Reactivity fix applied (2026-04-03):
 - `Timeline pill expand tab — fix applied, needs browser verification`
   Root cause was Svelte 5 not tracking `openMenuKey` as a template dependency when it was only read through the `isMenuOpen` wrapper function. Fixed by removing the wrapper and using `openMenuKey === src.key` directly in all template locations. Needs live browser test to confirm the menu now opens correctly.
 
-## 8. Verification
+## 8. IIIF Data Structure: Geomaps Consolidation (2026-04-16)
 
-- Last verified command: `pnpm run check`
+### Overview
+
+The IIIF data pipeline was refactored from a **3-file structure** to a **single pre-linked geomaps bundle** per map domain. This eliminates runtime join logic and reduces network requests from 3 to 1 per map.
+
+### Old Structure (Deprecated)
+
+Three separate files per map domain:
+```
+build/IIIF/
+├── {mapId}_manifests.json    — IIIF V2 manifests (all 635, keyed by label)
+├── {mapId}_info.json         — Image API info.json objects (keyed by service URL)
+└── georef/{mapId}.json       — Allmaps annotations (keyed by canvas ID)
+```
+
+**Viewer flow:**
+1. Fetch all 3 files in parallel
+2. Iterate manifests, extract canvas IDs
+3. For each canvas: look up in `georefByCanvas` by canvas ID
+4. Extract service URL from annotation → look up in `services` by URL
+5. Build RuntimeLayerEntry with matched annotation and info
+
+**Issues:**
+- 3 network fetches per map
+- Runtime join logic by canvas ID and service URL
+- Non-georeferenced manifests included but immediately discarded
+- Full IIIF manifest JSON stored even though only `@id`, `label` used
+
+### New Structure (Current)
+
+Single pre-linked file per map domain:
+```
+build/IIIF/
+├── PrimitiefKadaster_geomaps.json    (5.1M)
+└── GereduceerdeKadaster_geomaps.json (1.6M)
+```
+
+**File format:**
+```json
+{
+  "generatedAt": "2026-04-16T...",
+  "mapId": "PrimitiefKadaster",
+  "maps": [
+    {
+      "id": "https://iiif.ghentcdh.ugent.be/iiif/manifests/...",
+      "label": "Sinaai - Sectie A en B",
+      "isVerzamelblad": false,
+      "canvases": [
+        {
+          "id": "https://iiif.ghentcdh.ugent.be/.../canvas/...",
+          "info": {
+            "@context": "http://iiif.io/api/image/2/context.json",
+            "@id": "https://...",
+            "protocol": "http://iiif.io/api/image",
+            "width": 11760,
+            "height": 7800,
+            "tiles": [{ "width": 256, "scaleFactors": [1,2,4,8,16,32,64] }],
+            "profile": ["http://iiif.io/api/image/2/level1.json", {...}]
+          },
+          "georef": {
+            "type": "AnnotationPage",
+            "@context": "http://www.w3.org/ns/anno.jsonld",
+            "items": [{
+              "id": "https://annotations.allmaps.org/maps/...",
+              "type": "Annotation",
+              "@context": [...],
+              "motivation": "georeferencing",
+              "target": {
+                "type": "SpecificResource",
+                "source": {
+                  "id": "...",
+                  "type": "ImageService2",
+                  "width": 11760,
+                  "height": 7800,
+                  "partOf": [
+                    {
+                      "id": "...",  // canvas URL
+                      "type": "Canvas",
+                      "partOf": [{ "id": "...", "type": "Manifest" }]
+                    }
+                  ]
+                },
+                "selector": { "type": "SvgSelector", "value": "<svg ...>" }
+              },
+              "body": {
+                "type": "FeatureCollection",
+                "transformation": { "type": "polynomial", "options": {"order": 1} },
+                "features": [{ "type": "Feature", "geometry": {...}, "properties": {...} }],
+                "_allmaps": { "scale": ..., "area": ..., ... }
+              }
+            }]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Viewer flow:**
+1. Fetch single `{mapId}_geomaps.json`
+2. Iterate `maps[]`
+3. For each map, iterate `canvases[]`
+4. Each canvas already has `info` and `georef` inline
+5. Pass `canvas.info` to `layer.addImageInfos()`
+6. Pass `canvas.georef` to `layer.addGeoreferenceAnnotation()`
+
+**Benefits:**
+- ✅ 1 network fetch per map (vs 3)
+- ✅ No runtime join logic
+- ✅ Only georeferenced manifests (231 of 635)
+- ✅ Pre-computed `isVerzamelblad` flag
+- ✅ Pruned data (no unused metadata)
+
+### What Data Was Removed
+
+From manifests:
+- `thumbnail` — not used by viewer
+- Canvas `width`/`height` — available in `info`
+- Canvas `images[]` — service URL in `georef.target.source.id`
+- Full metadata — only `isVerzamelblad` computed at build time
+
+From info.json:
+- `sizes[]` — thumbnail pyramid; Allmaps uses `tiles[].scaleFactors`
+
+From annotations:
+- `created`/`modified` timestamps — not used for rendering
+- `target.source.provider` — attribution; not needed
+- Individual annotation `id` fields — preserved in full annotation
+
+### Implementation in Viewer
+
+**File:** `app/src/lib/artemis/runner.ts`
+
+Type change:
+```typescript
+type LayerInfo = {
+  // OLD (removed):
+  // infoPath?: string;
+  // manifestsPath?: string;
+  // georefPath?: string;
+  
+  // NEW:
+  geomapsPath?: string;
+  // ... other fields unchanged
+}
+```
+
+Function `loadNewIiifEntries()`:
+```typescript
+// OLD: fetch 3 files, join by canvas ID
+const [manifestBundle, georefBundle, infoBundle] = await Promise.all([
+  fetchJson(manifestsUrl),
+  fetchJson(georefUrl),
+  fetchJson(infoUrl),
+]);
+const georefByCanvas = georefBundle?.georefByCanvas ?? {};
+const services = infoBundle?.services ?? {};
+// ... iterate manifests, look up canvases in georefByCanvas, etc.
+
+// NEW: fetch 1 file, iterate maps directly
+const bundle = await fetchJson(geomapsUrl);
+const maps = bundle?.maps ?? [];
+for (const map of maps) {
+  const canvases = map.canvases ?? [];
+  // Each canvas already has georef and info inline
+  for (const canvas of canvases) {
+    if (canvas.info) infoByServiceUrl.set(canvas.info["@id"], canvas.info);
+    if (canvas.georef) inlineAnnotations.push({ raw: canvas.georef });
+  }
+}
+```
+
+**File:** `app/src/routes/+page.svelte`
+
+Path derivation in `normalizeSourceLayers()`:
+```typescript
+// OLD:
+map ? `IIIF/${map}_manifests.json` : (layer as any).manifestsPath,
+map ? `IIIF/${map}_info.json` : (layer as any).infoPath,
+map ? `IIIF/georef/${map}.json` : (layer as any).georefPath,
+
+// NEW:
+map ? `IIIF/${map}_geomaps.json` : (layer as any).geomapsPath,
+```
+
+### Migration Checklist
+
+- ✅ Pipeline generates `_geomaps.json` files
+- ✅ Pruning helpers applied (manifests, info, annotations)
+- ✅ Viewer loads single `geomapsPath`
+- ✅ `loadNewIiifEntries()` iterates `maps[]` directly
+- ✅ `isVerzamelblad` read from pre-computed field
+- ✅ TypeScript checks pass (0 errors)
+- ✅ Old files (`*_manifests.json`, `*_info.json`, `georef/`) removed from build
+
+### Testing
+
+To verify the new structure works end-to-end:
+1. Start dev server: `cd Artemis-RND/app && bun run dev`
+2. Verify IIIF maps render (Primitief, Gereduceerd)
+3. Check browser network tab: only 2 `_geomaps.json` requests (one per map domain) instead of 6 (3 per domain)
+4. Verify georef overlays display correctly
+5. Verify verzamelblad filtering works
+6. Verify info pre-warming works (check MapLibre tile requests load quickly)
+
+## 9. Verification
+
+- Last verified command: `bun run check` (0 errors, 0 warnings)
+- Pipeline build output: ✅ PrimitiefKadaster and GereduceerdeKadaster geomaps generated
 - Current TypeScript/Svelte status at last edit: `0 errors, 0 warnings`
 - Important: compile status is clean, but runtime behavior is not fully verified. The pill expand tab fix needs a live browser test. The compare-mode header order is now acceptable for now, but spacing/visual polish may still need browser tuning.
 - Runtime metadata status at last edit:
