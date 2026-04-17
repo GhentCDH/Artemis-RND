@@ -109,6 +109,17 @@ type RuntimeLayerEntry = {
     };
   }>;
   manifestAllmapsUrl?: string;
+  bbox?: [number, number, number, number] | null; // [minLon, minLat, maxLon, maxLat]
+};
+
+type BundleSprite = {
+  imageId: string;
+  scaleFactor: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  spriteTileScale?: number;
 };
 
 type RunnerLog = (level: "INFO" | "WARN" | "ERROR", msg: string) => void;
@@ -126,6 +137,41 @@ export function getLayerGroupId(layerInfo: LayerInfo): string {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Compute geographic bounding box from GCP coordinates
+function geoBoxFromGcps(gcps: any[]): [number, number, number, number] | null {
+  if (!Array.isArray(gcps) || gcps.length === 0) return null;
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const gcp of gcps) {
+    const geo = gcp?.geo;
+    if (!Array.isArray(geo) || geo.length < 2) continue;
+    const [lon, lat] = [Number(geo[0]), Number(geo[1])];
+    if (!isFinite(lon) || !isFinite(lat)) continue;
+    minLon = Math.min(minLon, lon);
+    maxLon = Math.max(maxLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  }
+  return isFinite(minLon) ? [minLon, minLat, maxLon, maxLat] : null;
+}
+
+// Check if two geographic bounding boxes intersect
+function bboxIntersects(
+  [aW, aS, aE, aN]: [number, number, number, number],
+  [bW, bS, bE, bN]: [number, number, number, number]
+): boolean {
+  return aW <= bE && aE >= bW && aS <= bN && aN >= bS;
+}
+
+// Get current map viewport as a geographic bounding box
+function getMapViewportBbox(map: maplibregl.Map): [number, number, number, number] | null {
+  try {
+    const b = map.getBounds();
+    return b ? [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] : null;
+  } catch {
+    return null;
+  }
+}
 
 function nowMs() {
   return performance.now();
@@ -209,6 +255,28 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
 
 let cachedIndex: CompiledIndex | null = null;
 const cachedNewIiifBundles = new Map<string, Promise<{ entries: RuntimeLayerEntry[]; infoByServiceUrl: Map<string, any> }>>();
+
+// Pending annotations: entries not yet added to WarpedMapLayer (deferred by viewport filtering)
+type PendingGroupState = {
+  entries: RuntimeLayerEntry[];
+  layers: WarpedMapLayer[];
+  cfg: CompiledRunnerConfig;
+  layerInfo: LayerInfo;
+  log?: RunnerLog;
+};
+const pendingByGroup = new Map<string, PendingGroupState>();
+
+// Sprite preview data for low-zoom rendering
+export type SpriteFeature = {
+  id: string;
+  label: string;
+  spriteUrl: string;
+  bbox: [number, number, number, number]; // [minLon, minLat, maxLon, maxLat]
+  layerId: string;
+  layerLabel: string;
+};
+export const spriteIndex = new Map<string, SpriteFeature>(); // keyed by entry.sourceManifestUrl
+
 type ManifestInfo = {
   sourceManifestUrl: string;
   label: string;
@@ -263,6 +331,7 @@ export function resetCompiledIndexCache() {
   mapIdToManifestInfo.clear();
   activeLayerCleanup.clear();
   parkedLayersByGroup.clear();
+  pendingByGroup.clear();
   paneRuntimes.clear();
 }
 
@@ -351,6 +420,7 @@ async function loadNewIiifEntries(
   cfg: CompiledRunnerConfig,
   layerInfo: LayerInfo,
   timeout: number,
+  spriteDebugMode: boolean = false,
   log?: RunnerLog
 ): Promise<{
   entries: RuntimeLayerEntry[];
@@ -384,7 +454,16 @@ async function loadNewIiifEntries(
       });
       const inlineSprites = canvases.flatMap((canvas: any) => {
         if (!canvas.sprite || !canvas.allmapsSprite || !canvas.spriteWidth || !canvas.spriteHeight) return [];
-        const imageUrl = joinUrl(cfg.datasetBaseUrl, String(canvas.sprite));
+        let spritePath = String(canvas.sprite);
+        if (spriteDebugMode) {
+          const dotIndex = spritePath.lastIndexOf('.');
+          if (dotIndex > -1) {
+            spritePath = spritePath.slice(0, dotIndex) + '_debug' + spritePath.slice(dotIndex);
+          } else {
+            spritePath += '_debug';
+          }
+        }
+        const imageUrl = joinUrl(cfg.datasetBaseUrl, spritePath);
         return [{
           imageUrl,
           imageSize: [Number(canvas.spriteWidth), Number(canvas.spriteHeight)] as [number, number],
@@ -569,12 +648,16 @@ export async function runLayerGroup(opts: {
   cfg: CompiledRunnerConfig;
   layerInfo: LayerInfo;
   paneId?: PaneRuntimeId;
+  initialRenderMaps?: boolean;
+  spriteOnly?: boolean;
+  parallelLoading?: boolean; // Load all maps in parallel vs phased (bootstrap → background)
+  spriteDebugMode?: boolean; // Use debug spritesheets with pink tint for visualization
   log?: RunnerLog;
   debug?: boolean; // gates expensive diagnostic work (annotation strategy, viewport diff analysis)
   onProgress?: (done: number, total: number, latest: RunResult) => void;
   onRenderStats?: (stats: LayerRenderStats) => void;
 }): Promise<RunResult[]> {
-  const { map, cfg, layerInfo, log, debug = false, paneId = "main" } = opts;
+  const { map, cfg, layerInfo, log, debug = false, paneId = "main", initialRenderMaps = true, spriteOnly = false, parallelLoading = false, spriteDebugMode = false } = opts;
   const runtime = getPaneRuntime(paneId);
   const layerLabel = layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel;
   const runStartedAt = nowMs();
@@ -612,7 +695,7 @@ export async function runLayerGroup(opts: {
   }
 
   const timeout = cfg.fetchTimeoutMs ?? 30000;
-  const loaded = await loadNewIiifEntries(cfg, layerInfo, timeout, log);
+  const loaded = await loadNewIiifEntries(cfg, layerInfo, timeout, spriteDebugMode, log);
   const infoByServiceUrl = loaded.infoByServiceUrl;
   const entriesUnfiltered = loaded.entries;
 
@@ -1198,34 +1281,46 @@ export async function runLayerGroup(opts: {
     }
   }
 
-  const bootstrapProcessed = await applyFetchedBatch(bootstrapFetched, 0, "sequential");
-  results.push(...bootstrapProcessed);
-  await warmSpritesForItems(bootstrapFetched, "bootstrap");
-  for (const layer of layers) {
-    layer.setLayerOptions({ renderMaps: true } as any);
-  }
-  emitIiifStep(log, layerLabel, "render-maps:enabled", `after=bootstrap`);
-  await Promise.race([
-    new Promise<void>((resolve) => {
-      if (bootstrapVisualReadyResolved) {
-        resolve();
-        return;
-      }
-      resolveBootstrapVisualReady = resolve;
-    }),
-    new Promise<void>((resolve) => setTimeout(resolve, 400))
-  ]);
-  emitIiifStep(
-    log,
-    layerLabel,
-    "bootstrap-visual-ready",
-    `spriteTiles=${spriteTileMapIds.size || spriteTileLoadedEvents} firstTiles=${firstTileMapIds.size || firstMapTileLoadedEvents}`
-  );
-  await nextFrame();
-  await nextFrame();
+  if (parallelLoading) {
+    // Parallel mode: Load all maps at once
+    emitIiifStep(log, layerLabel, "load-mode", "parallel");
+    const allProcessed = await applyFetchedBatch(fetchedAll, 0, "parallel");
+    results.push(...allProcessed);
+    for (const layer of layers) {
+      layer.setLayerOptions({ renderMaps: true } as any);
+    }
+    emitIiifStep(log, layerLabel, "render-maps:enabled", `after=all`);
+  } else {
+    // Phased mode: Bootstrap → Background (default)
+    emitIiifStep(log, layerLabel, "load-mode", "phased");
+    const bootstrapProcessed = await applyFetchedBatch(bootstrapFetched, 0, "sequential");
+    results.push(...bootstrapProcessed);
+    for (const layer of layers) {
+      layer.setLayerOptions({ renderMaps: true } as any);
+    }
+    emitIiifStep(log, layerLabel, "render-maps:enabled", `after=bootstrap`);
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        if (bootstrapVisualReadyResolved) {
+          resolve();
+          return;
+        }
+        resolveBootstrapVisualReady = resolve;
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 400))
+    ]);
+    emitIiifStep(
+      log,
+      layerLabel,
+      "bootstrap-visual-ready",
+      `spriteTiles=${spriteTileMapIds.size || spriteTileLoadedEvents} firstTiles=${firstTileMapIds.size || firstMapTileLoadedEvents}`
+    );
+    await nextFrame();
+    await nextFrame();
 
-  const processed = await applyFetchedBatch(backgroundFetched, bootstrapFetched.length, "chunked");
-  results.push(...processed);
+    const processed = await applyFetchedBatch(backgroundFetched, bootstrapFetched.length, "chunked");
+    results.push(...processed);
+  }
   const totalGeoreferencedMaps = fetchedAll.reduce(
     (sum, item) => sum + ("maps" in item ? item.maps.length : 0),
     0
@@ -1263,7 +1358,8 @@ export async function runLayerGroup(opts: {
         .join(" | ")
     );
   }
-  await warmSpritesForItems(backgroundFetched, "background");
+  // Warm all sprites at once (consolidated approach for both parallel and phased modes)
+  await warmSpritesForItems(fetchedAll, "all");
 
   // Keep the render loop alive so loadMissingImagesInViewport() keeps running.
   // With a fast IIIF server, allrequestedtilesloaded fires after the first batch

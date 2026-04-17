@@ -106,15 +106,15 @@ export const MAIN_LAYER_SOURCE: Record<string, { label: string; url: string }> =
   },
   PrimitiefKadaster: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build/index.json',
   },
   GereduceerdeKadaster: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build/index.json',
   },
   HanddrawnCollection: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build/index.json',
   },
 };
 

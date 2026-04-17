@@ -106,12 +106,16 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
-  const DEFAULT_BASE_URL = 'https://ghentcdh.github.io/Artemis-RnD-Data/build';
-  const FEATURE_FLAGS: { startupPreloadScreen: boolean; debugMenu: boolean } = {
+  const DEFAULT_BASE_URL = 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build';
+  const FEATURE_FLAGS: { startupPreloadScreen: boolean; debugMenu: boolean; parallelIiifLoading: boolean; spriteDebugMode: boolean } = {
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
     // Internal-only debug surface. Flip to true when needed locally.
     debugMenu: false,
+    // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
+    parallelIiifLoading: false,
+    // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
+    spriteDebugMode: false,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 
@@ -923,6 +927,8 @@
     try {
       await runLayerGroup({
         map, cfg: cfg(), layerInfo, log, debug: FEATURE_FLAGS.debugMenu,
+        parallelLoading: FEATURE_FLAGS.parallelIiifLoading,
+        spriteDebugMode: FEATURE_FLAGS.spriteDebugMode,
         onRenderStats: (stats) => { layerRenderStats = { ...layerRenderStats, [gid]: stats }; },
         onProgress: (done, total, result) => {
           layerProgress = { ...layerProgress, [gid]: { done, total } };
@@ -1052,6 +1058,8 @@
       layerInfo,
       log,
       debug: FEATURE_FLAGS.debugMenu,
+      parallelLoading: FEATURE_FLAGS.parallelIiifLoading,
+      spriteDebugMode: FEATURE_FLAGS.spriteDebugMode,
     });
   }
 
