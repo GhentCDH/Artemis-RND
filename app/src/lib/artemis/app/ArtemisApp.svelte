@@ -119,7 +119,7 @@
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
     parallelIiifLoading: true,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
-    spriteDebugMode: false,
+    spriteDebugMode: true,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 
@@ -467,6 +467,8 @@
   let viewerHistory: IiifMapInfo[] = [];
   let viewerPane: PaneId = 'right';
   let viewerSpriteRef: SpriteRef | undefined = undefined;
+  let viewerPlaceholderWidth = 0;
+  let viewerPlaceholderHeight = 0;
   let imageCollectionBubbleItem: PreviewBubbleItem | null = null;
   let imageCollectionBubbleX = 0;
   let imageCollectionBubbleY = 0;
@@ -559,10 +561,18 @@
     return pane === 'left' ? 'right' : 'left';
   }
 
-  function openViewer(next: IiifMapInfo, sourcePane: PaneId = 'left', targetPane?: PaneId, spriteRef?: SpriteRef) {
+  function openViewer(
+    next: IiifMapInfo,
+    sourcePane: PaneId = 'left',
+    targetPane?: PaneId,
+    spriteRef?: SpriteRef,
+    placeholderSize?: { width?: number; height?: number }
+  ) {
     viewerPane = targetPane ?? (isSplitLayout ? oppositePane(sourcePane) : 'right');
     viewerItem = next;
     viewerSpriteRef = spriteRef;
+    viewerPlaceholderWidth = placeholderSize?.width ?? 0;
+    viewerPlaceholderHeight = placeholderSize?.height ?? 0;
     viewerOpen = true;
     viewerHistory = [next, ...viewerHistory.filter((item) => !sameViewerItem(item, next))].slice(0, 10);
   }
@@ -1606,7 +1616,9 @@
               manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ''}
               historyItems={viewerHistory}
               spriteRef={viewerSpriteRef}
-              on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; }}
+              placeholderWidth={viewerPlaceholderWidth}
+              placeholderHeight={viewerPlaceholderHeight}
+              on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; viewerPlaceholderWidth = 0; viewerPlaceholderHeight = 0; }}
               on:select-history={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, viewerPane, viewerPane)}
             />
           {/key}
@@ -1628,7 +1640,9 @@
                 manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ''}
                 historyItems={viewerHistory}
                 spriteRef={viewerSpriteRef}
-                on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; }}
+                placeholderWidth={viewerPlaceholderWidth}
+                placeholderHeight={viewerPlaceholderHeight}
+                on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; viewerPlaceholderWidth = 0; viewerPlaceholderHeight = 0; }}
                 on:select-history={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, viewerPane, viewerPane)}
               />
             {/key}
@@ -1825,7 +1839,10 @@
             title: e.detail.title,
             sourceManifestUrl: e.detail.sourceManifestUrl,
             imageServiceUrl: e.detail.imageServiceUrl
-          }, imageCollectionBubblePane, undefined, e.detail.spriteRef);
+          }, imageCollectionBubblePane, undefined, e.detail.spriteRef, {
+            width: e.detail.placeholderWidth,
+            height: e.detail.placeholderHeight,
+          });
           closeImageCollectionBubble();
         }}
       />

@@ -16,6 +16,8 @@ export type IiifManifestDetails = IiifManifestPreview & {
   provider: string;
   requiredStatement: IiifManifestMetadataField | null;
   metadata: IiifManifestMetadataField[];
+  canvasWidth: number;
+  canvasHeight: number;
 };
 
 function firstDefinedString(...values: unknown[]): string {
@@ -147,6 +149,19 @@ function parseCanvasSummary(manifest: any): IiifManifestMetadataField[] {
   return entries;
 }
 
+function parseCanvasDimensions(manifest: any): { width: number; height: number } {
+  const v2Canvases = Array.isArray(manifest?.sequences?.[0]?.canvases) ? manifest.sequences[0].canvases : [];
+  const v3Canvases = Array.isArray(manifest?.items) ? manifest.items : [];
+  const canvases = v2Canvases.length > 0 ? v2Canvases : v3Canvases;
+  const firstCanvas = canvases[0];
+  const width = Number(firstCanvas?.width);
+  const height = Number(firstCanvas?.height);
+  return {
+    width: Number.isFinite(width) && width > 0 ? width : 0,
+    height: Number.isFinite(height) && height > 0 ? height : 0,
+  };
+}
+
 function extractImageServiceFromJson(manifest: any): string {
   const img0 = manifest?.sequences?.[0]?.canvases?.[0]?.images?.[0];
   if (img0) {
@@ -203,6 +218,7 @@ export async function loadManifestDetails(manifestUrl: string): Promise<IiifMani
 
   const previewUrl = pickThumbnailUrl(manifest) || `${imageServiceUrl.replace(/\/$/, '')}/full/400,/0/default.jpg`;
   const metadata = parseMetadataFields(manifest);
+  const canvasDimensions = parseCanvasDimensions(manifest);
   const fallbackMetadata: IiifManifestMetadataField[] = [
     { label: 'Manifest type', value: parsePresentationApiVersion(manifest) },
     ...parseCanvasSummary(manifest),
@@ -219,5 +235,7 @@ export async function loadManifestDetails(manifestUrl: string): Promise<IiifMani
     provider: parseProvider(manifest),
     requiredStatement: parseRequiredStatement(manifest),
     metadata: metadata.length > 0 ? metadata : fallbackMetadata,
+    canvasWidth: canvasDimensions.width,
+    canvasHeight: canvasDimensions.height,
   };
 }

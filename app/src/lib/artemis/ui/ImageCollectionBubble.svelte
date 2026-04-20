@@ -10,7 +10,14 @@
 
   const dispatch = createEventDispatcher<{
     close: void;
-    'open-viewer': { title: string; sourceManifestUrl: string; imageServiceUrl: string; spriteRef?: SpriteRef };
+    'open-viewer': {
+      title: string;
+      sourceManifestUrl: string;
+      imageServiceUrl: string;
+      spriteRef?: SpriteRef;
+      placeholderWidth?: number;
+      placeholderHeight?: number;
+    };
   }>();
 
   const BUBBLE_WIDTH = 280;
@@ -166,6 +173,8 @@
       sourceManifestUrl: bubbleItem.manifestUrl,
       imageServiceUrl: bubbleItem.imageServiceUrl || preview?.imageServiceUrl || '',
       spriteRef: bubbleItem.spriteRef,
+      placeholderWidth: preview?.previewWidth ?? 0,
+      placeholderHeight: preview?.previewHeight ?? 0,
     });
   }
 

@@ -16,6 +16,8 @@
   export let mirrored = false;
   export let historyItems: IiifMapInfo[] = [];
   export let spriteRef: SpriteRef | undefined = undefined;
+  export let placeholderWidth = 0;
+  export let placeholderHeight = 0;
 
   const dispatch = createEventDispatcher<{
     close: void;
@@ -32,35 +34,52 @@
   let metadataCollapsed = inline;
   let osdReady = false;
   let spriteDismissed = false;
-  let spriteOverlayStyle = '';
+  let spriteStyle = '';
   let OSD: typeof OpenSeadragonType | null = null;
   let _onTileLoaded: ((e: any) => void) | null = null;
   let _tileImageRef: OpenSeadragonType.TiledImage | null = null;
+  let _resizeObserver: ResizeObserver | null = null;
+  let containerWidth = 0;
+  let containerHeight = 0;
 
-  function syncSpriteToOSD() {
-    if (!viewer || !OSD || !spriteRef) return;
-    const tiledImage = viewer.world.getItemAt(0);
-    if (!tiledImage) return;
-    const bounds = tiledImage.getBounds(true);
-    const tl = viewer.viewport.viewportToViewerElementCoordinates(new OSD.Point(bounds.x, bounds.y));
-    const br = viewer.viewport.viewportToViewerElementCoordinates(new OSD.Point(bounds.x + bounds.width, bounds.y + bounds.height));
-    const imgW = br.x - tl.x;
-    const imgH = br.y - tl.y;
-    if (imgW <= 0 || imgH <= 0) return;
-    const sf = imgW / spriteRef.width;
-    spriteOverlayStyle = [
-      `left:${Math.round(tl.x)}px`,
-      `top:${Math.round(tl.y)}px`,
-      `width:${Math.round(imgW)}px`,
-      `height:${Math.round(imgH)}px`,
-      `background-image:url(${encodeURI(spriteRef.sheetUrl)})`,
-      `background-size:${Math.round(spriteRef.sheetWidth * sf)}px ${Math.round(spriteRef.sheetHeight * sf)}px`,
-      `background-position:-${Math.round(spriteRef.x * sf)}px -${Math.round(spriteRef.y * sf)}px`,
+  function buildSpriteStyle(ref: SpriteRef): string {
+    const maxWidth = Math.max(containerWidth, 320);
+    const maxHeight = Math.max(containerHeight, 320);
+    const sourceWidth = manifestDetails?.canvasWidth || placeholderWidth || ref.width;
+    const sourceHeight = manifestDetails?.canvasHeight || placeholderHeight || ref.height;
+    const fitScale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight);
+    const dw = Math.max(1, Math.round(sourceWidth * fitScale));
+    const dh = Math.max(1, Math.round(sourceHeight * fitScale));
+    const scaleX = dw / ref.width;
+    const scaleY = dh / ref.height;
+    return [
+      `width:${dw}px`,
+      `height:${dh}px`,
+      `background-image:url(${encodeURI(ref.sheetUrl)})`,
+      `background-size:${Math.round(ref.sheetWidth * scaleX)}px ${Math.round(ref.sheetHeight * scaleY)}px`,
+      `background-position:-${Math.round(ref.x * scaleX)}px -${Math.round(ref.y * scaleY)}px`,
     ].join(';');
   }
 
+  function updateSpriteStyle() {
+    spriteStyle = spriteRef ? buildSpriteStyle(spriteRef) : '';
+  }
+
+  function updateContainerSize() {
+    containerWidth = Math.max(container?.clientWidth ?? 0, 0);
+    containerHeight = Math.max(container?.clientHeight ?? 0, 0);
+    updateSpriteStyle();
+  }
+
+  $: manifestDetails, placeholderWidth, placeholderHeight, spriteRef, updateSpriteStyle();
+
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
+    updateContainerSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      _resizeObserver = new ResizeObserver(() => updateContainerSize());
+      if (container) _resizeObserver.observe(container);
+    }
 
     let serviceUrl = imageServiceUrl;
 
@@ -121,10 +140,6 @@
     } as OpenSeadragonType.Options);
 
     viewer.addOnceHandler('open', () => {
-      // Defer first sync to update-viewport — open fires before OSD applies home zoom,
-      // so getBounds returns pre-zoom coordinates that make the sprite appear tiny.
-      viewer!.addOnceHandler('update-viewport', () => syncSpriteToOSD());
-
       // tile-drawn is not raised by the WebGL drawer; use fully-loaded-change instead.
       const item = viewer!.world.getItemAt(0);
       if (item) {
@@ -144,12 +159,11 @@
         }
       }
     });
-    viewer.addHandler('animation', syncSpriteToOSD);
   });
 
   onDestroy(() => {
     window.removeEventListener("keydown", onKeyDown);
-    viewer?.removeHandler('animation', syncSpriteToOSD);
+    _resizeObserver?.disconnect();
     if (_tileImageRef && _onTileLoaded) {
       _tileImageRef.removeHandler('fully-loaded-change', _onTileLoaded);
     }
@@ -227,7 +241,7 @@
       class:viewer-main--mirrored={inline && mirrored}
       class:viewer-main--meta-collapsed={inline && metadataCollapsed}
     >
-      <div class="viewer-body" bind:this={container}>
+      <div class="viewer-body" class:viewer-body--mask-osd={!!spriteRef && !osdReady} bind:this={container}>
         {#if loadError}
           <div class="viewer-status viewer-error">{loadError}</div>
         {:else if !osdReady && !spriteRef && loadingService}
@@ -239,20 +253,12 @@
             class:viewer-sprite-placeholder--fade={osdReady}
             on:transitionend={() => { spriteDismissed = true; }}
           >
-            {#if spriteOverlayStyle}
-              <div class="viewer-sprite-synced" style={spriteOverlayStyle}></div>
-            {:else}
-              {@const s = spriteRef}
-              {@const scale = Math.min(1, 320 / s.height, 320 / s.width)}
-              {@const dw = Math.round(s.width * scale)}
-              {@const dh = Math.round(s.height * scale)}
-              <div class="viewer-sprite-pre-open">
-                <div
-                  class="viewer-sprite"
-                  style="width:{dw}px;height:{dh}px;background-image:url({encodeURI(s.sheetUrl)});background-size:{Math.round(s.sheetWidth*scale)}px {Math.round(s.sheetHeight*scale)}px;background-position:-{Math.round(s.x*scale)}px -{Math.round(s.y*scale)}px;"
-                ></div>
-              </div>
-            {/if}
+            <div class="viewer-sprite-pre-open">
+              <div
+                class="viewer-sprite"
+                style={spriteStyle}
+              ></div>
+            </div>
           </div>
         {/if}
       </div>
@@ -737,9 +743,8 @@
     opacity: 0;
   }
 
-  .viewer-sprite-synced {
-    position: absolute;
-    background-repeat: no-repeat;
+  .viewer-body--mask-osd :global(.openseadragon-container) {
+    opacity: 0;
   }
 
   .viewer-sprite-pre-open {
@@ -753,6 +758,10 @@
   .viewer-sprite {
     flex-shrink: 0;
     background-repeat: no-repeat;
+  }
+
+  .viewer-body :global(.openseadragon-container) {
+    transition: opacity 220ms ease;
   }
 
   .viewer-status {

@@ -26,10 +26,12 @@
   export let onToggleSublayer: (pane: PaneId, key: string, subId: string, localId: string) => void = () => {};
   export let isSublayerEnabled: (pane: PaneId, key: string, localId: string) => boolean = () => false;
   export let layerInfoKeyFor: (pane: PaneId, mainId: string) => string = () => '';
+
 </script>
 
 <div
   class="source-pill-wrap"
+  data-source-key={src.key}
   role="group"
   aria-label={`${src.label} timeline controls`}
   class:is-open={isOpen}
@@ -38,6 +40,7 @@
   on:mouseleave={() => onScheduleCloseMenu(src.key)}
 >
   <button
+    data-source-key={src.key}
     class="source-block"
     class:is-disabled={!enabled}
     class:is-current={isCurrent}
@@ -267,7 +270,7 @@
   .sub-menu-compare-info {
     grid-column: 2;
     position: relative;
-    z-index: 1;
+    z-index: var(--pill-z, 1);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -564,8 +567,8 @@
     padding: 0 34px 0 10px;
     margin: 0;
     pointer-events: auto;
-    transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease, box-shadow 200ms ease;
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 5px 12px rgba(0, 0, 0, 0.10);
+    transition: opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
+    box-shadow: var(--pill-shadow, 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 5px 12px rgba(0, 0, 0, 0.10));
   }
 
   .source-pill-wrap {
@@ -575,6 +578,30 @@
     width: var(--pill-width);
     min-width: var(--pill-min-width);
     pointer-events: auto;
+    transform: var(--pill-transform, none);
+    transform-origin: var(--pill-transform-origin, center center);
+    z-index: var(--pill-z, auto);
+    animation: var(--pill-animation, none);
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  @keyframes pill-current-expand-top {
+    0% {
+      transform: translateY(-2px) scale(1.02, 1.14);
+    }
+    100% {
+      transform: translateY(-4px) scale(1.08, 1.22);
+    }
+  }
+
+  @keyframes pill-current-expand-bottom {
+    0% {
+      transform: translateY(2px) scale(1.02, 1.14);
+    }
+    100% {
+      transform: translateY(4px) scale(1.08, 1.22);
+    }
   }
 
   .source-pill-wrap.is-open {
@@ -678,20 +705,6 @@
 
   .source-block.is-current {
     z-index: 2;
-  }
-
-  :global(.ts-row--lane-1) .source-block.is-current,
-  :global(.ts-row--lane-2) .source-block.is-current {
-    transform: translateY(-2px) scale(1.03, 1.18);
-    transform-origin: bottom center;
-    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 0 0 1px var(--pill-inset-active) inset;
-  }
-
-  :global(.ts-row--lane-3) .source-block.is-current,
-  :global(.ts-row--lane-4) .source-block.is-current {
-    transform: translateY(2px) scale(1.03, 1.18);
-    transform-origin: top center;
-    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 0 0 1px var(--pill-inset-active) inset;
   }
 
   .block-label {

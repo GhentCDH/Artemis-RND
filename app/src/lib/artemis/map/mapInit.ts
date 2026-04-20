@@ -1,6 +1,7 @@
 // $lib/artemis/map/mapInit.ts
 import maplibregl from "maplibre-gl";
 import basemapGeojsonUrl from "$lib/assets/Baselayer.geojson?url";
+import { ngiTileUrl } from "$lib/artemis/config/ngi";
 
 let map: maplibregl.Map | null = null;
 type BaseMapTheme = "light" | "dark";
@@ -24,14 +25,14 @@ const HISTCART_LAYERS: Record<
     sourceId: "histcart-ngi1904-source",
     layerId: "histcart-ngi1904-layer",
     tiles: [
-      "https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__450/MapServer/tile/{z}/{y}/{x}"
+      ngiTileUrl("/arcgis/rest/services/seamless_carto__default__3857__450/MapServer")
     ]
   },
   ngi1873: {
     sourceId: "histcart-ngi1873-source",
     layerId: "histcart-ngi1873-layer",
     tiles: [
-      "https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__140/MapServer/tile/{z}/{y}/{x}"
+      ngiTileUrl("/arcgis/rest/services/seamless_carto__default__3857__140/MapServer")
     ]
   },
   popp: {

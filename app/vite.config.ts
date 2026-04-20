@@ -3,6 +3,15 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [sveltekit()],
+	server: {
+		proxy: {
+			'/ngi-proxy': {
+				target: 'https://wmts.ngi.be',
+				changeOrigin: true,
+				rewrite: (path) => path.replace(/^\/ngi-proxy/, '')
+			}
+		}
+	},
 	build: {
 		sourcemap: true,
 		chunkSizeWarningLimit: 1200,
