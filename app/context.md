@@ -2,192 +2,106 @@
 
 ## Overview
 
-The viewer uses a low-zoom sprite preview strategy for IIIF layers and promotes full Allmaps rendering only when the viewport or zoom level justifies it. The current data contract keeps a shared atlas per map bundle, while the canvas-to-sprite relationship is resolved explicitly via `canvasAllmapsId`.
+- Route entrypoint: `src/routes/+page.svelte`
+- Main shell: `src/lib/artemis/app/ArtemisApp.svelte`
+- Default dataset base URL: `https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build`
+- Verification baseline: `pnpm check` passes with `0 errors, 0 warnings`
 
-## Current Architecture
+## Current Structure
 
-### Main Runtime Files
+### Shell
 
-- `src/lib/artemis/runner.ts`: compiled-data runtime, IIIF loading, sprite prewarm, deferred map promotion
-- `src/routes/+page.svelte`: map page orchestration, sprite overlay DOM layer, zoom gating, layer toggling
+- `src/routes/+page.svelte`
+  Thin mount only.
+- `src/lib/artemis/app/ArtemisApp.svelte`
+  Cross-feature orchestration shell.
 
-### Data Dependencies
+### Feature Modules
 
-The viewer consumes:
+- `src/lib/artemis/config/layers.ts`
+  Layer ids, labels, colors, ordering, sublayer definitions, and initial toggle state.
+- `src/lib/artemis/dataset/runtimeMetadata.ts`
+  Loads `static/site.json` and `static/layers.json`.
+- `src/lib/artemis/dataset/manifestSearch.ts`
+  Shapes manifest search data from build output.
+- `src/lib/artemis/dataset/toponyms.ts`
+  Loads toponym files and manages toponym load state.
+- `src/lib/artemis/dataset/toponymNormalization.ts`
+  Normalizes raw toponym data.
+- `src/lib/artemis/iiif/runner.ts`
+  Low-level IIIF / Allmaps runtime.
+- `src/lib/artemis/iiif/layerLifecycle.ts`
+  Shell-facing IIIF load, warmup, and sync helpers.
+- `src/lib/artemis/map/mapInit.ts`
+  MapLibre and base/historical layer setup.
+- `src/lib/artemis/panes/splitView.ts`
+  Split-view lifecycle and pane synchronization.
+- `src/lib/artemis/search/text.ts`
+  Shared search text normalization and scoring.
+- `src/lib/artemis/search/navigation.ts`
+  Search result interaction flow.
+- `src/lib/artemis/timeline/layerControls.ts`
+  Layer ordering and timeslider-driven visibility logic.
+- `src/lib/artemis/shared/types.ts`
+  Shared viewer types.
+- `src/lib/artemis/shared/utils.ts`
+  Shared generic utilities.
+
+### UI
+
+- `src/lib/components/Timeslider.svelte`
+  Main timeline UI and compare controls.
+- `src/lib/artemis/ui/ToponymSearch.svelte`
+  Search UI.
+- `src/lib/artemis/ui/InfoCards.svelte`
+  Pinned card and parcel info UI.
+- `src/lib/artemis/ui/ImageCollectionBubble.svelte`
+  Massart / image bubble UI.
+- `src/lib/artemis/viewer/IiifViewer.svelte`
+  Docked IIIF viewer.
+
+## Data Contract
+
+The viewer currently consumes:
 
 - `index.json`
 - `IIIF/<mapId>_geomaps.json`
 - `IIIF/<mapId>/sprites/sprites.jpg`
 - `IIIF/<mapId>/sprites/sprites.json`
+- `Image collections/Massart/index.json`
+- `Toponyms/<mapId>/<mapId>Toponyms.json`
+- `Parcels/PrimitiefKadaster/PrimitiefKadasterParcels.geojson`
+- `static/site.json`
+- `static/layers.json`
 
-## Sprite System
+Current sprite contract:
 
-### Bundle-Level Sprite Lookup
+- bundle-level sprite metadata lives in `*_geomaps.json`
+- `sprites.json` is keyed by `canvasAllmapsId`
+- canvases stay compact and resolve sprite rectangles via `canvasAllmapsId`
+- `build/index.json` should expose `centerLon` / `centerLat` for georeferenced entries
 
-`runner.ts` now prefers bundle-level sprite metadata:
+## Assets
 
-1. fetch `*_geomaps.json`
-2. read `bundle.sprites`
-3. fetch `bundle.sprites.json`
-4. index sprite rectangles by `canvasAllmapsId`
-5. match each canvas via `canvas.canvasAllmapsId`
+- `src/lib/assets/Baselayer.geojson`
+  Build-time imported asset used by `mapInit.ts`; it should stay outside `static/`.
+- `static/favicon.svg`
+  Canonical public favicon location.
 
-`build/index.json` center coordinates are now expected to be present again for georeferenced entries, and `+page.svelte` uses those for search results and preview anchoring.
+## Current Decisions
 
-This avoids duplicating sprite rectangles inside `geomaps` while keeping a strict one-canvas-to-one-sprite mapping through the existing `canvasAllmapsId`.
+- The viewer structure is now feature-grouped instead of flat at the `artemis/` root.
+- Shared config belongs in `config/`, and shared primitives belong in `shared/`.
+- The route file stays thin; orchestration belongs in `ArtemisApp.svelte`.
+- Runtime metadata is loaded from `static/site.json` and `static/layers.json`.
 
-Older data may still expose canvas-level sprite metadata directly in each canvas entry:
+## Known Remaining Cleanup
 
-- `sprite`
-- `spriteWidth`
-- `spriteHeight`
-- `allmapsSprite`
+- `Timeslider.svelte` is still the biggest readability hotspot and needs a dedicated simplification pass.
+- `pnpm-lock.yaml` still contains stale `@sveltejs/adapter-auto` entries even though `package.json` no longer does.
 
-That legacy shape is still supported as a fallback in the viewer, but current data output should use the bundle-level atlas plus keyed lookup path.
+## Runtime Follow-Up
 
-### Runtime Types
-
-`RuntimeLayerEntry` includes:
-
-- `inlineMaps`
-- `inlineSprites`
-- `bbox`
-- manifest metadata for labeling and grouping
-
-`BundleSprite` includes:
-
-- `imageId`
-- `scaleFactor`
-- `x`
-- `y`
-- `width`
-- `height`
-- optional `spriteTileScale`
-
-### Sprite Preview Index
-
-`spriteIndex` stores low-zoom preview entries keyed by manifest URL:
-
-- `id`
-- `label`
-- `spriteUrl`
-- `bbox`
-- `layerId`
-- `layerLabel`
-
-These power the overlay previews in `+page.svelte`.
-
-## Loading Strategy
-
-### Preload Phase
-
-`preloadGeomapsCache()`:
-
-- loads geomaps bundles early
-- resolves bundle sprite manifests
-- populates `spriteIndex`
-- warm-fetches spritesheets into the browser HTTP cache
-
-### Initial IIIF Load
-
-`runLayerGroup()`:
-
-- fetches bundle entries from `loadNewIiifEntries()`
-- computes geographic bbox per entry from GCPs
-- splits entries into:
-  - `inViewport`
-  - `deferredEntries`
-- immediately loads only viewport-relevant maps
-- stores deferred entries in `pendingByGroup`
-
-### Viewport Promotion
-
-`syncViewportAnnotations()`:
-
-- checks `pendingByGroup`
-- intersects entry bbox with current map viewport
-- promotes newly visible entries into the active `WarpedMapLayer`
-- processes them in small chunks with frame yields
-
-This keeps startup lighter while still allowing progressive reveal during pan/zoom.
-
-## Zoom Behavior
-
-- `IIIF_MIN_ZOOM = 12`
-- Below zoom 12:
-  - sprite overlay is visible
-  - full IIIF layers may be parked
-- At or above zoom 12:
-  - sprite overlay is hidden
-  - IIIF manifests / warped maps are actively synced and rendered
-
-## Helper Logic in runner.ts
-
-Current helper additions include:
-
-- `geoBoxFromGcps()`
-- `bboxIntersects()`
-- `getMapViewportBbox()`
-- `preloadGeomapsCache()`
-- `syncViewportAnnotations()`
-
-These support sprite preview indexing and deferred IIIF promotion.
-
-## Current Page-Level Behavior
-
-`+page.svelte` is still responsible for:
-
-- creating the sprite overlay DOM container
-- rendering preview `<img>` elements
-- positioning sprites with `map.project()`
-- showing/hiding the overlay by zoom level
-- triggering layer-group sync when toggles change
-
-The overlay remains a UI preview layer; Allmaps still does the real warped image rendering.
-
-## Known Runtime Assumptions
-
-- Each manifest preview currently uses the first sprite in `inlineSprites` for low-zoom preview indexing
-- Bundle-level sprite manifests are keyed by `canvasAllmapsId`
-- Some upstream canvases may legitimately have no sprite because their IIIF image service is inaccessible
-- Missing sprite rectangles should not break full IIIF rendering for the remaining canvases
-- `build/index.json` once again exposes `centerLon` / `centerLat` for georeferenced entries and the viewer uses those for search and preview anchoring
-
-## Current Known Issues / Risks
-
-- Some source IIIF services are unstable or unavailable for specific canvases
-- Sprite preview quality and sizing may still need tuning
-- Low-zoom preview uses simplified sprite placement rather than warped rendering
-- There is still partial coupling between runtime behavior and bundle conventions
-- Confirmed data bug: some Massart titles are truncated incorrectly by current title parsing
-
-## Practical Debug Points
-
-When validating this system, check:
-
-- `runner.ts` bundle fetch path for `bundle.sprites.json`
-- `spriteIndex.size` after preload
-- `pendingByGroup` behavior during pan/zoom
-- `logs/report.log` in the data repo when expected sprites are missing
-
-## Related Repo Contract
-
-This viewer context assumes the data repo now publishes:
-
-- bundle-level `sprites` metadata in `*_geomaps.json`
-- shared spritesheet image at `IIIF/<mapId>/sprites/sprites.jpg`
-- canonical sprite rectangle lookup at `IIIF/<mapId>/sprites/sprites.json`
-- `sprites.json` entries keyed by `canvasAllmapsId`
-- compact canvas entries in `geomaps` that keep `canvasAllmapsId` but do not duplicate sprite rectangle payloads
-
-## TODOs
-
-- Re-verify low-zoom preview behavior against the current atlas contract in the browser
-- Re-check `runner.ts` fallback behavior only if older data with per-canvas sprite metadata still needs to be supported
-- Re-check Massart display text after the title parsing bug is fixed upstream
-
-## Compatibility Check
-
-- `runner.ts` is compatible with the current sprite atlas contract because it now resolves `sprites.json` by `canvasAllmapsId`
-- `+page.svelte` is compatible with the restored `centerLon` / `centerLat` fields in `build/index.json`
-- No additional viewer code change is currently required for the rebuilt data format
+- Re-verify low-zoom sprite preview behavior in the browser against the current atlas contract.
+- Re-test search and preview anchoring against restored `centerLon` / `centerLat`.
+- Re-check Massart display text after upstream title parsing cleanup.

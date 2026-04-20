@@ -22,17 +22,15 @@
     resetCompiledIndexCache, resetPaneRuntime, getLayerGroupId, refreshActiveLayerGroups,
     getAllActiveWarpedMaps, getManifestInfoForMapId,
     type LayerInfo, type CompiledIndex, type CompiledRunnerConfig,
-  } from '$lib/artemis/runner';
+  } from '$lib/artemis/iiif/runner';
   import {
     loadRuntimeMetadata as loadRuntimeMetadataData,
-    type RuntimeSiteLogo,
     type RuntimeSiteMetadata,
-    type RuntimeTeamUnit,
     type RuntimeLayerMetadata,
     type RuntimeTeamInstitution,
   } from '$lib/artemis/dataset/runtimeMetadata';
   import { buildManifestSearchIndex as buildManifestSearchIndexData } from '$lib/artemis/dataset/manifestSearch';
-  import { loadToponymIndexData } from '$lib/artemis/dataset/toponyms';
+  import { loadToponymIndex as loadToponymIndexData } from '$lib/artemis/dataset/toponyms';
   import {
     getIiifMainLayerIds as getIiifMainLayerIdsData,
     loadIiifLayerIntoPane,
@@ -58,20 +56,20 @@
     syncRightPaneState as syncRightPaneStateData,
     teardownRightPaneMap,
   } from '$lib/artemis/panes/splitView';
-  import { normalizeSearchText } from '$lib/artemis/search';
-  import { normalizeRawToponym } from '$lib/artemis/toponyms';
-  import { asFiniteNumber } from '$lib/artemis/utils';
+  import { normalizeSearchText } from '$lib/artemis/search/text';
+  import { normalizeRawToponym } from '$lib/artemis/dataset/toponymNormalization';
+  import { asFiniteNumber } from '$lib/artemis/shared/utils';
   import {
     MAIN_LAYER_ORDER, MAIN_LAYER_META, MAIN_LAYER_LABELS, MAIN_LAYER_INFO,
     MAIN_LAYER_SUBS, SUB_LAYER_DEFS,
     makeInitialMainLayerEnabled, makeInitialSubLayerEnabled,
     type MainLayerId,
-  } from '$lib/artemis/layerConfig';
+  } from '$lib/artemis/config/layers';
   import type { HistCartLayerKey } from '$lib/artemis/map/mapInit';
   import type {
-    ToponymIndexItem, RawToponymIndexItem, ManifestSearchItem,
+    ToponymIndexItem, ManifestSearchItem,
     IiifMapInfo, ParcelClickInfo, PinnedCard, MassartItem, PreviewBubbleItem,
-  } from '$lib/artemis/types';
+  } from '$lib/artemis/shared/types';
 
   import ToponymSearch from '$lib/artemis/ui/ToponymSearch.svelte';
   import InfoCards from '$lib/artemis/ui/InfoCards.svelte';
@@ -153,108 +151,6 @@
     return `${base}/static`.replace(/\/+$/, '');
   }
 
-  async function fetchRuntimeJson<T>(url: string): Promise<T> {
-    const res = await fetch(url);
-    const text = await res.text();
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-    const trimmed = text.trim().toLowerCase();
-    if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
-      throw new Error(`Expected JSON but got HTML from ${url}`);
-    }
-    return JSON.parse(text) as T;
-  }
-
-  function normalizeParagraphList(value: unknown): string[] {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed ? [trimmed] : [];
-    }
-    if (!Array.isArray(value)) return [];
-    return value
-      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-      .filter(Boolean);
-  }
-
-  function normalizeTeamGroups(value: unknown): RuntimeTeamInstitution[] {
-    if (!Array.isArray(value)) return [];
-    const byInstitution: Record<string, RuntimeTeamUnit[]> = {};
-
-    value.forEach((entry) => {
-      if (!entry || typeof entry !== 'object') return;
-      const institution = typeof (entry as any).institution === 'string' ? (entry as any).institution.trim() : '';
-      const unit = typeof (entry as any).unit === 'string' ? (entry as any).unit.trim() : '';
-      const members = Array.isArray((entry as any).members)
-        ? (entry as any).members
-            .map((m: unknown) => (typeof m === 'string' ? m.trim() : ''))
-            .filter(Boolean)
-        : [];
-
-      if (!institution || (!unit && members.length === 0)) return;
-      if (!byInstitution[institution]) byInstitution[institution] = [];
-      byInstitution[institution].push({ unit, members });
-    });
-
-    return Object.entries(byInstitution).map(([institution, units]) => ({
-      institution,
-      units,
-    }));
-  }
-
-  function normalizeSiteLogos(value: unknown, repoRoot: string): RuntimeSiteLogo[] {
-    if (!Array.isArray(value)) return [];
-    function resolveSrc(raw: string): string {
-      if (!raw) return raw;
-      // Already absolute
-      if (/^https?:\/\//i.test(raw)) return raw;
-      // Relative path from site.json — resolve against repo root
-      if (repoRoot) return `${repoRoot}/${raw.replace(/^\//, '')}`;
-      return raw;
-    }
-    return value.flatMap((entry) => {
-      if (typeof entry === 'string') {
-        const src = resolveSrc(entry.trim());
-        return src ? [{ src, alt: '', href: null, label: src }] : [];
-      }
-      if (!entry || typeof entry !== 'object') return [];
-      const rawSrc = typeof (entry as any).src === 'string' ? (entry as any).src.trim() : '';
-      if (!rawSrc) return [];
-      const src = resolveSrc(rawSrc);
-      const alt = typeof (entry as any).alt === 'string' ? (entry as any).alt.trim() : '';
-      const hrefRaw = typeof (entry as any).href === 'string' ? (entry as any).href.trim() : '';
-      const label =
-        (typeof (entry as any).label === 'string' && (entry as any).label.trim()) ||
-        (typeof (entry as any).name === 'string' && (entry as any).name.trim()) ||
-        alt ||
-        rawSrc;
-      return [{ src, alt, href: hrefRaw || null, label }];
-    });
-  }
-
-  function normalizeSiteMetadata(raw: unknown, repoRoot = ''): RuntimeSiteMetadata {
-    const data = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-    return {
-      title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : 'About Artemis',
-      info: normalizeParagraphList(data.info),
-      attribution: typeof data.attribution === 'string' ? data.attribution.trim() : '',
-      team: normalizeTeamGroups(data.team),
-      logos: normalizeSiteLogos(data.logos, repoRoot),
-    };
-  }
-
-  function normalizeLayerMetadataMap(raw: unknown): Record<string, RuntimeLayerMetadata> {
-    const data = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-    return Object.fromEntries(
-      Object.entries(data).flatMap(([key, value]) => {
-        if (!value || typeof value !== 'object') return [];
-        const title = typeof (value as any).title === 'string' && (value as any).title.trim()
-          ? (value as any).title.trim()
-          : key;
-        const info = normalizeParagraphList((value as any).info);
-        return [[key, { title, info }]];
-      })
-    );
-  }
-
   function getLayerMetadataCandidates(mainId: string): string[] {
     const subIds = MAIN_LAYER_SUBS[mainId] ?? [];
     const iiifSubId = subIds.find((subId) => SUB_LAYER_DEFS[subId]?.kind === 'iiif');
@@ -270,24 +166,6 @@
       .pop()
       ?.replace(/_geomaps\.json$/i, '') ?? '';
     return [...new Set([explicitLayerId, compiledTail, iiifMap, geomapsStem, mainId].filter(Boolean))];
-  }
-
-  function fallbackLayerMetadata(mainId: string): RuntimeLayerMetadata {
-    return {
-      title: MAIN_LAYER_LABELS[mainId] ?? mainId,
-      info: MAIN_LAYER_INFO[mainId] ? [MAIN_LAYER_INFO[mainId]] : [],
-    };
-  }
-
-  function resolveLayerMetadataByMainId(rawByKey: Record<string, RuntimeLayerMetadata>): Record<string, RuntimeLayerMetadata> {
-    return Object.fromEntries(
-      mainLayerOrder.map((mainId) => {
-        const candidates = getLayerMetadataCandidates(mainId);
-        const resolved = candidates.map((key) => rawByKey[key]).find(Boolean);
-
-        return [mainId, resolved ?? fallbackLayerMetadata(mainId)];
-      })
-    );
   }
 
   async function loadRuntimeMetadata() {
@@ -829,30 +707,6 @@
     });
   }
 
-  function applyMainLayerOpacity(mainId: string) {
-    const opacity = mainLayerOpacity[mainId] ?? 1;
-    const wmtsKey = getMainWmtsKey(mainId);
-    if (wmtsKey && mainLayerEnabled[mainId]) {
-      setHistCartLayerOpacity(map, wmtsKey, opacity);
-    }
-    for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
-      const subDef = SUB_LAYER_DEFS[subId];
-      if (subDef?.kind === 'iiif') {
-        if (!mainLayerEnabled[mainId]) continue;
-        const info = getIiifInfoForSub(subId);
-        if (info) setLayerGroupOpacity(map, info.uiLayerId, opacity);
-      } else {
-        if (!subLayerEnabled[subId]) continue;
-        if (subDef?.kind === 'wms') {
-          const landUsageKey = getLandUsageKey(mainId);
-          if (landUsageKey) setLandUsageLayerOpacity(map, landUsageKey, opacity);
-        } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
-          setPrimitiveLayerOpacity(map, opacity);
-        }
-      }
-    }
-  }
-
   // ─── Layer toggle operations ───────────────────────────────────────────────
 
   async function loadIiifLayer(layerInfo: UILayerInfo) {
@@ -1070,30 +924,6 @@
 
   // ─── Index + toponym loading ───────────────────────────────────────────────
 
-  async function loadToponymIndex(buildIndex: CompiledIndex) {
-    toponymLoading = true;
-    toponymError = null;
-    try {
-      const result = await loadToponymIndexData({
-        buildIndex,
-        datasetBaseUrl: normalizeDatasetBaseUrl(datasetBaseUrl.trim()),
-        normalizeRawToponym,
-        log,
-      });
-      toponymIndex = result.toponymIndex;
-      toponymError = result.toponymError;
-      if (toponymError) {
-        log('WARN', `Toponyms index unavailable: ${toponymError}`);
-      }
-    } catch (e: any) {
-      toponymIndex = [];
-      toponymError = e?.message ?? String(e);
-      log('WARN', `Toponyms index unavailable: ${toponymError}`);
-    } finally {
-      toponymLoading = false;
-    }
-  }
-
   async function fetchIndex() {
     resetCompiledIndexCache();
     try {
@@ -1133,7 +963,21 @@
         await syncRightPaneState();
       }
 
-      await loadToponymIndex(index);
+      await loadToponymIndexData({
+        buildIndex: index,
+        datasetBaseUrl: normalizeDatasetBaseUrl(datasetBaseUrl.trim()),
+        normalizeRawToponym,
+        log,
+        setToponymIndex: (items) => {
+          toponymIndex = items;
+        },
+        setToponymError: (error) => {
+          toponymError = error;
+        },
+        setToponymLoading: (loading) => {
+          toponymLoading = loading;
+        },
+      });
     } catch (e: any) {
       manifestSearchIndex = [];
       log('ERROR', `Index fetch failed: ${e?.message ?? String(e)}`);

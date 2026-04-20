@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import type { PreviewBubbleItem } from '$lib/artemis/types';
+  import type { PreviewBubbleItem } from '$lib/artemis/shared/types';
   import { loadManifestPreview } from '$lib/artemis/viewer/manifestPreview';
 
   export let item: PreviewBubbleItem;

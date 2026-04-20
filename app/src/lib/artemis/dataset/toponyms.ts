@@ -1,5 +1,5 @@
-import type { CompiledIndex } from '$lib/artemis/runner';
-import type { RawToponymIndexItem, ToponymIndexItem } from '$lib/artemis/types';
+import type { CompiledIndex } from '$lib/artemis/iiif/runner';
+import type { RawToponymIndexItem, ToponymIndexItem } from '$lib/artemis/shared/types';
 
 type ToponymIndexPayload = {
   itemCount?: number;
@@ -13,6 +13,12 @@ type LoadToponymIndexDataOptions = {
   datasetBaseUrl: string;
   normalizeRawToponym: (raw: RawToponymIndexItem) => ToponymIndexItem | null;
   log?: (level: 'INFO' | 'WARN' | 'ERROR', msg: string) => void;
+};
+
+type LoadToponymIndexOptions = LoadToponymIndexDataOptions & {
+  setToponymIndex: (items: ToponymIndexItem[]) => void;
+  setToponymError: (error: string | null) => void;
+  setToponymLoading: (loading: boolean) => void;
 };
 
 const FALLBACK_TOPONYM_MAPS = ['Ferraris', 'PrimitiefKadaster'];
@@ -108,5 +114,39 @@ export async function loadToponymIndexData({
       toponymIndex: [],
       toponymError: e?.message ?? String(e),
     };
+  }
+}
+
+export async function loadToponymIndex({
+  buildIndex,
+  datasetBaseUrl,
+  normalizeRawToponym,
+  log,
+  setToponymIndex,
+  setToponymError,
+  setToponymLoading,
+}: LoadToponymIndexOptions): Promise<void> {
+  setToponymLoading(true);
+  setToponymError(null);
+
+  try {
+    const result = await loadToponymIndexData({
+      buildIndex,
+      datasetBaseUrl,
+      normalizeRawToponym,
+      log,
+    });
+    setToponymIndex(result.toponymIndex);
+    setToponymError(result.toponymError);
+    if (result.toponymError) {
+      log?.('WARN', `Toponyms index unavailable: ${result.toponymError}`);
+    }
+  } catch (e: any) {
+    const message = e?.message ?? String(e);
+    setToponymIndex([]);
+    setToponymError(message);
+    log?.('WARN', `Toponyms index unavailable: ${message}`);
+  } finally {
+    setToponymLoading(false);
   }
 }

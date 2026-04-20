@@ -1,8 +1,8 @@
 <!-- Right-side floating info cards shown on IIIF map click and parcel click. -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { MAIN_LAYER_META } from '$lib/artemis/layerConfig';
-  import type { IiifMapInfo, IiifPanelGroup, ParcelClickInfo, PinnedCard } from '$lib/artemis/types';
+  import { MAIN_LAYER_META } from '$lib/artemis/config/layers';
+  import type { IiifMapInfo, IiifPanelGroup, ParcelClickInfo, PinnedCard } from '$lib/artemis/shared/types';
 
   export let pinnedCards: PinnedCard[] = [];
   export let iiifPanelGroups: IiifPanelGroup[] = [];

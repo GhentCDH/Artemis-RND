@@ -1,5 +1,5 @@
-import type { ManifestSearchItem, PreviewBubbleItem, ToponymIndexItem } from '$lib/artemis/types';
-import type { MainLayerId } from '$lib/artemis/layerConfig';
+import type { ManifestSearchItem, PreviewBubbleItem, ToponymIndexItem } from '$lib/artemis/shared/types';
+import type { MainLayerId } from '$lib/artemis/config/layers';
 
 export type SearchFocusState = {
   mainId: MainLayerId;

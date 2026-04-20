@@ -1,11 +1,11 @@
-// $lib/artemis/runner.ts
+// $lib/artemis/iiif/runner.ts
 //
 // Compiled-only runner — loads annotations from a GitHub Pages-hosted dataset.
 // Supports multiple independent layers, each toggled on/off via the UI.
 
 import type maplibregl from "maplibre-gl";
 import { WarpedMapLayer } from "@allmaps/maplibre";
-import type { RunResult, StepTiming } from "$lib/artemis/types";
+import type { RunResult, StepTiming } from "$lib/artemis/shared/types";
 
 // ---------------------------------------------------------------------------
 // Types

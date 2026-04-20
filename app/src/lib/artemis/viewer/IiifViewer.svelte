@@ -2,7 +2,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
   import type OpenSeadragonType from "openseadragon";
-  import type { IiifMapInfo } from '$lib/artemis/types';
+  import type { IiifMapInfo } from '$lib/artemis/shared/types';
   import {
     loadManifestDetails,
     type IiifManifestDetails,

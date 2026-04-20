@@ -2,9 +2,9 @@
      dispatches events for map-level actions (fly-to, layer activation). -->
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-  import { normalizeSearchText, scoreText } from '$lib/artemis/search';
-  import { MAIN_LAYER_META, MAIN_LAYER_LABELS } from '$lib/artemis/layerConfig';
-  import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/types';
+  import { normalizeSearchText, scoreText } from '$lib/artemis/search/text';
+  import { MAIN_LAYER_META, MAIN_LAYER_LABELS } from '$lib/artemis/config/layers';
+  import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/shared/types';
 
   export let toponymIndex: ToponymIndexItem[] = [];
   export let manifestSearchIndex: ManifestSearchItem[] = [];

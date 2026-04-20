@@ -3,8 +3,8 @@
   import { dev } from '$app/environment';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import type { MassartItem } from '$lib/artemis/types';
-  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META } from '$lib/artemis/layerConfig';
+  import type { MassartItem } from '$lib/artemis/shared/types';
+  import { MAIN_LAYER_LABELS, MAIN_LAYER_SHORT_LABELS, MAIN_LAYER_META } from '$lib/artemis/config/layers';
 
   type PaneId = 'left' | 'right';
   type LayerMetadata = { title: string; info: string[] };

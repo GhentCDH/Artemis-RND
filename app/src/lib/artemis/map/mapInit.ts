@@ -598,7 +598,7 @@ function attachPrimitiveDebugListeners(map: maplibregl.Map, geojsonUrl: string):
 
 // ─── Massart photo pins ───────────────────────────────────────────────────────
 
-import type { MassartItem } from "$lib/artemis/types";
+import type { MassartItem } from "$lib/artemis/shared/types";
 
 const MASSART_SOURCE_ID = "massart-pins-source";
 const MASSART_LAYER_INACTIVE = "massart-pins-inactive";
