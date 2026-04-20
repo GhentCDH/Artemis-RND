@@ -127,6 +127,7 @@
     viewer = OpenSeadragon({
       element: container,
       tileSources: `${serviceUrl}/info.json`,
+      drawer: 'canvas',
       showNavigationControl: false,
       showZoomControl: false,
       showHomeControl: false,

@@ -119,7 +119,7 @@
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
     parallelIiifLoading: true,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
-    spriteDebugMode: true,
+    spriteDebugMode: false,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 
