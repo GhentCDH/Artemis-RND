@@ -15,6 +15,7 @@
     setPrimitiveHoverFeature, setPrimitiveSelectFeature,
     setIiifHoverMasks,
     setMassartPins, updateMassartActiveYear, getMassartClickLayerIds,
+    flashLocationMarker,
   } from '$lib/artemis/map/mapInit';
   import {
     loadCompiledIndex, runLayerGroup, removeLayerGroup, parkLayerGroup, clearAllLayerGroups,
@@ -68,7 +69,7 @@
   import type { HistCartLayerKey } from '$lib/artemis/map/mapInit';
   import type {
     ToponymIndexItem, ManifestSearchItem,
-    IiifMapInfo, ParcelClickInfo, PinnedCard, MassartItem, PreviewBubbleItem,
+    IiifMapInfo, ParcelClickInfo, PinnedCard, MassartItem, PreviewBubbleItem, SpriteRef,
   } from '$lib/artemis/shared/types';
 
   import ToponymSearch from '$lib/artemis/ui/ToponymSearch.svelte';
@@ -118,7 +119,7 @@
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
     parallelIiifLoading: true,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
-    spriteDebugMode: true,
+    spriteDebugMode: false,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
 
@@ -200,15 +201,40 @@
   let massartItems: MassartItem[] = [];
   let massartYear = Math.round((1700 + 1855) / 2); // updated by slider year-change
   let rightTimelineYear = MASSART_YEAR_MAX;
+  let massartSpriteRects: Record<string, { x: number; y: number; width: number; height: number }> = {};
+  let massartSpriteSheetUrl = '';
+  let massartSpriteSheetSize: [number, number] = [0, 0];
 
   async function loadMassartData() {
     try {
-      const url = `${cfg().datasetBaseUrl}/Image collections/Massart/index.json`;
-      const res = await fetch(url);
+      const base = `${cfg().datasetBaseUrl}/Image collections/Massart`;
+      const res = await fetch(`${base}/Massart_index.json`);
       if (!res.ok) return;
       const data = await res.json();
       massartItems = Array.isArray(data.items) ? data.items : [];
+      if (data.sprites?.json && data.sprites?.image) {
+        const spritesRes = await fetch(`${cfg().datasetBaseUrl}/${data.sprites.json}`);
+        if (spritesRes.ok) {
+          massartSpriteRects = await spritesRes.json();
+          massartSpriteSheetUrl = `${cfg().datasetBaseUrl}/${data.sprites.image}`;
+          massartSpriteSheetSize = data.sprites.imageSize ?? [0, 0];
+        }
+      }
     } catch { /* degrade silently — pins won't appear */ }
+  }
+
+  function massartSpriteRef(item: MassartItem): SpriteRef | undefined {
+    const rect = massartSpriteRects[item.repId];
+    if (!rect || !massartSpriteSheetUrl) return undefined;
+    const sheetUrl = FEATURE_FLAGS.spriteDebugMode
+      ? massartSpriteSheetUrl.replace(/(\.[^.]+)$/, "_debug$1")
+      : massartSpriteSheetUrl;
+    return {
+      sheetUrl,
+      sheetWidth: massartSpriteSheetSize[0],
+      sheetHeight: massartSpriteSheetSize[1],
+      ...rect,
+    };
   }
 
   function onMassartYearChange(e: CustomEvent<{ year: number; pane?: 'left' | 'right' }>) {
@@ -440,6 +466,7 @@
   let viewerItem: IiifMapInfo | null = null;
   let viewerHistory: IiifMapInfo[] = [];
   let viewerPane: PaneId = 'right';
+  let viewerSpriteRef: SpriteRef | undefined = undefined;
   let imageCollectionBubbleItem: PreviewBubbleItem | null = null;
   let imageCollectionBubbleX = 0;
   let imageCollectionBubbleY = 0;
@@ -532,9 +559,10 @@
     return pane === 'left' ? 'right' : 'left';
   }
 
-  function openViewer(next: IiifMapInfo, sourcePane: PaneId = 'left', targetPane?: PaneId) {
+  function openViewer(next: IiifMapInfo, sourcePane: PaneId = 'left', targetPane?: PaneId, spriteRef?: SpriteRef) {
     viewerPane = targetPane ?? (isSplitLayout ? oppositePane(sourcePane) : 'right');
     viewerItem = next;
+    viewerSpriteRef = spriteRef;
     viewerOpen = true;
     viewerHistory = [next, ...viewerHistory.filter((item) => !sameViewerItem(item, next))].slice(0, 10);
   }
@@ -1034,7 +1062,17 @@
         map.easeTo({ center, zoom: nextZoom, essential: true, duration: 900 });
       } catch (e: any) { log('ERROR', `Fly-to failed: ${e?.message ?? String(e)}`); }
     };
-    if (map.isStyleLoaded()) fly(); else map.once('load', fly);
+    if (map.isStyleLoaded()) {
+      fly();
+    } else {
+      const onReady = () => {
+        map.off('styledata', onReady);
+        map.off('idle', onReady);
+        fly();
+      };
+      map.once('styledata', onReady);
+      map.once('idle', onReady);
+    }
   }
 
   function applySearchFocus(focus: SearchFocusState | null) {
@@ -1047,6 +1085,7 @@
   // ─── ToponymSearch event handlers ─────────────────────────────────────────
 
   async function onFlyToToponym(item: ToponymIndexItem) {
+    flashLocationMarker(map, item.lon, item.lat);
     applySearchFocus(
       await handleToponymSelection(item, searchFocusNonce, {
         mainLayerLabels: MAIN_LAYER_LABELS,
@@ -1070,6 +1109,9 @@
   }
 
   async function onManifestClick(result: ManifestSearchItem) {
+    if (result.centerLon != null && result.centerLat != null) {
+      flashLocationMarker(map, result.centerLon, result.centerLat);
+    }
     applySearchFocus(
       await handleManifestSelection(result, searchFocusNonce, {
         mainLayerLabels: MAIN_LAYER_LABELS,
@@ -1215,7 +1257,7 @@
         const { manifestUrl } = feat.properties as { manifestUrl: string };
         const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
         if (!item) return;
-        openImageCollectionBubble(item, 'right');
+        openImageCollectionBubble({ ...item, spriteRef: massartSpriteRef(item) }, 'right');
       });
       targetMap.on('mouseenter', layerId, () => { targetMap.getCanvas().style.cursor = 'pointer'; });
       targetMap.on('mouseleave', layerId, () => { targetMap.getCanvas().style.cursor = ''; });
@@ -1419,7 +1461,7 @@
               const { manifestUrl } = feat.properties as { manifestUrl: string };
               const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
               if (!item) return;
-              openImageCollectionBubble(item, 'left');
+              openImageCollectionBubble({ ...item, spriteRef: massartSpriteRef(item) }, 'left');
             });
             map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
             map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
@@ -1563,7 +1605,8 @@
               sourceManifestUrl={viewerItem.sourceManifestUrl}
               manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ''}
               historyItems={viewerHistory}
-              on:close={() => (viewerOpen = false)}
+              spriteRef={viewerSpriteRef}
+              on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; }}
               on:select-history={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, viewerPane, viewerPane)}
             />
           {/key}
@@ -1584,7 +1627,8 @@
                 sourceManifestUrl={viewerItem.sourceManifestUrl}
                 manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ''}
                 historyItems={viewerHistory}
-                on:close={() => (viewerOpen = false)}
+                spriteRef={viewerSpriteRef}
+                on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; }}
                 on:select-history={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, viewerPane, viewerPane)}
               />
             {/key}
@@ -1781,7 +1825,7 @@
             title: e.detail.title,
             sourceManifestUrl: e.detail.sourceManifestUrl,
             imageServiceUrl: e.detail.imageServiceUrl
-          }, imageCollectionBubblePane);
+          }, imageCollectionBubblePane, undefined, e.detail.spriteRef);
           closeImageCollectionBubble();
         }}
       />

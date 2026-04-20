@@ -68,7 +68,9 @@ The viewer currently consumes:
 - `IIIF/<mapId>_geomaps.json`
 - `IIIF/<mapId>/sprites/sprites.jpg`
 - `IIIF/<mapId>/sprites/sprites.json`
-- `Image collections/Massart/index.json`
+- `Image collections/Massart/Massart_index.json`
+- `Image collections/Massart/Massart_sprites.jpg`
+- `Image collections/Massart/Massart_sprites.json`
 - `Toponyms/<mapId>/<mapId>Toponyms.json`
 - `Parcels/PrimitiefKadaster/PrimitiefKadasterParcels.geojson`
 - `static/site.json`

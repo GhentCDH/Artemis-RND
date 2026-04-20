@@ -81,9 +81,9 @@ export async function loadToponymIndexData({
             : [];
 
         if (items.length > 0) {
-          const itemsWithMetadata = items.map((item) => ({
+          const itemsWithMetadata = items.map((item, i) => ({
             ...item,
-            id: item.id ? `${mapId}::${item.id}` : `${mapId}::unknown-${Math.random()}`,
+            id: `${mapId}::${i}`,
             mapId: item.mapId || mapId,
             sourceFile: item.sourceFile || `${mapId}/${mapId}Toponyms.json`,
             sourceGroup: item.sourceGroup || mapId,

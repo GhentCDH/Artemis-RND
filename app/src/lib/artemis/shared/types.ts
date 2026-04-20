@@ -83,6 +83,16 @@ export type IiifMapInfo = {
   mainId?: string;
 };
 
+export type SpriteRef = {
+  sheetUrl: string;
+  sheetWidth: number;
+  sheetHeight: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type PreviewBubbleItem = {
   title: string;
   manifestUrl: string;
@@ -93,6 +103,7 @@ export type PreviewBubbleItem = {
   kicker?: string;
   lat?: number;
   lon?: number;
+  spriteRef?: SpriteRef;
 };
 
 export type ParcelClickInfo = {

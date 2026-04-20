@@ -81,11 +81,11 @@ export async function handleToponymSelection(
   deps: SearchNavigationDeps
 ): Promise<SearchFocusState | null> {
   const mainId = resolveMainIdForMapName(item.mapName, deps.mainLayerLabels);
+  deps.flyToCoordinates(item.lon, item.lat, `Toponym "${item.text}"`);
   if (mainId) {
     await focusTimelineForMainLayer(mainId, deps);
     await activateLayer(mainId, deps);
   }
-  deps.flyToCoordinates(item.lon, item.lat, `Toponym "${item.text}"`);
   return mainId ? buildSearchFocus(mainId, currentNonce, deps.timelineYearByLayer) : null;
 }
 
@@ -101,16 +101,6 @@ export async function handleManifestSelection(
   }
   if (result.centerLon != null && result.centerLat != null) {
     deps.flyToCoordinates(result.centerLon, result.centerLat, `Manifest "${result.text}"`);
-    deps.openPreviewBubbleAt(
-      {
-        title: result.label,
-        manifestUrl: result.sourceManifestUrl,
-        location: mainId ? deps.mainLayerLabels[mainId] : result.mapName,
-        kicker: 'Map Sheet',
-      },
-      result.centerLon,
-      result.centerLat
-    );
   }
   return mainId ? buildSearchFocus(mainId, currentNonce, deps.timelineYearByLayer) : null;
 }

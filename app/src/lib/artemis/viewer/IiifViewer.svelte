@@ -2,7 +2,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
   import type OpenSeadragonType from "openseadragon";
-  import type { IiifMapInfo } from '$lib/artemis/shared/types';
+  import type { IiifMapInfo, SpriteRef } from '$lib/artemis/shared/types';
   import {
     loadManifestDetails,
     type IiifManifestDetails,
@@ -15,6 +15,7 @@
   export let inline = false;
   export let mirrored = false;
   export let historyItems: IiifMapInfo[] = [];
+  export let spriteRef: SpriteRef | undefined = undefined;
 
   const dispatch = createEventDispatcher<{
     close: void;
@@ -29,6 +30,34 @@
   let metadataError = '';
   let manifestDetails: IiifManifestDetails | null = null;
   let metadataCollapsed = inline;
+  let osdReady = false;
+  let spriteDismissed = false;
+  let spriteOverlayStyle = '';
+  let OSD: typeof OpenSeadragonType | null = null;
+  let _onTileLoaded: ((e: any) => void) | null = null;
+  let _tileImageRef: OpenSeadragonType.TiledImage | null = null;
+
+  function syncSpriteToOSD() {
+    if (!viewer || !OSD || !spriteRef) return;
+    const tiledImage = viewer.world.getItemAt(0);
+    if (!tiledImage) return;
+    const bounds = tiledImage.getBounds(true);
+    const tl = viewer.viewport.viewportToViewerElementCoordinates(new OSD.Point(bounds.x, bounds.y));
+    const br = viewer.viewport.viewportToViewerElementCoordinates(new OSD.Point(bounds.x + bounds.width, bounds.y + bounds.height));
+    const imgW = br.x - tl.x;
+    const imgH = br.y - tl.y;
+    if (imgW <= 0 || imgH <= 0) return;
+    const sf = imgW / spriteRef.width;
+    spriteOverlayStyle = [
+      `left:${Math.round(tl.x)}px`,
+      `top:${Math.round(tl.y)}px`,
+      `width:${Math.round(imgW)}px`,
+      `height:${Math.round(imgH)}px`,
+      `background-image:url(${encodeURI(spriteRef.sheetUrl)})`,
+      `background-size:${Math.round(spriteRef.sheetWidth * sf)}px ${Math.round(spriteRef.sheetHeight * sf)}px`,
+      `background-position:-${Math.round(spriteRef.x * sf)}px -${Math.round(spriteRef.y * sf)}px`,
+    ].join(';');
+  }
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
@@ -75,6 +104,7 @@
     }
 
     const OpenSeadragon = (await import("openseadragon")).default;
+    OSD = OpenSeadragon;
     viewer = OpenSeadragon({
       element: container,
       tileSources: `${serviceUrl}/info.json`,
@@ -89,10 +119,40 @@
       minZoomLevel: 0.1,
       gestureSettingsMouse: { scrollToZoom: true },
     } as OpenSeadragonType.Options);
+
+    viewer.addOnceHandler('open', () => {
+      // Defer first sync to update-viewport — open fires before OSD applies home zoom,
+      // so getBounds returns pre-zoom coordinates that make the sprite appear tiny.
+      viewer!.addOnceHandler('update-viewport', () => syncSpriteToOSD());
+
+      // tile-drawn is not raised by the WebGL drawer; use fully-loaded-change instead.
+      const item = viewer!.world.getItemAt(0);
+      if (item) {
+        _tileImageRef = item;
+        _onTileLoaded = (e: any) => {
+          if (e.fullyLoaded) {
+            _tileImageRef?.removeHandler('fully-loaded-change', _onTileLoaded!);
+            _onTileLoaded = null;
+            setTimeout(() => { osdReady = true; }, 0);
+          }
+        };
+        item.addHandler('fully-loaded-change', _onTileLoaded);
+        if ((item as any).fullyLoaded) {
+          item.removeHandler('fully-loaded-change', _onTileLoaded);
+          _onTileLoaded = null;
+          setTimeout(() => { osdReady = true; }, 0);
+        }
+      }
+    });
+    viewer.addHandler('animation', syncSpriteToOSD);
   });
 
   onDestroy(() => {
     window.removeEventListener("keydown", onKeyDown);
+    viewer?.removeHandler('animation', syncSpriteToOSD);
+    if (_tileImageRef && _onTileLoaded) {
+      _tileImageRef.removeHandler('fully-loaded-change', _onTileLoaded);
+    }
     viewer?.destroy();
   });
 
@@ -168,10 +228,32 @@
       class:viewer-main--meta-collapsed={inline && metadataCollapsed}
     >
       <div class="viewer-body" bind:this={container}>
-        {#if loadingService}
-          <div class="viewer-status">Loading image…</div>
-        {:else if loadError}
+        {#if loadError}
           <div class="viewer-status viewer-error">{loadError}</div>
+        {:else if !osdReady && !spriteRef && loadingService}
+          <div class="viewer-status">Loading image…</div>
+        {/if}
+        {#if spriteRef && !spriteDismissed}
+          <div
+            class="viewer-sprite-placeholder"
+            class:viewer-sprite-placeholder--fade={osdReady}
+            on:transitionend={() => { spriteDismissed = true; }}
+          >
+            {#if spriteOverlayStyle}
+              <div class="viewer-sprite-synced" style={spriteOverlayStyle}></div>
+            {:else}
+              {@const s = spriteRef}
+              {@const scale = Math.min(1, 320 / s.height, 320 / s.width)}
+              {@const dw = Math.round(s.width * scale)}
+              {@const dh = Math.round(s.height * scale)}
+              <div class="viewer-sprite-pre-open">
+                <div
+                  class="viewer-sprite"
+                  style="width:{dw}px;height:{dh}px;background-image:url({encodeURI(s.sheetUrl)});background-size:{Math.round(s.sheetWidth*scale)}px {Math.round(s.sheetHeight*scale)}px;background-position:-{Math.round(s.x*scale)}px -{Math.round(s.y*scale)}px;"
+                ></div>
+              </div>
+            {/if}
+          </div>
         {/if}
       </div>
       <aside class="viewer-meta" class:viewer-meta--collapsed={inline && metadataCollapsed}>
@@ -637,6 +719,40 @@
     background: var(--viewer-chip-bg-hover);
     color: var(--text-primary);
     border-color: var(--viewer-chip-border-hover);
+  }
+
+  .viewer-sprite-placeholder {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    opacity: 1;
+    transition: opacity 600ms ease;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .viewer-sprite-placeholder--fade {
+    opacity: 0;
+  }
+
+  .viewer-sprite-synced {
+    position: absolute;
+    background-repeat: no-repeat;
+  }
+
+  .viewer-sprite-pre-open {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .viewer-sprite {
+    flex-shrink: 0;
+    background-repeat: no-repeat;
   }
 
   .viewer-status {
