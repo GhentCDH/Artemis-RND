@@ -459,15 +459,15 @@ async function loadNewIiifEntries(
             : spritePath
         )
       : "";
-    const spritesByImageId = new Map<string, BundleSprite>();
+    const spritesByCanvasAllmapsId = new Map<string, BundleSprite>();
 
     if (spriteJsonPath) {
       const spritesUrl = joinUrl(cfg.datasetBaseUrl, spriteJsonPath);
-      const sprites = await fetchJson<BundleSprite[]>(spritesUrl, timeout);
-      for (const sprite of Array.isArray(sprites) ? sprites : []) {
-        const imageId = String(sprite?.imageId ?? "").trim();
-        if (!imageId) continue;
-        spritesByImageId.set(imageId, sprite);
+      const sprites = await fetchJson<Record<string, BundleSprite>>(spritesUrl, timeout);
+      for (const [canvasAllmapsId, sprite] of Object.entries(sprites ?? {})) {
+        const key = String(canvasAllmapsId).trim();
+        if (!key || !sprite) continue;
+        spritesByCanvasAllmapsId.set(key, sprite);
       }
     }
 
@@ -481,8 +481,8 @@ async function loadNewIiifEntries(
         return [{ url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`, raw: canvas.georeferencedMap }];
       });
       const inlineSprites = canvases.flatMap((canvas: any) => {
-        const imageId = String(canvas?.georeferencedMap?.resource?.id ?? "").trim();
-        const sprite = imageId ? spritesByImageId.get(imageId) : undefined;
+        const canvasAllmapsId = String(canvas?.canvasAllmapsId ?? "").trim();
+        const sprite = canvasAllmapsId ? spritesByCanvasAllmapsId.get(canvasAllmapsId) : undefined;
         if (!sprite || !spriteImageSize || !spriteImageUrl) return [];
         return [{
           imageUrl: spriteImageUrl,

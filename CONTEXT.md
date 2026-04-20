@@ -52,6 +52,15 @@
 - Simplify `Timeslider.svelte`; it contains multiple overlapping iterations.
 - Re-verify lane assignment and small-pill readability after the interaction bugs are fixed.
 - Re-test smallest pills for hitbox, visual width, and abbreviation legibility.
+- Data-contract follow-up: re-verify viewer behavior against the current atlas contract where `sprites.json` is keyed by `canvasAllmapsId`.
+- Data-contract follow-up: `build/index.json` center coordinates are back; re-test search and preview anchoring against the rebuilt data.
+- Data-contract follow-up: re-check Massart labels/titles in the viewer after the data repo fixes title parsing.
+
+Current status after local compatibility review:
+
+- `app/src/lib/artemis/runner.ts` already resolves atlas entries by `canvasAllmapsId`
+- `app/src/routes/+page.svelte` already consumes restored `centerLon` / `centerLat`
+- No additional viewer runtime change is currently required for the rebuilt data contract
 
 ## 6.1 Timeline Sublayer Menu Refactor
 
