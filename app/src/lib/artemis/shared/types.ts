@@ -81,6 +81,19 @@ export type IiifMapInfo = {
   centerLon?: number;
   centerLat?: number;
   mainId?: string;
+  spriteRef?: SpriteRef;
+  placeholderWidth?: number;
+  placeholderHeight?: number;
+};
+
+export type SpriteRef = {
+  sheetUrl: string;
+  sheetWidth: number;
+  sheetHeight: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export type PreviewBubbleItem = {
@@ -93,6 +106,9 @@ export type PreviewBubbleItem = {
   kicker?: string;
   lat?: number;
   lon?: number;
+  spriteRef?: SpriteRef;
+  placeholderWidth?: number;
+  placeholderHeight?: number;
 };
 
 export type ParcelClickInfo = {

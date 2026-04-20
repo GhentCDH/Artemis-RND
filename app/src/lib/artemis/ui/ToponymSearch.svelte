@@ -2,9 +2,9 @@
      dispatches events for map-level actions (fly-to, layer activation). -->
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-  import { normalizeSearchText, scoreText } from '$lib/artemis/search';
-  import { MAIN_LAYER_META, MAIN_LAYER_LABELS } from '$lib/artemis/layerConfig';
-  import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/types';
+  import { normalizeSearchText, scoreText } from '$lib/artemis/search/text';
+  import { MAIN_LAYER_META, MAIN_LAYER_LABELS } from '$lib/artemis/config/layers';
+  import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/shared/types';
 
   export let toponymIndex: ToponymIndexItem[] = [];
   export let manifestSearchIndex: ManifestSearchItem[] = [];
@@ -81,10 +81,18 @@
   }
 
   function onFocus() {
+    if (locked) return;
     menuOpen = true;
     if (firstFocusSeen) return;
     firstFocusSeen = true;
     pickSuggestions(3);
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu();
+    }
   }
 
   function cancelPendingClose() {
@@ -154,14 +162,18 @@
   }
 
   function selectToponym(item: ToponymIndexItem) {
+    locked = true;
     query = item.text;
-    closeMenu();
+    menuOpen = false;
+    inputEl?.blur();
     dispatch('fly-to-toponym', item);
   }
 
   function selectManifest(result: ManifestSearchItem & { score: number }) {
+    locked = true;
     query = result.text;
-    closeMenu();
+    menuOpen = false;
+    inputEl?.blur();
     dispatch('manifest-click', result);
   }
 
@@ -186,13 +198,15 @@
   <div class="ui-panel toponym-search-row">
     <input
       bind:this={inputEl}
-      type="search"
+      type="text"
       class="ui-input"
       placeholder="Search manifests and toponyms..."
       bind:value={query}
       on:input={onInput}
       on:focus={onFocus}
+      on:keydown={onKeydown}
       spellcheck="false"
+      autocomplete="off"
     />
     {#if query.trim()}
       <button

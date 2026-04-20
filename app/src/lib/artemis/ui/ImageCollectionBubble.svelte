@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import type { PreviewBubbleItem } from '$lib/artemis/types';
+  import type { PreviewBubbleItem, SpriteRef } from '$lib/artemis/shared/types';
   import { loadManifestPreview } from '$lib/artemis/viewer/manifestPreview';
 
   export let item: PreviewBubbleItem;
@@ -10,7 +10,14 @@
 
   const dispatch = createEventDispatcher<{
     close: void;
-    'open-viewer': { title: string; sourceManifestUrl: string; imageServiceUrl: string };
+    'open-viewer': {
+      title: string;
+      sourceManifestUrl: string;
+      imageServiceUrl: string;
+      spriteRef?: SpriteRef;
+      placeholderWidth?: number;
+      placeholderHeight?: number;
+    };
   }>();
 
   const BUBBLE_WIDTH = 280;
@@ -165,6 +172,9 @@
       title: bubbleItem.title || preview?.previewTitle || 'Untitled document',
       sourceManifestUrl: bubbleItem.manifestUrl,
       imageServiceUrl: bubbleItem.imageServiceUrl || preview?.imageServiceUrl || '',
+      spriteRef: bubbleItem.spriteRef,
+      placeholderWidth: bubbleItem.placeholderWidth ?? preview?.previewWidth ?? 0,
+      placeholderHeight: bubbleItem.placeholderHeight ?? preview?.previewHeight ?? 0,
     });
   }
 
@@ -210,6 +220,17 @@
           <div class="image-collection-bubble-preview">
             {#if preview?.previewUrl}
               <img src={preview.previewUrl} alt={preview.previewTitle || bubbleItem.title} />
+            {:else if bubbleItem.spriteRef}
+              {@const s = bubbleItem.spriteRef}
+              {@const scale = Math.min(220 / s.height, 260 / s.width)}
+              {@const dw = Math.round(s.width * scale)}
+              {@const dh = Math.round(s.height * scale)}
+              <div class="image-collection-bubble-sprite-wrap">
+                <div
+                  class="image-collection-bubble-sprite"
+                  style="width:{dw}px;height:{dh}px;background-image:url({encodeURI(s.sheetUrl)});background-size:{Math.round(s.sheetWidth*scale)}px {Math.round(s.sheetHeight*scale)}px;background-position:-{Math.round(s.x*scale)}px -{Math.round(s.y*scale)}px;"
+                ></div>
+              </div>
             {:else if preview?.loading}
               <div class="image-collection-bubble-status">Loading preview…</div>
             {:else}
@@ -377,6 +398,19 @@
     object-fit: contain;
     position: relative;
     z-index: 1;
+  }
+
+  .image-collection-bubble-sprite-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .image-collection-bubble-sprite {
+    flex-shrink: 0;
+    background-repeat: no-repeat;
   }
 
   .image-collection-bubble-status {

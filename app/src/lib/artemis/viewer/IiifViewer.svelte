@@ -2,7 +2,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
   import type OpenSeadragonType from "openseadragon";
-  import type { IiifMapInfo } from '$lib/artemis/types';
+  import type { IiifMapInfo, SpriteRef } from '$lib/artemis/shared/types';
   import {
     loadManifestDetails,
     type IiifManifestDetails,
@@ -15,6 +15,9 @@
   export let inline = false;
   export let mirrored = false;
   export let historyItems: IiifMapInfo[] = [];
+  export let spriteRef: SpriteRef | undefined = undefined;
+  export let placeholderWidth = 0;
+  export let placeholderHeight = 0;
 
   const dispatch = createEventDispatcher<{
     close: void;
@@ -29,9 +32,54 @@
   let metadataError = '';
   let manifestDetails: IiifManifestDetails | null = null;
   let metadataCollapsed = inline;
+  let osdReady = false;
+  let spriteDismissed = false;
+  let spriteStyle = '';
+  let OSD: typeof OpenSeadragonType | null = null;
+  let _onTileLoaded: ((e: any) => void) | null = null;
+  let _tileImageRef: OpenSeadragonType.TiledImage | null = null;
+  let _resizeObserver: ResizeObserver | null = null;
+  let containerWidth = 0;
+  let containerHeight = 0;
+
+  function buildSpriteStyle(ref: SpriteRef): string {
+    const maxWidth = Math.max(containerWidth, 320);
+    const maxHeight = Math.max(containerHeight, 320);
+    const sourceWidth = manifestDetails?.canvasWidth || placeholderWidth || ref.width;
+    const sourceHeight = manifestDetails?.canvasHeight || placeholderHeight || ref.height;
+    const fitScale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight);
+    const dw = Math.max(1, Math.round(sourceWidth * fitScale));
+    const dh = Math.max(1, Math.round(sourceHeight * fitScale));
+    const scaleX = dw / ref.width;
+    const scaleY = dh / ref.height;
+    return [
+      `width:${dw}px`,
+      `height:${dh}px`,
+      `background-image:url(${encodeURI(ref.sheetUrl)})`,
+      `background-size:${Math.round(ref.sheetWidth * scaleX)}px ${Math.round(ref.sheetHeight * scaleY)}px`,
+      `background-position:-${Math.round(ref.x * scaleX)}px -${Math.round(ref.y * scaleY)}px`,
+    ].join(';');
+  }
+
+  function updateSpriteStyle() {
+    spriteStyle = spriteRef ? buildSpriteStyle(spriteRef) : '';
+  }
+
+  function updateContainerSize() {
+    containerWidth = Math.max(container?.clientWidth ?? 0, 0);
+    containerHeight = Math.max(container?.clientHeight ?? 0, 0);
+    updateSpriteStyle();
+  }
+
+  $: manifestDetails, placeholderWidth, placeholderHeight, spriteRef, updateSpriteStyle();
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
+    updateContainerSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      _resizeObserver = new ResizeObserver(() => updateContainerSize());
+      if (container) _resizeObserver.observe(container);
+    }
 
     let serviceUrl = imageServiceUrl;
 
@@ -75,9 +123,11 @@
     }
 
     const OpenSeadragon = (await import("openseadragon")).default;
+    OSD = OpenSeadragon;
     viewer = OpenSeadragon({
       element: container,
       tileSources: `${serviceUrl}/info.json`,
+      drawer: 'canvas',
       showNavigationControl: false,
       showZoomControl: false,
       showHomeControl: false,
@@ -89,10 +139,35 @@
       minZoomLevel: 0.1,
       gestureSettingsMouse: { scrollToZoom: true },
     } as OpenSeadragonType.Options);
+
+    viewer.addOnceHandler('open', () => {
+      // tile-drawn is not raised by the WebGL drawer; use fully-loaded-change instead.
+      const item = viewer!.world.getItemAt(0);
+      if (item) {
+        _tileImageRef = item;
+        _onTileLoaded = (e: any) => {
+          if (e.fullyLoaded) {
+            _tileImageRef?.removeHandler('fully-loaded-change', _onTileLoaded!);
+            _onTileLoaded = null;
+            setTimeout(() => { osdReady = true; }, 0);
+          }
+        };
+        item.addHandler('fully-loaded-change', _onTileLoaded);
+        if ((item as any).fullyLoaded) {
+          item.removeHandler('fully-loaded-change', _onTileLoaded);
+          _onTileLoaded = null;
+          setTimeout(() => { osdReady = true; }, 0);
+        }
+      }
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener("keydown", onKeyDown);
+    _resizeObserver?.disconnect();
+    if (_tileImageRef && _onTileLoaded) {
+      _tileImageRef.removeHandler('fully-loaded-change', _onTileLoaded);
+    }
     viewer?.destroy();
   });
 
@@ -167,11 +242,25 @@
       class:viewer-main--mirrored={inline && mirrored}
       class:viewer-main--meta-collapsed={inline && metadataCollapsed}
     >
-      <div class="viewer-body" bind:this={container}>
-        {#if loadingService}
-          <div class="viewer-status">Loading image…</div>
-        {:else if loadError}
+      <div class="viewer-body" class:viewer-body--mask-osd={!!spriteRef && !osdReady} bind:this={container}>
+        {#if loadError}
           <div class="viewer-status viewer-error">{loadError}</div>
+        {:else if !osdReady && !spriteRef && loadingService}
+          <div class="viewer-status">Loading image…</div>
+        {/if}
+        {#if spriteRef && !spriteDismissed}
+          <div
+            class="viewer-sprite-placeholder"
+            class:viewer-sprite-placeholder--fade={osdReady}
+            on:transitionend={() => { spriteDismissed = true; }}
+          >
+            <div class="viewer-sprite-pre-open">
+              <div
+                class="viewer-sprite"
+                style={spriteStyle}
+              ></div>
+            </div>
+          </div>
         {/if}
       </div>
       <aside class="viewer-meta" class:viewer-meta--collapsed={inline && metadataCollapsed}>
@@ -637,6 +726,43 @@
     background: var(--viewer-chip-bg-hover);
     color: var(--text-primary);
     border-color: var(--viewer-chip-border-hover);
+  }
+
+  .viewer-sprite-placeholder {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    opacity: 1;
+    transition: opacity 600ms ease;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .viewer-sprite-placeholder--fade {
+    opacity: 0;
+  }
+
+  .viewer-body--mask-osd :global(.openseadragon-container) {
+    opacity: 0;
+  }
+
+  .viewer-sprite-pre-open {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .viewer-sprite {
+    flex-shrink: 0;
+    background-repeat: no-repeat;
+  }
+
+  .viewer-body :global(.openseadragon-container) {
+    transition: opacity 220ms ease;
   }
 
   .viewer-status {

@@ -1,8 +1,8 @@
 // Toponym normalization — converts raw API responses to normalized items.
 
-import type { RawToponymIndexItem, ToponymIndexItem } from "$lib/artemis/types";
-import { asFiniteNumber } from "$lib/artemis/utils";
-import { normalizeSearchText } from "$lib/artemis/search";
+import type { RawToponymIndexItem, ToponymIndexItem } from "$lib/artemis/shared/types";
+import { asFiniteNumber } from "$lib/artemis/shared/utils";
+import { normalizeSearchText } from "$lib/artemis/search/text";
 
 function centroidFromBounds(bounds: unknown): [number, number] | null {
   if (!Array.isArray(bounds) || bounds.length < 4) return null;

@@ -1,6 +1,7 @@
 // $lib/artemis/map/mapInit.ts
 import maplibregl from "maplibre-gl";
 import basemapGeojsonUrl from "$lib/assets/Baselayer.geojson?url";
+import { ngiTileUrl } from "$lib/artemis/config/ngi";
 
 let map: maplibregl.Map | null = null;
 type BaseMapTheme = "light" | "dark";
@@ -24,14 +25,14 @@ const HISTCART_LAYERS: Record<
     sourceId: "histcart-ngi1904-source",
     layerId: "histcart-ngi1904-layer",
     tiles: [
-      "https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__450/MapServer/tile/{z}/{y}/{x}"
+      ngiTileUrl("/arcgis/rest/services/seamless_carto__default__3857__450/MapServer")
     ]
   },
   ngi1873: {
     sourceId: "histcart-ngi1873-source",
     layerId: "histcart-ngi1873-layer",
     tiles: [
-      "https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__140/MapServer/tile/{z}/{y}/{x}"
+      ngiTileUrl("/arcgis/rest/services/seamless_carto__default__3857__140/MapServer")
     ]
   },
   popp: {
@@ -598,7 +599,7 @@ function attachPrimitiveDebugListeners(map: maplibregl.Map, geojsonUrl: string):
 
 // ─── Massart photo pins ───────────────────────────────────────────────────────
 
-import type { MassartItem } from "$lib/artemis/types";
+import type { MassartItem } from "$lib/artemis/shared/types";
 
 const MASSART_SOURCE_ID = "massart-pins-source";
 const MASSART_LAYER_INACTIVE = "massart-pins-inactive";
@@ -758,4 +759,48 @@ export function updateMassartActiveYear(
 export function getMassartClickLayerIds(): string[] {
   // Only the active-year pin layer should be interactive.
   return [MASSART_LAYER_ACTIVE];
+}
+
+const FLASH_STYLE_ID = 'location-flash-marker-style';
+
+function ensureFlashStyles() {
+  if (document.getElementById(FLASH_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = FLASH_STYLE_ID;
+  style.textContent = `
+    .location-flash-marker {
+      width: 0; height: 0;
+      pointer-events: none;
+    }
+    .location-flash-ring {
+      position: absolute;
+      width: 36px; height: 36px;
+      top: -18px; left: -18px;
+      border-radius: 50%;
+      background: rgba(239, 108, 0, 0.8);
+      opacity: 0;
+      animation: location-flash-pulse 1.0s ease-out forwards;
+    }
+    @keyframes location-flash-pulse {
+      0%   { transform: scale(0.15); opacity: 1; }
+      100% { transform: scale(3.5); opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+export function flashLocationMarker(targetMap: maplibregl.Map, lon: number, lat: number) {
+  ensureFlashStyles();
+  const el = document.createElement('div');
+  el.className = 'location-flash-marker';
+  for (let i = 0; i < 3; i++) {
+    const ring = document.createElement('div');
+    ring.className = 'location-flash-ring';
+    ring.style.animationDelay = `${0.85 + i * 0.55}s`;
+    el.appendChild(ring);
+  }
+  const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+    .setLngLat([lon, lat])
+    .addTo(targetMap);
+  setTimeout(() => marker.remove(), 3500);
 }

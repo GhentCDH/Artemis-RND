@@ -1,5 +1,6 @@
 // Layer configuration for the historical map era tree.
 // Defines all main layers (eras), their sub-layers, labels, and visual metadata.
+import { ngiTileUrl } from './ngi';
 
 export type MainLayerId =
   | 'NGI1904'
@@ -78,11 +79,11 @@ export const MAIN_LAYER_INFO: Record<string, string> = {
 export const MAIN_LAYER_SOURCE: Record<string, { label: string; url: string }> = {
   NGI1904: {
     label: 'NGI raster tiles',
-    url: 'https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__450/MapServer/tile/{z}/{y}/{x}',
+    url: ngiTileUrl('/arcgis/rest/services/seamless_carto__default__3857__450/MapServer'),
   },
   NGI1873: {
     label: 'NGI raster tiles',
-    url: 'https://wmts.ngi.be/arcgis/rest/services/seamless_carto__default__3857__140/MapServer/tile/{z}/{y}/{x}',
+    url: ngiTileUrl('/arcgis/rest/services/seamless_carto__default__3857__140/MapServer'),
   },
   Popp: {
     label: 'Geopunt WMTS',
@@ -106,15 +107,15 @@ export const MAIN_LAYER_SOURCE: Record<string, { label: string; url: string }> =
   },
   PrimitiefKadaster: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build/index.json',
   },
   GereduceerdeKadaster: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build/index.json',
   },
   HanddrawnCollection: {
     label: 'Compiled IIIF dataset',
-    url: 'https://ghentcdh.github.io/Artemis-RnD-Data/build/index.json',
+    url: 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build/index.json',
   },
 };
 
