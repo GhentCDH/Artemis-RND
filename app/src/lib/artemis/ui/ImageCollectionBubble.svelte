@@ -173,8 +173,8 @@
       sourceManifestUrl: bubbleItem.manifestUrl,
       imageServiceUrl: bubbleItem.imageServiceUrl || preview?.imageServiceUrl || '',
       spriteRef: bubbleItem.spriteRef,
-      placeholderWidth: preview?.previewWidth ?? 0,
-      placeholderHeight: preview?.previewHeight ?? 0,
+      placeholderWidth: bubbleItem.placeholderWidth ?? preview?.previewWidth ?? 0,
+      placeholderHeight: bubbleItem.placeholderHeight ?? preview?.previewHeight ?? 0,
     });
   }
 

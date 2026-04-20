@@ -81,6 +81,9 @@ export type IiifMapInfo = {
   centerLon?: number;
   centerLat?: number;
   mainId?: string;
+  spriteRef?: SpriteRef;
+  placeholderWidth?: number;
+  placeholderHeight?: number;
 };
 
 export type SpriteRef = {
@@ -104,6 +107,8 @@ export type PreviewBubbleItem = {
   lat?: number;
   lon?: number;
   spriteRef?: SpriteRef;
+  placeholderWidth?: number;
+  placeholderHeight?: number;
 };
 
 export type ParcelClickInfo = {

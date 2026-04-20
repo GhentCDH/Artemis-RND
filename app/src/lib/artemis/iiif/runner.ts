@@ -5,7 +5,7 @@
 
 import type maplibregl from "maplibre-gl";
 import { WarpedMapLayer } from "@allmaps/maplibre";
-import type { RunResult, StepTiming } from "$lib/artemis/shared/types";
+import type { RunResult, SpriteRef, StepTiming } from "$lib/artemis/shared/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,7 +94,13 @@ type RuntimeLayerEntry = {
   isVerzamelblad?: boolean;
   annotSource?: "single" | "multi";
   canvasCount?: number;
-  inlineMaps?: Array<{ url: string; raw: unknown }>;
+  inlineMaps?: Array<{
+    url: string;
+    raw: unknown;
+    spriteRef?: SpriteRef;
+    placeholderWidth?: number;
+    placeholderHeight?: number;
+  }>;
   inlineSprites?: Array<{
     imageUrl: string;
     imageSize: [number, number];
@@ -284,6 +290,9 @@ type ManifestInfo = {
   label: string;
   compiledManifestPath: string;
   manifestAllmapsUrl?: string;
+  spriteRef?: SpriteRef;
+  placeholderWidth?: number;
+  placeholderHeight?: number;
 };
 type PaneRuntime = {
   activeLayersByGroup: Map<string, string[]>;
@@ -478,7 +487,29 @@ async function loadNewIiifEntries(
 
       const inlineMaps = canvases.flatMap((canvas: any) => {
         if (!canvas.georeferencedMap) return [];
-        return [{ url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`, raw: canvas.georeferencedMap }];
+        const canvasAllmapsId = String(canvas?.canvasAllmapsId ?? "").trim();
+        const sprite = canvasAllmapsId ? spritesByCanvasAllmapsId.get(canvasAllmapsId) : undefined;
+        const spriteRef =
+          sprite && spriteImageSize && spriteImageUrl
+            ? {
+                sheetUrl: spriteImageUrl,
+                sheetWidth: spriteImageSize[0],
+                sheetHeight: spriteImageSize[1],
+                x: sprite.x,
+                y: sprite.y,
+                width: sprite.width,
+                height: sprite.height,
+              }
+            : undefined;
+        const placeholderWidth = Number(canvas?.info?.width ?? canvas?.georeferencedMap?.resource?.width ?? 0);
+        const placeholderHeight = Number(canvas?.info?.height ?? canvas?.georeferencedMap?.resource?.height ?? 0);
+        return [{
+          url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`,
+          raw: canvas.georeferencedMap,
+          spriteRef,
+          placeholderWidth: Number.isFinite(placeholderWidth) && placeholderWidth > 0 ? placeholderWidth : undefined,
+          placeholderHeight: Number.isFinite(placeholderHeight) && placeholderHeight > 0 ? placeholderHeight : undefined,
+        }];
       });
       const inlineSprites = canvases.flatMap((canvas: any) => {
         const canvasAllmapsId = String(canvas?.canvasAllmapsId ?? "").trim();
@@ -990,7 +1021,7 @@ export async function runLayerGroup(opts: {
 
   // Phase 1: collect inlined georeferenced maps from the geomaps bundle
   type FetchedGeoreferencedMap =
-    | { url: string; raw: unknown; fetchMs: number }
+    | { url: string; raw: unknown; fetchMs: number; spriteRef?: SpriteRef; placeholderWidth?: number; placeholderHeight?: number }
     | { url: string; error: string };
   type FetchedSprite = {
     imageUrl: string;
@@ -1037,6 +1068,9 @@ export async function runLayerGroup(opts: {
           url: a.url,
           raw: a.raw,
           fetchMs: 0,
+          spriteRef: a.spriteRef,
+          placeholderWidth: a.placeholderWidth,
+          placeholderHeight: a.placeholderHeight,
         })),
         sprites: entry.inlineSprites ?? [],
       };
@@ -1119,7 +1153,10 @@ export async function runLayerGroup(opts: {
           };
         }
 
-        const okMaps = item.maps.filter((a): a is { url: string; raw: unknown; fetchMs: number } => "raw" in a);
+        const okMaps = item.maps.filter(
+          (a): a is { url: string; raw: unknown; fetchMs: number; spriteRef?: SpriteRef; placeholderWidth?: number; placeholderHeight?: number } =>
+            "raw" in a
+        );
         const failedMaps = item.maps.filter((a): a is { url: string; error: string } => "error" in a);
         subLayerAssignments[subLayerIndex].manifests++;
         subLayerAssignments[subLayerIndex].maps += okMaps.length;
@@ -1187,7 +1224,10 @@ export async function runLayerGroup(opts: {
               `${Math.round(applyMs)}ms layer=${subLayerIndex} label="${item.entry.label}" canvases=${item.entry.canvasCount ?? "?"} maps=${okMaps.length} added=${succeeded.length} failed=${failed.length}`
             );
           }
-          for (const mapId of succeeded) {
+          for (let resultIndex = 0; resultIndex < allmapsResults.length; resultIndex++) {
+            const mapId = allmapsResults[resultIndex];
+            if (typeof mapId !== "string") continue;
+            const sourceMap = okMaps[resultIndex];
             mapMetaByMapId.set(mapId, {
               label: item.entry.label,
               manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
@@ -1196,7 +1236,10 @@ export async function runLayerGroup(opts: {
               sourceManifestUrl: item.entry.sourceManifestUrl,
               label: item.entry.label,
               compiledManifestPath: item.entry.compiledManifestPath,
-              manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry)
+              manifestAllmapsUrl: deriveAllmapsManifestUrl(item.entry),
+              spriteRef: sourceMap?.spriteRef,
+              placeholderWidth: sourceMap?.placeholderWidth,
+              placeholderHeight: sourceMap?.placeholderHeight,
             });
           }
           steps.push({

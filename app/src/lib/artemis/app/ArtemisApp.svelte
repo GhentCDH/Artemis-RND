@@ -570,9 +570,9 @@
   ) {
     viewerPane = targetPane ?? (isSplitLayout ? oppositePane(sourcePane) : 'right');
     viewerItem = next;
-    viewerSpriteRef = spriteRef;
-    viewerPlaceholderWidth = placeholderSize?.width ?? 0;
-    viewerPlaceholderHeight = placeholderSize?.height ?? 0;
+    viewerSpriteRef = spriteRef ?? next.spriteRef;
+    viewerPlaceholderWidth = placeholderSize?.width ?? next.placeholderWidth ?? 0;
+    viewerPlaceholderHeight = placeholderSize?.height ?? next.placeholderHeight ?? 0;
     viewerOpen = true;
     viewerHistory = [next, ...viewerHistory.filter((item) => !sameViewerItem(item, next))].slice(0, 10);
   }
@@ -630,6 +630,9 @@
       imageServiceUrl: info.imageServiceUrl,
       location: info.layerLabel,
       kicker: 'Map Sheet',
+      spriteRef: info.spriteRef,
+      placeholderWidth: info.placeholderWidth,
+      placeholderHeight: info.placeholderHeight,
     };
   }
 
@@ -1177,6 +1180,9 @@
         mainId,
         centerLon: bbox ? (bbox[0] + bbox[2]) / 2 : undefined,
         centerLat: bbox ? (bbox[1] + bbox[3]) / 2 : undefined,
+        spriteRef: info.spriteRef,
+        placeholderWidth: info.placeholderWidth,
+        placeholderHeight: info.placeholderHeight,
       });
     }
     return items;
