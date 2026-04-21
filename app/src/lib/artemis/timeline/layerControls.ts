@@ -148,7 +148,7 @@ export function applyLayerOrderToPane({
           } catch {
           }
         }
-      } else if (subDef?.kind === 'geojson' && subId === 'primitief-parcels') {
+      } else if (subDef?.kind === 'geojson' && subId === 'PrimitiefKadaster-parcels') {
         for (const layerId of getPrimitiveLayerIds()) {
           try {
             if (targetMap.getLayer(layerId)) targetMap.moveLayer(layerId);
@@ -208,7 +208,7 @@ export async function toggleSubLayerState(subId: string, enabled: boolean, deps:
   }
 
   if (subDef.kind === 'geojson') {
-    if (subId === 'primitief-parcels') {
+    if (subId === 'PrimitiefKadaster-parcels') {
       deps.setPrimitiveLayerVisible(deps.targetMap, enabled, deps.primitiveGeojsonUrl());
       if (enabled) deps.setPrimitiveLayerOpacity(deps.targetMap, opacity);
       deps.applyMainPaneOrder();
@@ -271,7 +271,7 @@ export async function toggleRightPaneSubLayerState(deps: ToggleRightSubLayerDeps
   }
 
   if (subDef.kind === 'geojson') {
-    if (deps.subId === 'primitief-parcels') {
+    if (deps.subId === 'PrimitiefKadaster-parcels') {
       deps.setPrimitiveLayerVisible(deps.rightMap, deps.enabled, deps.primitiveGeojsonUrl());
       if (deps.enabled) deps.setPrimitiveLayerOpacity(deps.rightMap, opacity);
       deps.applyRightPaneOrder();

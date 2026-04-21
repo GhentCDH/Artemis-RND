@@ -125,21 +125,15 @@ export const SUB_LAYER_DEFS: Record<string, { label: string; kind: SubLayerKind 
   'Popp-wmts':              { label: 'Map',             kind: 'wmts'       },
   'Ferraris-wmts':          { label: 'WMTS',            kind: 'wmts'       },
   'Ferraris-landusage':     { label: 'Land usage',           kind: 'wms'        },
-  'Ferraris-toponyms':      { label: 'Toponyms',             kind: 'searchable' },
   'Villaret-wmts':          { label: 'Map',             kind: 'wmts'       },
   'Frickx-wmts':            { label: 'Map',             kind: 'wmts'       },
   'Vandermaelen-wmts':      { label: 'WMTS',            kind: 'wmts'       },
   'Vandermaelen-landusage': { label: 'Land usage',           kind: 'wms'        },
-  'Vandermaelen-toponyms':  { label: 'Toponyms',             kind: 'searchable' },
   'PrimitiefKadaster-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
   'PrimitiefKadaster-parcels':      { label: 'Parcels',              kind: 'geojson'    },
-  'PrimitiefKadaster-landusage':    { label: 'Land usage',           kind: 'geojson'    },
   'GereduceerdeKadaster-iiif':       { label: 'IIIF collection',      kind: 'iiif'       },
-  'GereduceerdeKadaster-parcels':    { label: 'Parcels',              kind: 'geojson'    },
-  'GereduceerdeKadaster-landusage':  { label: 'Land usage',           kind: 'geojson'    },
   'HanddrawnCollection-iiif':         { label: 'IIIF collection',      kind: 'iiif'       },
   'HanddrawnCollection-parcels':      { label: 'Parcels',              kind: 'geojson'    },
-  'HanddrawnCollection-water':        { label: 'Water infrastructure', kind: 'geojson'    },
 };
 
 
@@ -147,13 +141,13 @@ export const MAIN_LAYER_SUBS: Record<string, string[]> = {
   NGI1904:      ['NGI1904-wmts'],
   NGI1873:      ['NGI1873-wmts'],
   Popp:         ['Popp-wmts'],
-  Ferraris:     ['Ferraris-wmts', 'Ferraris-landusage', 'Ferraris-toponyms'],
+  Ferraris:     ['Ferraris-wmts', 'Ferraris-landusage'],
   Villaret:     ['Villaret-wmts'],
   Frickx:       ['Frickx-wmts'],
-  Vandermaelen: ['Vandermaelen-wmts', 'Vandermaelen-landusage', 'Vandermaelen-toponyms'],
-  PrimitiefKadaster:    ['PrimitiefKadaster-iiif', 'PrimitiefKadaster-parcels', 'PrimitiefKadaster-landusage'],
-  GereduceerdeKadaster:  ['GereduceerdeKadaster-iiif', 'GereduceerdeKadaster-parcels', 'GereduceerdeKadaster-landusage'],
-  HanddrawnCollection:    ['HanddrawnCollection-iiif', 'HanddrawnCollection-parcels', 'HanddrawnCollection-water'],
+  Vandermaelen: ['Vandermaelen-wmts', 'Vandermaelen-landusage'],
+  PrimitiefKadaster:    ['PrimitiefKadaster-iiif', 'PrimitiefKadaster-parcels'],
+  GereduceerdeKadaster:  ['GereduceerdeKadaster-iiif'],
+  HanddrawnCollection:    ['HanddrawnCollection-iiif', 'HanddrawnCollection-parcels'],
 };
 
 export function makeInitialMainLayerEnabled(): Record<string, boolean> {

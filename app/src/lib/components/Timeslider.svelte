@@ -53,7 +53,6 @@
       sublayers: [
         { id: 'iiif', subId: 'HanddrawnCollection-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'HanddrawnCollection-parcels', label: 'Parcels', defaultOn: false },
-        { id: 'water', subId: 'HanddrawnCollection-water', label: 'Water infrastructure', defaultOn: false },
       ],
     },
     {
@@ -84,7 +83,6 @@
       sublayers: [
         { id: 'iiif', subId: 'PrimitiefKadaster-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'PrimitiefKadaster-parcels', label: 'Parcels', defaultOn: false },
-        { id: 'landuse', subId: 'PrimitiefKadaster-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
@@ -100,8 +98,6 @@
       start: 1847, end: 1855, repr: 1851, color: 'var(--layer-gereduceerd-color)', lane: 1,
       sublayers: [
         { id: 'iiif', subId: 'GereduceerdeKadaster-iiif', label: 'Map', defaultOn: true },
-        { id: 'parcels', subId: 'GereduceerdeKadaster-parcels', label: 'Parcels', defaultOn: false },
-        { id: 'landuse', subId: 'GereduceerdeKadaster-landusage', label: 'Land use', defaultOn: false },
       ],
     },
     {
@@ -253,7 +249,11 @@
   }
 
   function scrubberIndicatorStyle(year: number, color?: string, badgeBg?: string, badgeText?: string): string {
-    const bits = [`left:${scrubberCenterPx(year)}px`];
+    const ratio = Math.max(0, Math.min(1, (year - axisStart) / axisSpan));
+    const leftStyle = trackWidth > 0
+      ? `left:${scrubberCenterPx(year)}px`
+      : `left:calc(${ratio} * (100% - ${SCRUBBER_THUMB_SIZE}px) + ${SCRUBBER_THUMB_SIZE / 2}px)`;
+    const bits = [leftStyle];
     if (color) bits.push(`--pane-color:${color}`);
     if (badgeBg) bits.push(`--pane-badge-bg:${badgeBg}`);
     if (badgeText) bits.push(`--pane-badge-text:${badgeText}`);

@@ -200,7 +200,9 @@ export function createMapContextWithTheme(container: HTMLElement, theme: BaseMap
     style: getBaseMapStyle(theme),
     center: [4.23, 51.10], // Bornem, Scheldt valley
     zoom: 10,
-    attributionControl: false
+    attributionControl: false,
+    pitchWithRotate: false,
+    maxPitch: 0
   });
   mapThemeByInstance.set(nextMap, theme);
 
