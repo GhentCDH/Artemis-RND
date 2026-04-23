@@ -583,10 +583,11 @@
     return sourceEstimatedLabelWidthPx(src.label);
   }
 
-  function sourceBlockStyle(src: SourceDef): string {
+  let currentSourceKeys: Set<SourceKey> = new Set();
+
+  function sourceBlockStyle(src: SourceDef, isCurrent: boolean): string {
     const inclusiveEnd = Math.max(src.start, src.end + 1);
     const spanYears = Math.max(1, inclusiveEnd - src.start);
-    const isCurrent = sourceIsCurrentForKey(src.key);
     const currentTransform = isCurrent
       ? (src.lane <= 2 ? 'translateY(-3px) scale(1.04, 1.18)' : 'translateY(3px) scale(1.04, 1.18)')
       : 'none';
@@ -596,12 +597,9 @@
     const currentShadow = isCurrent
       ? '0 10px 22px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 0 0 1px var(--pill-inset-active) inset'
       : '0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 5px 12px rgba(0, 0, 0, 0.10)';
-    const currentAnimation = isCurrent
-      ? (src.lane <= 2 ? "pill-current-expand-top 900ms cubic-bezier(0.22, 1, 0.36, 1) infinite alternate" : "pill-current-expand-bottom 900ms cubic-bezier(0.22, 1, 0.36, 1) infinite alternate")
-      : 'none';
     const currentZ = isCurrent ? '2' : '1';
     if (trackWidth <= 0) {
-      return `left:${pct(src.start, axisStart, axisSpan)};--pill-width:${widthPct(src.start, inclusiveEnd, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-transform:${currentTransform};--pill-transform-origin:${currentTransformOrigin};--pill-shadow:${currentShadow};--pill-animation:${currentAnimation};--pill-z:${currentZ}`;
+      return `left:${pct(src.start, axisStart, axisSpan)};--pill-width:${widthPct(src.start, inclusiveEnd, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-transform:${currentTransform};--pill-transform-origin:${currentTransformOrigin};--pill-shadow:${currentShadow};--pill-z:${currentZ}`;
     }
 
     const halfThumb = SCRUBBER_THUMB_SIZE / 2;
@@ -611,7 +609,7 @@
     const centerYear = src.start + spanYears / 2;
     const centerPx = ((centerYear - axisStart) / axisSpan) * usableWidth + halfThumb;
     const leftPx = Math.max(0, Math.min(trackWidth - widthPx, centerPx - widthPx / 2));
-    return `left:${leftPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-transform:${currentTransform};--pill-transform-origin:${currentTransformOrigin};--pill-shadow:${currentShadow};--pill-animation:${currentAnimation};--pill-z:${currentZ}`;
+    return `left:${leftPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-transform:${currentTransform};--pill-transform-origin:${currentTransformOrigin};--pill-shadow:${currentShadow};--pill-z:${currentZ}`;
   }
 
   function sourceMenuStyle(src: SourceDef, pane: PaneId = 'left'): string {
@@ -619,15 +617,17 @@
     return `--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pane-header-tint:${paneTint}`;
   }
 
-  function sourceIsCurrentForKey(key: SourceKey): boolean {
+  // currentSourceKeys is derived reactively from the scrubber year(s) so the
+  // active pill updates continuously while scrubbing/dragging.
+  $: currentSourceKeys = (() => {
     if (!dualPaneEnabled) {
-      return activeSourceKeys.has(key) && leftEnabledLayers[key];
+      return new Set<SourceKey>(paneSourcesForYear(sliderYear).map((s) => s.key));
     }
-    return (
-      (leftEnabledLayers[key] && leftVisibleSourceKeys.has(key)) ||
-      (rightEnabledLayers[key] && rightVisibleSourceKeys.has(key))
-    );
-  }
+    const keys = new Set<SourceKey>();
+    if (disabledPane !== 'left') for (const s of paneSourcesForYear(localLeftYear)) keys.add(s.key);
+    if (disabledPane !== 'right') for (const s of paneSourcesForYear(localRightYear)) keys.add(s.key);
+    return keys;
+  })();
 
   function sourceHasOverlap(key: SourceKey): boolean {
     return activePanesBySource[key].length > 1;
@@ -898,34 +898,32 @@
       <div class={`ts-row ts-row--lane-${lane.lane}`}>
         {#each lane.sources as src}
           {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-          {@const currentToken = sourceIsCurrentForKey(src.key) ? 'current' : 'idle'}
-          {#key `${src.key}:${currentToken}`}
-            <SliderLayer
-              {src}
-              {enabled}
-              isOpen={openMenuKey === src.key}
-              isCurrent={sourceIsCurrentForKey(src.key)}
-              hasOverlap={sourceHasOverlap(src.key)}
-              loading={loadingLayers[src.mainId]}
-              {dualPaneEnabled}
-              leftEnabled={leftEnabledLayers[src.key]}
-              rightEnabled={rightEnabledLayers[src.key]}
-              sourceBlockStyle={sourceBlockStyle(src)}
-              sourceMenuStyle={sourceMenuStyle(src, 'left')}
-              layerInfoExpanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
-              onCancelCloseMenu={cancelCloseMenu}
-              onScheduleCloseMenu={scheduleCloseMenu}
-              onJumpToSource={jumpToSource}
-              onPillEnter={onPillEnter}
-              onPillLeave={onPillLeave}
-              onToggleMenu={toggleMenu}
-              onInfoButtonClick={onInfoButtonClick}
-              onToggleLayerEnabled={toggleLayerEnabled}
-              onToggleSublayer={toggleSublayer}
-              {isSublayerEnabled}
-              layerInfoKeyFor={layerInfoKey}
-            />
-          {/key}
+          {@const isCurrent = currentSourceKeys.has(src.key)}
+          <SliderLayer
+            {src}
+            {enabled}
+            isOpen={openMenuKey === src.key}
+            {isCurrent}
+            hasOverlap={sourceHasOverlap(src.key)}
+            loading={loadingLayers[src.mainId]}
+            {dualPaneEnabled}
+            leftEnabled={leftEnabledLayers[src.key]}
+            rightEnabled={rightEnabledLayers[src.key]}
+            sourceBlockStyle={sourceBlockStyle(src, isCurrent)}
+            sourceMenuStyle={sourceMenuStyle(src, 'left')}
+            layerInfoExpanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
+            onCancelCloseMenu={cancelCloseMenu}
+            onScheduleCloseMenu={scheduleCloseMenu}
+            onJumpToSource={jumpToSource}
+            onPillEnter={onPillEnter}
+            onPillLeave={onPillLeave}
+            onToggleMenu={toggleMenu}
+            onInfoButtonClick={onInfoButtonClick}
+            onToggleLayerEnabled={toggleLayerEnabled}
+            onToggleSublayer={toggleSublayer}
+            {isSublayerEnabled}
+            layerInfoKeyFor={layerInfoKey}
+          />
         {/each}
       </div>
     {/each}
@@ -984,34 +982,32 @@
       <div class={`ts-row ts-row--lane-${lane.lane}`}>
         {#each lane.sources as src}
           {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-          {@const currentToken = sourceIsCurrentForKey(src.key) ? 'current' : 'idle'}
-          {#key `${src.key}:${currentToken}`}
-            <SliderLayer
-              {src}
-              {enabled}
-              isOpen={openMenuKey === src.key}
-              isCurrent={sourceIsCurrentForKey(src.key)}
-              hasOverlap={sourceHasOverlap(src.key)}
-              loading={loadingLayers[src.mainId]}
-              {dualPaneEnabled}
-              leftEnabled={leftEnabledLayers[src.key]}
-              rightEnabled={rightEnabledLayers[src.key]}
-              sourceBlockStyle={sourceBlockStyle(src)}
-              sourceMenuStyle={sourceMenuStyle(src, 'left')}
-              layerInfoExpanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
-              onCancelCloseMenu={cancelCloseMenu}
-              onScheduleCloseMenu={scheduleCloseMenu}
-              onJumpToSource={jumpToSource}
-              onPillEnter={onPillEnter}
-              onPillLeave={onPillLeave}
-              onToggleMenu={toggleMenu}
-              onInfoButtonClick={onInfoButtonClick}
-              onToggleLayerEnabled={toggleLayerEnabled}
-              onToggleSublayer={toggleSublayer}
-              {isSublayerEnabled}
-              layerInfoKeyFor={layerInfoKey}
-            />
-          {/key}
+          {@const isCurrent = currentSourceKeys.has(src.key)}
+          <SliderLayer
+            {src}
+            {enabled}
+            isOpen={openMenuKey === src.key}
+            {isCurrent}
+            hasOverlap={sourceHasOverlap(src.key)}
+            loading={loadingLayers[src.mainId]}
+            {dualPaneEnabled}
+            leftEnabled={leftEnabledLayers[src.key]}
+            rightEnabled={rightEnabledLayers[src.key]}
+            sourceBlockStyle={sourceBlockStyle(src, isCurrent)}
+            sourceMenuStyle={sourceMenuStyle(src, 'left')}
+            layerInfoExpanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
+            onCancelCloseMenu={cancelCloseMenu}
+            onScheduleCloseMenu={scheduleCloseMenu}
+            onJumpToSource={jumpToSource}
+            onPillEnter={onPillEnter}
+            onPillLeave={onPillLeave}
+            onToggleMenu={toggleMenu}
+            onInfoButtonClick={onInfoButtonClick}
+            onToggleLayerEnabled={toggleLayerEnabled}
+            onToggleSublayer={toggleSublayer}
+            {isSublayerEnabled}
+            layerInfoKeyFor={layerInfoKey}
+          />
         {/each}
       </div>
     {/each}
@@ -1468,5 +1464,3 @@
     }
   }
 </style>
-
-

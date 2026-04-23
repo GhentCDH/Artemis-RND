@@ -581,28 +581,12 @@
     transform: var(--pill-transform, none);
     transform-origin: var(--pill-transform-origin, center center);
     z-index: var(--pill-z, auto);
-    animation: var(--pill-animation, none);
     transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
     will-change: transform;
   }
 
-  @keyframes pill-current-expand-top {
-    0% {
-      transform: translateY(-2px) scale(1.02, 1.14);
-    }
-    100% {
-      transform: translateY(-4px) scale(1.08, 1.22);
-    }
-  }
-
-  @keyframes pill-current-expand-bottom {
-    0% {
-      transform: translateY(2px) scale(1.02, 1.14);
-    }
-    100% {
-      transform: translateY(4px) scale(1.08, 1.22);
-    }
-  }
+  /* Keyframes are defined globally in `src/app.css` so the inline `animation`
+     value coming from Timeslider can reference stable names. */
 
   .source-pill-wrap.is-open {
     z-index: 80;
