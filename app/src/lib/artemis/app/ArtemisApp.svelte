@@ -23,7 +23,7 @@
     resetCompiledIndexCache, resetPaneRuntime, getLayerGroupId, refreshActiveLayerGroups,
     getAllActiveWarpedMaps, getManifestInfoForMapId,
     type LayerInfo, type CompiledIndex, type CompiledRunnerConfig,
-  } from '$lib/artemis/iiif/runner';
+  } from '$lib/artemis/iiif/layerController';
   import {
     loadRuntimeMetadata as loadRuntimeMetadataData,
     type RuntimeSiteMetadata,
@@ -117,7 +117,7 @@
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
-    parallelIiifLoading: true,
+    parallelIiifLoading: false,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
     spriteDebugMode: false,
   };
@@ -321,26 +321,39 @@
     return base / 2;
   }
 
-  function updateScaleIndicator(targetMap?: maplibregl.Map | null) {
-    const activeMap = targetMap ?? map ?? rightMap;
-    if (!activeMap) return;
-    const center = activeMap.getCenter();
-    const zoom = activeMap.getZoom();
-    const metersPerPixel = (156543.03392 * Math.cos((center.lat * Math.PI) / 180)) / (2 ** zoom);
-    const maxMeters = metersPerPixel * SCALE_MAX_WIDTH_PX;
-    const niceDistance = chooseNiceScaleDistance(maxMeters);
-    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0 || niceDistance <= 0) {
-      scaleWidthPx = 0;
-      scaleLabel = '';
-      return;
-    }
-    scaleWidthPx = Math.max(24, Math.min(SCALE_MAX_WIDTH_PX, niceDistance / metersPerPixel));
-    scaleLabel = formatScaleDistance(niceDistance);
-  }
+	  function updateScaleIndicator(targetMap?: maplibregl.Map | null) {
+	    const activeMap = targetMap ?? map ?? rightMap;
+	    if (!activeMap) return;
+	    const center = activeMap.getCenter();
+	    const zoom = activeMap.getZoom();
+	    const metersPerPixel = (156543.03392 * Math.cos((center.lat * Math.PI) / 180)) / (2 ** zoom);
+	    const maxMeters = metersPerPixel * SCALE_MAX_WIDTH_PX;
+	    const niceDistance = chooseNiceScaleDistance(maxMeters);
+	    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0 || niceDistance <= 0) {
+	      scaleWidthPx = 0;
+	      scaleLabel = '';
+	      return;
+	    }
+	    scaleWidthPx = Math.max(24, Math.min(SCALE_MAX_WIDTH_PX, niceDistance / metersPerPixel));
+	    scaleLabel = formatScaleDistance(niceDistance);
+	  }
 
-  async function rehydratePaneMap(targetMap: maplibregl.Map, paneId: PaneId | 'main') {
-    await clearAllLayerGroups(targetMap, paneId);
-    resetPaneRuntime(paneId);
+	  const lastLoggedTileZoom: Record<PaneId, number | null> = { left: null, right: null };
+	  function logViewLevel(targetMap: maplibregl.Map, pane: PaneId) {
+	    if (!import.meta.env.DEV) return;
+	    const zoom = targetMap.getZoom();
+	    const tileZoom = Math.floor(zoom);
+	    if (lastLoggedTileZoom[pane] === tileZoom) return;
+	    lastLoggedTileZoom[pane] = tileZoom;
+	    const center = targetMap.getCenter();
+	    console.log(
+	      `[Artemis] pane=${pane} zoom=${zoom.toFixed(2)} tileZ=${tileZoom} (round=${Math.round(zoom)}) center=${center.lng.toFixed(6)},${center.lat.toFixed(6)}`,
+	    );
+	  }
+
+	  async function rehydratePaneMap(targetMap: maplibregl.Map, paneId: PaneId | 'main') {
+	    await clearAllLayerGroups(targetMap, paneId);
+	    resetPaneRuntime(paneId);
 
     if (paneId === 'right') {
       rightIiifHoveredMaps = [];
@@ -1372,20 +1385,22 @@
       setRightMapReady: (value) => {
         rightMapReady = value;
       },
-      onLoad: async (targetMap) => {
-        updateScaleIndicator(targetMap);
-        attachRightMassartHandlers(targetMap);
-        attachRightIiifHandlers(targetMap);
-        await syncRightPaneState();
-      },
-      onMove: (targetMap) => {
-        if (imageCollectionBubbleItem) closeImageCollectionBubble();
-        refreshActiveLayerGroups('right');
-        syncCamera('right');
-        updateScaleIndicator(targetMap);
-      },
-    });
-  }
+	      onLoad: async (targetMap) => {
+	        updateScaleIndicator(targetMap);
+	        logViewLevel(targetMap, 'right');
+	        attachRightMassartHandlers(targetMap);
+	        attachRightIiifHandlers(targetMap);
+	        await syncRightPaneState();
+	      },
+	      onMove: (targetMap) => {
+	        if (imageCollectionBubbleItem) closeImageCollectionBubble();
+	        refreshActiveLayerGroups('right');
+	        syncCamera('right');
+	        updateScaleIndicator(targetMap);
+	        logViewLevel(targetMap, 'right');
+	      },
+	    });
+	  }
 
   function teardownRightMap() {
     teardownRightPaneMap({
@@ -1435,12 +1450,13 @@
       applyThemeMode('light');
     }
 
-    map = ensureMapContext(mapDiv, themeMode);
-    map.on('load', () => {
-      updateScaleIndicator(map);
-      // Re-apply WMTS/WMS visibility that may have been set before the style finished loading.
-      // setHistCartLayerVisible / setLandUsageLayerVisible call map.addSource + map.addLayer,
-      // which throw if the style isn't ready. The Timeslider onMount fires before load, so any
+	    map = ensureMapContext(mapDiv, themeMode);
+	    map.on('load', () => {
+	      updateScaleIndicator(map);
+	      logViewLevel(map, 'left');
+	      // Re-apply WMTS/WMS visibility that may have been set before the style finished loading.
+	      // setHistCartLayerVisible / setLandUsageLayerVisible call map.addSource + map.addLayer,
+	      // which throw if the style isn't ready. The Timeslider onMount fires before load, so any
       // sublayer toggle that arrived early is silently lost. Re-applying here closes that gap.
       for (const mainId of mainLayerOrder) {
         for (const subId of MAIN_LAYER_SUBS[mainId] ?? []) {
@@ -1565,12 +1581,13 @@
       openPreviewBubbleAt(item, centerLon, centerLat, 'left');
     };
 
-    const onMapMove = () => {
-      if (imageCollectionBubbleItem) closeImageCollectionBubble();
-      refreshActiveLayerGroups('main');
-      syncCamera('left');
-      updateScaleIndicator(map);
-    };
+	    const onMapMove = () => {
+	      if (imageCollectionBubbleItem) closeImageCollectionBubble();
+	      refreshActiveLayerGroups('main');
+	      syncCamera('left');
+	      updateScaleIndicator(map);
+	      logViewLevel(map, 'left');
+	    };
 
     map.on('mousemove', onMouseMove);
     map.on('mouseout',  onMouseOut);

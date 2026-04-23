@@ -1,0 +1,18 @@
+@keyframes pill-current-expand-top {
+  0% {
+    transform: translateY(-2px) scale(1.02, 1.14);
+  }
+  100% {
+    transform: translateY(-4px) scale(1.08, 1.22);
+  }
+}
+
+@keyframes pill-current-expand-bottom {
+  0% {
+    transform: translateY(2px) scale(1.02, 1.14);
+  }
+  100% {
+    transform: translateY(4px) scale(1.08, 1.22);
+  }
+}
+

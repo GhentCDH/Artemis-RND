@@ -1,4 +1,4 @@
-import type { CompiledIndex } from '$lib/artemis/iiif/runner';
+import type { CompiledIndex } from '$lib/artemis/iiif/layerController';
 import type { RawToponymIndexItem, ToponymIndexItem } from '$lib/artemis/shared/types';
 
 type ToponymIndexPayload = {

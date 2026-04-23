@@ -1,5 +1,5 @@
 import type maplibregl from 'maplibre-gl';
-import { runLayerGroup, type LayerInfo } from '$lib/artemis/iiif/runner';
+import { runLayerGroup, type LayerInfo } from '$lib/artemis/iiif/layerController';
 
 type LayerInfoWithUiId = LayerInfo & { uiLayerId: string };
 type ViewMode = 'single' | 'split';

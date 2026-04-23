@@ -1,5 +1,5 @@
 import type { ManifestSearchItem } from '$lib/artemis/shared/types';
-import type { CompiledIndex } from '$lib/artemis/iiif/runner';
+import type { CompiledIndex } from '$lib/artemis/iiif/layerController';
 
 type VisibleLayer = {
   sourceCollectionUrl: string;
