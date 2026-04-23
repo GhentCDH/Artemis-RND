@@ -117,7 +117,7 @@
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
-    parallelIiifLoading: true,
+    parallelIiifLoading: false,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
     spriteDebugMode: false,
   };

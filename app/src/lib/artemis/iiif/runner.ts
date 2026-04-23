@@ -1400,9 +1400,9 @@ export async function runLayerGroup(opts: {
     }
   }
 
-  if (parallelLoading || hasSprites) {
+  if (parallelLoading) {
     // Parallel mode: Load all maps at once
-    step("load-mode", parallelLoading ? "parallel" : "sprites-unified");
+    step("load-mode", "parallel");
     const allProcessed = await applyFetchedBatch(fetchedAll, 0, "parallel");
     results.push(...allProcessed);
   } else {
