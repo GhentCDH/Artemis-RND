@@ -567,7 +567,10 @@
     padding: 0 34px 0 10px;
     margin: 0;
     pointer-events: auto;
-    transition: opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
+    transform: var(--pill-block-transform, none);
+    transform-origin: var(--pill-block-transform-origin, center center);
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, filter 200ms ease, box-shadow 200ms ease;
+    will-change: transform;
     box-shadow: var(--pill-shadow, 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 5px 12px rgba(0, 0, 0, 0.10));
   }
 
@@ -578,11 +581,8 @@
     width: var(--pill-width);
     min-width: var(--pill-min-width);
     pointer-events: auto;
-    transform: var(--pill-transform, none);
-    transform-origin: var(--pill-transform-origin, center center);
+    transform: var(--pill-wrapper-transform, translateX(-50%));
     z-index: var(--pill-z, auto);
-    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-    will-change: transform;
   }
 
   /* Keyframes are defined globally in `src/app.css` so the inline `animation`

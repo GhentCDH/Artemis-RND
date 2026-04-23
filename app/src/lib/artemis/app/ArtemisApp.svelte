@@ -23,7 +23,7 @@
     resetCompiledIndexCache, resetPaneRuntime, getLayerGroupId, refreshActiveLayerGroups,
     getAllActiveWarpedMaps, getManifestInfoForMapId,
     type LayerInfo, type CompiledIndex, type CompiledRunnerConfig,
-  } from '$lib/artemis/iiif/runner';
+  } from '$lib/artemis/iiif/layerController';
   import {
     loadRuntimeMetadata as loadRuntimeMetadataData,
     type RuntimeSiteMetadata,
