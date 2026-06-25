@@ -60,6 +60,7 @@
   import { normalizeSearchText } from '$lib/artemis/search/text';
   import { normalizeRawToponym } from '$lib/artemis/dataset/toponymNormalization';
   import { asFiniteNumber } from '$lib/artemis/shared/utils';
+  import { resolveIiifGeomapsPath } from '$lib/artemis/config/iiifGeomaps';
   import {
     MAIN_LAYER_ORDER, MAIN_LAYER_META, MAIN_LAYER_LABELS, MAIN_LAYER_INFO,
     MAIN_LAYER_SUBS, SUB_LAYER_DEFS,
@@ -112,7 +113,7 @@
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
-  const DEFAULT_BASE_URL = 'https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build';
+  const DEFAULT_BASE_URL = 'https://ghentcdh.github.io/Artemis-RnD-Data/build';
   const FEATURE_FLAGS: { startupPreloadScreen: boolean; parallelIiifLoading: boolean; spriteDebugMode: boolean } = {
     // Flip to false to bypass the startup preload/loading-screen concept.
     startupPreloadScreen: false,
@@ -152,22 +153,19 @@
     return `${base}/static`.replace(/\/+$/, '');
   }
 
-  function getLayerMetadataCandidates(mainId: string): string[] {
-    const subIds = MAIN_LAYER_SUBS[mainId] ?? [];
-    const iiifSubId = subIds.find((subId) => SUB_LAYER_DEFS[subId]?.kind === 'iiif');
-    const iiifLayer = iiifSubId ? getIiifInfoForSub(iiifSubId) : undefined;
-    const explicitLayerId = typeof (iiifLayer as any)?.layerId === 'string'
-      ? String((iiifLayer as any).layerId).trim()
-      : '';
-    const compiledTail = iiifLayer?.compiledCollectionPath?.split('/').filter(Boolean).pop() ?? '';
-    const iiifMap = typeof (iiifLayer as any)?.map === 'string' ? String((iiifLayer as any).map).trim() : '';
-    const geomapsStem = (iiifLayer as any)?.geomapsPath
-      ?.split('/')
-      .filter(Boolean)
-      .pop()
-      ?.replace(/_geomaps\.json$/i, '') ?? '';
-    return [...new Set([explicitLayerId, compiledTail, iiifMap, geomapsStem, mainId].filter(Boolean))];
-  }
+	  function getLayerMetadataCandidates(mainId: string): string[] {
+	    const subIds = MAIN_LAYER_SUBS[mainId] ?? [];
+	    const iiifSubId = subIds.find((subId) => SUB_LAYER_DEFS[subId]?.kind === 'iiif');
+	    const iiifLayer = iiifSubId ? getIiifInfoForSub(iiifSubId) : undefined;
+	    const compiledTail = iiifLayer?.compiledCollectionPath?.split('/').filter(Boolean).pop() ?? '';
+	    const iiifMap = typeof (iiifLayer as any)?.map === 'string' ? String((iiifLayer as any).map).trim() : '';
+	    const geomapsStem = (iiifLayer as any)?.geomapsPath
+	      ?.split('/')
+	      .filter(Boolean)
+	      .pop()
+	      ?.replace(/_geomaps\.json$/i, '') ?? '';
+	    return [...new Set([compiledTail, iiifMap, geomapsStem, mainId].filter(Boolean))];
+	  }
 
   async function loadRuntimeMetadata() {
     const runtimeMetadata = await loadRuntimeMetadataData({
@@ -636,69 +634,40 @@
     syncImageCollectionBubblePosition();
   }
 
-  function iiifBubbleItem(info: IiifMapInfo): PreviewBubbleItem {
-    return {
-      title: info.title,
-      manifestUrl: info.sourceManifestUrl,
-      imageServiceUrl: info.imageServiceUrl,
-      location: info.layerLabel,
-      kicker: 'Map Sheet',
-      spriteRef: info.spriteRef,
-      placeholderWidth: info.placeholderWidth,
-      placeholderHeight: info.placeholderHeight,
-    };
-  }
-
-  function iiifBubbleItems(infos: IiifMapInfo[]): PreviewBubbleItem[] {
-    return infos.map((info) => iiifBubbleItem(info));
-  }
-
-  function iiifBubbleGroup(infos: IiifMapInfo[]): PreviewBubbleItem | null {
-    const items = iiifBubbleItems(infos);
-    if (items.length === 0) return null;
-    if (items.length === 1) return items[0];
-    return { ...items[0], alternatives: items };
-  }
-
   function normalizeSourceLayers(index: CompiledIndex): UILayerInfo[] {
     const baseLayers = index.renderLayers ?? [];
     const nextIiifLayers = Array.isArray((index as any).iiifLayers) ? (index as any).iiifLayers : [];
 
-    if (baseLayers.length === 0 && nextIiifLayers.length > 0) {
-      const normalized = nextIiifLayers.map((layer: any) => {
-        const sourceCollectionLabel = cleanLayerLabel(
-          String(layer.map ?? layer.label ?? layer.sourceCollectionLabel ?? layer.layerId ?? '')
-        );
-        const normalizedLayer: UILayerInfo = {
-          sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
-          sourceCollectionLabel,
-          compiledCollectionPath: layer.compiledCollectionPath,
-          map: layer.map,
-          layerId: layer.layerId,
-          geomapsPath: (layer as any).geomapsPath,
-          spritesPath: layer.spritesPath,
-          manifestCount: Number(layer.manifestCount ?? 0),
-          georefCount: Number(layer.georefCount ?? 0),
-          renderLayerKey: String(layer.renderLayerKey ?? 'default'),
-          renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
-          hidden: Boolean(layer.hidden),
-          uiLayerId: getLayerGroupId({
-            sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
-            sourceCollectionLabel,
-            compiledCollectionPath: layer.compiledCollectionPath,
-            map: layer.map,
-            layerId: layer.layerId,
-            geomapsPath: (layer as any).geomapsPath,
-            spritesPath: layer.spritesPath,
-            manifestCount: Number(layer.manifestCount ?? 0),
-            georefCount: Number(layer.georefCount ?? 0),
-            renderLayerKey: String(layer.renderLayerKey ?? 'default'),
-            renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
-            hidden: Boolean(layer.hidden),
-          }),
-        };
-        return normalizedLayer;
-      });
+	    if (baseLayers.length === 0 && nextIiifLayers.length > 0) {
+	      const normalized = nextIiifLayers.map((layer: any) => {
+	        const sourceCollectionLabel = cleanLayerLabel(
+	          String(layer.map ?? layer.label ?? layer.sourceCollectionLabel ?? '')
+	        );
+          const layerMapId = String(layer.map ?? deriveIiifMapId(sourceCollectionLabel) ?? '').trim() || undefined;
+	        const normalizedLayer: UILayerInfo = {
+	          sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
+	          sourceCollectionLabel,
+	          compiledCollectionPath: layer.compiledCollectionPath,
+	          map: layerMapId ?? layer.map,
+	          geomapsPath: resolveIiifGeomapsPath(layerMapId, (layer as any).geomapsPath),
+	          spritesPath: layer.spritesPath,
+	          renderLayerKey: String(layer.renderLayerKey ?? 'default'),
+	          renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
+	          hidden: Boolean(layer.hidden),
+	          uiLayerId: getLayerGroupId({
+	            sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
+	            sourceCollectionLabel,
+	            compiledCollectionPath: layer.compiledCollectionPath,
+	            map: layerMapId ?? layer.map,
+	            geomapsPath: resolveIiifGeomapsPath(layerMapId, (layer as any).geomapsPath),
+	            spritesPath: layer.spritesPath,
+	            renderLayerKey: String(layer.renderLayerKey ?? 'default'),
+	            renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
+	            hidden: Boolean(layer.hidden),
+	          }),
+	        };
+	        return normalizedLayer;
+	      });
 
       return normalized;
     }
@@ -713,7 +682,9 @@
         ...layer,
         sourceCollectionLabel,
         map: map ?? (layer as any).map,
-        geomapsPath: map ? `IIIF/${map}_geomaps.json` : (layer as any).geomapsPath,
+        geomapsPath: map
+          ? resolveIiifGeomapsPath(map, undefined)
+          : resolveIiifGeomapsPath((layer as any).map, (layer as any).geomapsPath),
         spritesPath: map ? `IIIF/${map}/sprites/` : (layer as any).spritesPath,
         compiledCollectionPath: map ? undefined : layer.compiledCollectionPath,
         renderLayerLabel: layer.renderLayerLabel ? cleanLayerLabel(layer.renderLayerLabel) : layer.renderLayerLabel,
@@ -764,15 +735,14 @@
   // ─── Layer toggle operations ───────────────────────────────────────────────
 
   async function loadIiifLayer(layerInfo: UILayerInfo) {
-    await loadIiifLayerIntoPane({
-      targetMap: map,
-      cfg: cfg(),
-      layerInfo,
-      log,
-      parallelLoading: FEATURE_FLAGS.parallelIiifLoading,
-      spriteDebugMode: FEATURE_FLAGS.spriteDebugMode,
-    });
-  }
+	    await loadIiifLayerIntoPane({
+	      targetMap: map,
+	      cfg: cfg(),
+	      layerInfo,
+	      parallelLoading: FEATURE_FLAGS.parallelIiifLoading,
+	      spriteDebugMode: FEATURE_FLAGS.spriteDebugMode,
+	    });
+	  }
 
   function getIiifMainLayerIds(): string[] {
     return getIiifMainLayerIdsData({
@@ -783,10 +753,10 @@
   }
 
   async function warmInitialIiifLayers() {
-    await warmInitialIiifLayersData({
-      startupPreloadScreen: FEATURE_FLAGS.startupPreloadScreen,
-      initialWarmupPending,
-      initialWarmupRunning,
+	    await warmInitialIiifLayersData({
+	      startupPreloadScreen: FEATURE_FLAGS.startupPreloadScreen,
+	      initialWarmupPending,
+	      initialWarmupRunning,
       mainLayerOrder,
       mainLayerLabels: MAIN_LAYER_LABELS,
       mainLayerSubs: MAIN_LAYER_SUBS,
@@ -803,12 +773,11 @@
         mainLayerLoading = { ...mainLayerLoading, [mainId]: value };
       },
       loadIiifLayer,
-      parkLayerGroup: async (groupId) => {
-        await parkLayerGroup(map, groupId);
-      },
-      log,
-    });
-  }
+	      parkLayerGroup: async (groupId) => {
+	        await parkLayerGroup(map, groupId);
+	      },
+	    });
+	  }
 
   function shouldShowIiifGroup(mainId: string, iiifSubId: string): boolean {
     return Boolean(mainLayerEnabled[mainId] && subLayerEnabled[iiifSubId]);
@@ -869,16 +838,15 @@
 
   async function loadIiifLayerForRight(layerInfo: UILayerInfo) {
     if (!rightMap) return;
-    await loadIiifLayerIntoPane({
-      targetMap: rightMap,
-      paneId: 'right',
-      cfg: cfg(),
-      layerInfo,
-      log,
-      parallelLoading: FEATURE_FLAGS.parallelIiifLoading,
-      spriteDebugMode: FEATURE_FLAGS.spriteDebugMode,
-    });
-  }
+	    await loadIiifLayerIntoPane({
+	      targetMap: rightMap,
+	      paneId: 'right',
+	      cfg: cfg(),
+	      layerInfo,
+	      parallelLoading: FEATURE_FLAGS.parallelIiifLoading,
+	      spriteDebugMode: FEATURE_FLAGS.spriteDebugMode,
+	    });
+	  }
 
   function shouldShowRightIiifGroup(mainId: string, iiifSubId: string): boolean {
     return Boolean(rightMainLayerVisible[mainId] && rightSubLayerVisible[iiifSubId]);
@@ -1201,6 +1169,17 @@
     return items;
   }
 
+  function openFirstIiifHitInViewer(
+    hits: Array<{ mapId: string; warpedMap: any; groupId: string }>,
+    sourcePane: PaneId,
+    paneId: PaneId | 'main' = 'main'
+  ) {
+    const [item] = buildIiifInfoPanelItems(hits, paneId);
+    if (!item) return;
+    openViewer(item, sourcePane, 'right');
+    closeImageCollectionBubble();
+  }
+
   // ─── Reactive derivations ──────────────────────────────────────────────────
 
   $: panelOpen = parcelClickInfo !== null || pinnedCards.length > 0;
@@ -1328,14 +1307,7 @@
     };
 
     const onClick = () => {
-      const items = buildIiifInfoPanelItems(rightIiifHoveredMaps, 'right');
-      const anchor = items[0];
-      const item = iiifBubbleGroup(items);
-      if (!item || !anchor) return;
-      const centerLon = anchor.centerLon;
-      const centerLat = anchor.centerLat;
-      if (centerLon == null || centerLat == null) return;
-      openPreviewBubbleAt(item, centerLon, centerLat, 'right');
+      openFirstIiifHitInViewer(rightIiifHoveredMaps, 'right', 'right');
     };
 
     targetMap.on('mousemove', onMouseMove);
@@ -1571,14 +1543,7 @@
       }
 
       // IIIF click
-      const items = buildIiifInfoPanelItems(iiifHoveredMaps);
-      const anchor = items[0];
-      const item = iiifBubbleGroup(items);
-      if (!item || !anchor) return;
-      const centerLon = anchor.centerLon;
-      const centerLat = anchor.centerLat;
-      if (centerLon == null || centerLat == null) return;
-      openPreviewBubbleAt(item, centerLon, centerLat, 'left');
+      openFirstIiifHitInViewer(iiifHoveredMaps, 'left');
     };
 
 	    const onMapMove = () => {

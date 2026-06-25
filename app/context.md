@@ -4,7 +4,7 @@
 
 - Route entrypoint: `src/routes/+page.svelte`
 - Main shell: `src/lib/artemis/app/ArtemisApp.svelte`
-- Default dataset base URL: `https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build`
+- Default dataset base URL: `https://ghentcdh.github.io/Artemis-RnD-Data/build`
 - Verification baseline: `pnpm check` passes with `0 errors, 0 warnings`
 
 ## Current Structure

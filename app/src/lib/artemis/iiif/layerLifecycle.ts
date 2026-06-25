@@ -2,24 +2,21 @@ import type maplibregl from 'maplibre-gl';
 import { runLayerGroup, type LayerInfo } from '$lib/artemis/iiif/layerController';
 
 type LayerInfoWithUiId = LayerInfo & { uiLayerId: string };
-type ViewMode = 'single' | 'split';
 
 export async function loadIiifLayerIntoPane(opts: {
   targetMap: maplibregl.Map;
   paneId?: 'right';
   cfg: any;
   layerInfo: LayerInfoWithUiId;
-  log: (level: 'INFO' | 'WARN' | 'ERROR', msg: string) => void;
   parallelLoading: boolean;
   spriteDebugMode: boolean;
 }) {
-  const { targetMap, paneId, cfg, layerInfo, log, parallelLoading, spriteDebugMode } = opts;
+  const { targetMap, paneId, cfg, layerInfo, parallelLoading, spriteDebugMode } = opts;
   await runLayerGroup({
     map: targetMap,
     paneId,
     cfg,
     layerInfo,
-    log,
     parallelLoading,
     spriteDebugMode,
   });
@@ -55,7 +52,6 @@ export async function warmInitialIiifLayers(opts: {
   setMainLayerLoading: (mainId: string, value: boolean) => void;
   loadIiifLayer: (layerInfo: LayerInfoWithUiId) => Promise<void>;
   parkLayerGroup: (groupId: string) => Promise<void>;
-  log: (level: 'INFO' | 'WARN' | 'ERROR', msg: string) => void;
 }) {
   const {
     startupPreloadScreen,
@@ -70,7 +66,6 @@ export async function warmInitialIiifLayers(opts: {
     setMainLayerLoading,
     loadIiifLayer,
     parkLayerGroup,
-    log,
   } = opts;
 
   if (!startupPreloadScreen || !initialWarmupPending || initialWarmupRunning) return;
@@ -97,7 +92,7 @@ export async function warmInitialIiifLayers(opts: {
         await loadIiifLayer(info);
         await parkLayerGroup(info.uiLayerId);
       } catch (e: any) {
-        log('ERROR', `[Warmup] ${mainId} failed: ${e?.message ?? String(e)}`);
+        void e;
       } finally {
         setMainLayerLoading(mainId, false);
         done += 1;

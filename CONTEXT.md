@@ -5,7 +5,7 @@
 - Repo purpose: SvelteKit viewer for historical Belgian maps and images.
 - Main route entrypoint: `app/src/routes/+page.svelte`
 - Main app shell: `app/src/lib/artemis/app/ArtemisApp.svelte`
-- Default dataset: `https://raw.githubusercontent.com/ghentcdh/Artemis-RnD-Data/dev/build`
+- Default dataset: `https://ghentcdh.github.io/Artemis-RnD-Data/build`
 - Last verified command: `pnpm check`
 - Current verification status: `0 errors, 0 warnings`
 

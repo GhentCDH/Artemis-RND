@@ -1,6 +1,6 @@
 import type maplibregl from "maplibre-gl";
-import { initializeLayerGroup, type LayerRenderStats, type SubLayerRenderStats } from "./initialization";
-import { resetBundleLoaderCache, loadCompiledIndex, getIiifCacheStats, type CompiledIndex, type CompiledIndexEntry, type CompiledRunnerConfig, type IiifLog, type LayerInfo } from "./bundleLoader";
+import { initializeLayerGroup } from "./initialization";
+import { resetBundleLoaderCache, loadCompiledIndex, type CompiledIndex, type CompiledRunnerConfig, type LayerInfo } from "./bundleLoader";
 import {
   clearAllLayerGroups,
   getAllActiveWarpedMaps,
@@ -16,29 +16,21 @@ import {
   resetAllIiifRuntime,
   resetPaneRuntime,
   setLayerGroupOpacity,
-  spriteIndex,
   type ManifestInfo,
   type PaneRuntimeId,
-  type SpriteFeature,
 } from "./runtime";
 
 export type {
   CompiledIndex,
-  CompiledIndexEntry,
   CompiledRunnerConfig,
-  IiifLog,
   LayerInfo,
   ManifestInfo,
   PaneRuntimeId,
-  SpriteFeature,
-  LayerRenderStats,
-  SubLayerRenderStats,
 };
 
 export {
   clearAllLayerGroups,
   getAllActiveWarpedMaps,
-  getIiifCacheStats,
   getLayerGroupId,
   getLayerGroupLayerIds,
   getManifestInfoForMapId,
@@ -51,7 +43,6 @@ export {
   reorderLayerGroups,
   resetPaneRuntime,
   setLayerGroupOpacity,
-  spriteIndex,
 };
 
 export function resetCompiledIndexCache() {
@@ -68,10 +59,6 @@ export async function runLayerGroup(opts: {
   spriteOnly?: boolean;
   parallelLoading?: boolean;
   spriteDebugMode?: boolean;
-  log?: IiifLog;
-  debug?: boolean;
-  onProgress?: (done: number, total: number, latest: any) => void;
-  onRenderStats?: (stats: LayerRenderStats) => void;
 }) {
   return initializeLayerGroup(opts);
 }

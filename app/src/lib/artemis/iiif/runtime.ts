@@ -23,23 +23,12 @@ type PaneRuntime = {
   parkedLayersByGroup: Map<string, { layerIds: string[]; warpedLayers: WarpedMapLayer[] }>;
 };
 
-export type SpriteFeature = {
-  id: string;
-  label: string;
-  spriteUrl: string;
-  bbox: [number, number, number, number];
-  layerId: string;
-  layerLabel: string;
-};
-
 const activeLayersByGroup = new Map<string, string[]>();
 const activeWarpedLayersByGroup = new Map<string, WarpedMapLayer[]>();
 const mapIdToManifestInfo = new Map<string, ManifestInfo>();
 const activeLayerCleanup = new Map<string, () => void>();
 const parkedLayersByGroup = new Map<string, { layerIds: string[]; warpedLayers: WarpedMapLayer[] }>();
 const paneRuntimes = new Map<PaneRuntimeId, PaneRuntime>();
-
-export const spriteIndex = new Map<string, SpriteFeature>();
 
 export function getLayerGroupId(layerInfo: LayerInfo): string {
   const base =

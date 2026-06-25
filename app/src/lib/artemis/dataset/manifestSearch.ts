@@ -45,7 +45,7 @@ export function buildManifestSearchIndex({
       (entry as any).sourceCollectionLabel ||
       'IIIF';
     const text = `${mapName} - ${label}`;
-    const id = String(entry.manifestAllmapsId ?? '').trim() || compiledManifestPath || sourceManifestUrl;
+    const id = compiledManifestPath || sourceManifestUrl;
     if (seen.has(id)) continue;
     seen.add(id);
 
