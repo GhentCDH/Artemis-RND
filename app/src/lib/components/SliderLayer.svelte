@@ -69,7 +69,7 @@
   $: waveFloor = trackWaveFloor(src.lane);
   $: subtleWave = Math.max(2, Math.min(4, (meanderWidth - 24) / 100));
   $: meanderSeed = hashString(`${src.key}:${src.start}:${src.end}:${bulgeDirection}`);
-  $: apexWave = seededRange(meanderSeed, 1, 8, 15);
+  $: apexWave = seededRange(meanderSeed, 1, 20, 32);
   $: apexY = bulgeDirection === 'above' ? axisY - apexWave : axisY + apexWave;
   $: leftWobbleOffset = seededRange(meanderSeed, 2, 0, subtleWave);
   $: rightWobbleOffset = seededRange(meanderSeed, 3, 0, subtleWave);
