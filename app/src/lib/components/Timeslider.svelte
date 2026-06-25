@@ -224,26 +224,11 @@
   }
 
   function axisTickStyle(year: number): string {
-    return `left:${pct(year, axisStart, axisSpan)};--tick-top:${5 + axisOffsetForYear(year)}px`;
+    return `left:${pct(year, axisStart, axisSpan)};--tick-top:5px`;
   }
 
   function axisCurvePath(): string {
-    const centerY = 14;
-    const points = Array.from({ length: 17 }, (_, index) => {
-      const ratio = index / 16;
-      return { x: ratio * 100, y: centerY + axisOffsetForRatio(ratio) };
-    });
-    const commands = [`M ${points[0].x} ${points[0].y}`];
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const p0 = points[Math.max(0, i - 1)];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[Math.min(points.length - 1, i + 2)];
-      commands.push(
-        `C ${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6}, ${p2.x} ${p2.y}`
-      );
-    }
-    return commands.join(' ');
+    return 'M 0 14 L 100 14';
   }
 
   $: axisPath = axisCurvePath();
