@@ -113,7 +113,6 @@ const primitiveDebugDetachByMap = new WeakMap<maplibregl.Map, () => void>();
 const BASE_BACKGROUND_LAYER_ID = "artemis-base-background";
 const BASE_WATER_SOURCE_ID = "artemis-base-water-source";
 const BASE_WATER_FILL_LAYER_ID = "artemis-base-water-fill";
-const BASE_WATER_LINE_LAYER_ID = "artemis-base-water-line";
 
 function isMapStyleUsable(targetMap: maplibregl.Map | null | undefined): targetMap is maplibregl.Map {
   if (!targetMap) return false;
@@ -168,7 +167,6 @@ function getBaseMapStyle(theme: BaseMapTheme, baselayerData: GeoJSON.FeatureColl
   const isDark = theme === "dark";
   const backgroundColor = getCssColor("--map-background", isDark ? "#15120d" : "#f6f2ea");
   const waterFillColor = getCssColor("--map-water-fill", isDark ? "#29434b" : "#c5d9dc");
-  const waterOutlineColor = getCssColor("--map-water-outline", isDark ? "#5f8790" : "#93aeb4");
 
   return {
     version: 8,
@@ -193,20 +191,6 @@ function getBaseMapStyle(theme: BaseMapTheme, baselayerData: GeoJSON.FeatureColl
         paint: {
           "fill-color": waterFillColor,
           "fill-opacity": 1
-        }
-      },
-      {
-        id: BASE_WATER_LINE_LAYER_ID,
-        type: "line",
-        source: BASE_WATER_SOURCE_ID,
-        paint: {
-          "line-color": waterOutlineColor,
-          "line-width": [
-            "interpolate", ["linear"], ["zoom"],
-            7, 0.35,
-            10, 0.6,
-            14, 1.1
-          ]
         }
       }
     ]
