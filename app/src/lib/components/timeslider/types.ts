@@ -23,3 +23,12 @@ export type SliderSource = {
   lane: number;
   sublayers: SliderSublayer[];
 };
+
+export type CollectionInfo = {
+  key: string;
+  mainId: string;
+  name: string;
+  color: string;
+  dateRange: string;
+  sublayers: Array<{ id: string; subId: string; label: string; url?: string }>;
+};

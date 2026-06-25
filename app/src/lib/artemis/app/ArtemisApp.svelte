@@ -78,6 +78,9 @@
   import ImageCollectionBubble from '$lib/artemis/ui/ImageCollectionBubble.svelte';
   import IiifViewer from '$lib/artemis/viewer/IiifViewer.svelte';
   import Timeslider from '$lib/components/Timeslider.svelte';
+  import MapInfoWindow from '$lib/components/MapInfoWindow.svelte';
+  import BrandingPanel from '$lib/components/BrandingPanel.svelte';
+  import type { CollectionInfo } from '$lib/components/timeslider/types';
 
   // ─── Map ───────────────────────────────────────────────────────────────────
 
@@ -97,7 +100,6 @@
   const THEME_STORAGE_KEY = 'artemis-theme-mode';
   let scaleWidthPx = 0;
   let scaleLabel = '';
-  let siteInfoOpen = false;
   let siteMetadata: RuntimeSiteMetadata = {
     title: 'About Artemis',
     info: [],
@@ -110,6 +112,8 @@
   let searchFocusMainId: MainLayerId | null = null;
   let searchFocusYear: number | null = null;
   let searchFocusNonce = 0;
+  let activeCollection: CollectionInfo | null = null;
+  let mapInfoWindowOpen = false;
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -1243,6 +1247,18 @@
     });
   }
 
+  // ─── MapInfoWindow wiring ──────────────────────────────────────────────────
+
+  $: mapInfoWindowOpen = activeCollection !== null;
+
+  function onMapInfoWindowClose() {
+    activeCollection = null;
+  }
+
+  async function onMapInfoWindowSublayerToggle(e: CustomEvent<{ sublayerId: string; enabled: boolean }>) {
+    await toggleSubLayer(e.detail.sublayerId, e.detail.enabled);
+  }
+
   function syncCamera(from: PaneId) {
     syncCameraBetweenPanes({
       from,
@@ -1582,7 +1598,6 @@
   }
 </script>
 
-<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && siteInfoOpen) { siteInfoOpen = false; } }} />
 <div class="wrap">
   <main class="map-shell">
     <div
@@ -1685,17 +1700,6 @@
             aria-pressed={isSplitLayout}
             on:click={toggleSplitMode}
           >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
-          <button
-            class="compare-toggle site-info-toggle"
-            type="button"
-            aria-label="Open site information"
-            title="Open site information"
-            aria-haspopup="dialog"
-            aria-expanded={siteInfoOpen}
-            on:click={() => (siteInfoOpen = !siteInfoOpen)}
-          >
-            About
-          </button>
         </div>
         {#if scaleLabel}
           <div class="map-scale" aria-label={`Map scale indicator: ${scaleLabel} in the real world`}>
@@ -1716,6 +1720,7 @@
         {searchFocusNonce}
         yearLeeway={MASSART_LEEWAY}
         loadingLayers={combinedMainLayerLoading}
+        bind:activeCollection
         on:mainToggle={onTimesliderMainToggle}
         on:sublayerChange={onTimesliderSublayerChange}
         on:paneMainToggle={onTimesliderPaneMainToggle}
@@ -1726,94 +1731,18 @@
       />
     </div>
 
-    {#if siteInfoOpen}
-      <div
-        class="site-info-backdrop"
-        role="button"
-        tabindex="0"
-        aria-label="Close site information"
-        on:click={(event) => {
-          if (event.target === event.currentTarget) siteInfoOpen = false;
-        }}
-        on:keydown={(event) => {
-          if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            siteInfoOpen = false;
-          }
-        }}
-      >
-        <div
-          class="site-info-modal ui-panel-overlay"
-          role="dialog"
-          tabindex="-1"
-          aria-modal="true"
-          aria-label={siteMetadata.title}
-        >
-          <div class="site-info-head">
-            <div>
-              <div class="ui-label">Site Info</div>
-              <h2>{siteMetadata.title}</h2>
-            </div>
-            <button class="ui-btn site-info-close" type="button" on:click={() => (siteInfoOpen = false)}>Close</button>
-          </div>
-          <div class="site-info-body">
-            {#each siteMetadata.info as paragraph}
-              <p>{paragraph}</p>
-            {/each}
-            {#if siteMetadata.team.length > 0}
-              <div class="site-info-section">
-                <div class="ui-label">Team</div>
-                <div class="site-info-team">
-                  {#each siteMetadata.team as institution}
-                    <div class="site-info-team-institution-group">
-                      <div class="site-info-team-institution">{institution.institution}</div>
-                      <div class="site-info-team-units">
-                        {#each institution.units as unit}
-                          <div class="site-info-team-unit-group">
-                            {#if unit.unit}
-                              <div class="site-info-team-unit">{unit.unit}</div>
-                            {/if}
-                            {#if unit.members.length > 0}
-                              <ul class="site-info-team-members">
-                                {#each unit.members as member}
-                                  <li>{member}</li>
-                                {/each}
-                              </ul>
-                            {/if}
-                          </div>
-                        {/each}
-                      </div>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-            {#if siteMetadata.logos.length > 0}
-              <div class="site-info-section">
-                <div class="ui-label">Partners</div>
-                <div class="site-info-logos">
-                  {#each siteMetadata.logos as logo}
-                    {#if logo.href}
-                      <a href={logo.href} target="_blank" rel="noreferrer" title={logo.label}>
-                        <img src={logo.src} alt={logo.alt} loading="lazy" />
-                      </a>
-                    {:else}
-                      <img src={logo.src} alt={logo.alt} title={logo.label} loading="lazy" />
-                    {/if}
-                  {/each}
-                </div>
-              </div>
-            {/if}
-            {#if siteMetadata.attribution}
-              <div class="site-info-section">
-                <div class="ui-label">Attribution</div>
-                <p>{siteMetadata.attribution}</p>
-              </div>
-            {/if}
-          </div>
-        </div>
-      </div>
-    {/if}
+    <MapInfoWindow
+      isOpen={mapInfoWindowOpen}
+      collectionKey={activeCollection?.key ?? null}
+      collectionName={activeCollection?.name ?? ''}
+      collectionColor={activeCollection?.color ?? ''}
+      collectionDate={activeCollection?.dateRange ?? ''}
+      sublayers={activeCollection?.sublayers ?? []}
+      on:close={onMapInfoWindowClose}
+      on:sublayer-toggle={onMapInfoWindowSublayerToggle}
+    />
+
+    <BrandingPanel {siteMetadata} />
 
     {#if imageCollectionBubbleItem}
       <ImageCollectionBubble
@@ -1925,17 +1854,11 @@
     top: 10px;
     bottom: 10px;
     left: 50%;
-    width: 10px;
+    width: var(--split-divider-width);
     transform: translateX(-50%);
-    border-radius: 999px;
     pointer-events: none;
     z-index: 4;
-    background:
-      linear-gradient(90deg, var(--split-divider-shine-edge) 0%, var(--split-divider-shine) 50%, var(--split-divider-shine-edge) 100%),
-      linear-gradient(180deg, var(--split-divider-core-edge) 0%, var(--split-divider-core) 50%, var(--split-divider-core-edge) 100%);
-    box-shadow:
-      0 0 0 1px var(--split-divider-outline),
-      0 0 20px var(--split-divider-shadow);
+    background: var(--split-divider-color);
   }
 
 
@@ -2098,189 +2021,6 @@
     background: var(--toolbar-button-active-bg);
     border-color: var(--toolbar-button-active-border);
     color: var(--toolbar-button-active-text);
-  }
-
-  .site-info-toggle {
-    min-width: 92px;
-    justify-content: center;
-  }
-
-  .site-info-toggle[aria-expanded='true'] {
-    background: var(--toolbar-button-active-bg);
-    border-color: var(--toolbar-button-active-border);
-    color: var(--toolbar-button-active-text);
-  }
-
-  .site-info-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 110;
-    background: rgba(17, 15, 11, 0.26);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 88px 20px 20px;
-  }
-
-  .site-info-modal {
-    width: min(920px, calc(100vw - 40px));
-    max-height: min(84vh, 900px);
-    overflow: auto;
-    padding: 22px 24px 20px;
-    color: var(--text-primary);
-    /* Override ui-panel-overlay dark overlay bg with the warm panel surface */
-    background: var(--surface-floating);
-    backdrop-filter: blur(6px);
-    border-color: var(--surface-outline-soft);
-    box-shadow: 0 8px 32px rgba(40, 30, 10, 0.14), 0 2px 6px rgba(40, 30, 10, 0.08);
-  }
-
-  .site-info-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 18px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--border-ui) 82%, transparent);
-  }
-
-  .site-info-head h2 {
-    margin: 6px 0 0;
-    font-size: clamp(24px, 2vw, 30px);
-    line-height: 1.08;
-    letter-spacing: -0.02em;
-    font-weight: 700;
-  }
-
-  .site-info-close {
-    flex: 0 0 auto;
-  }
-
-  .site-info-body {
-    font-family: var(--font-ui);
-  }
-
-  .site-info-body p {
-    margin: 0 0 14px;
-    max-width: 64ch;
-    font-size: 14px;
-    line-height: 1.68;
-    color: color-mix(in srgb, var(--text-primary) 94%, white 6%);
-  }
-
-  .site-info-section {
-    margin-top: 20px;
-    padding-top: 14px;
-    border-top: 1px solid color-mix(in srgb, var(--border-ui) 76%, transparent);
-  }
-
-
-  .site-info-logos {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin-top: 12px;
-    align-items: center;
-  }
-
-  .site-info-logos a,
-  .site-info-logos img {
-    border-radius: var(--radius-xs);
-  }
-
-  .site-info-logos a {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 10px;
-    border: 1px solid color-mix(in srgb, var(--border-ui) 74%, transparent);
-    background: color-mix(in srgb, var(--overlay-bg) 86%, black 14%);
-    transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
-  }
-
-  .site-info-logos a:hover {
-    transform: translateY(-1px);
-    border-color: var(--border-ui);
-    background: color-mix(in srgb, var(--overlay-bg) 92%, black 8%);
-  }
-
-  .site-info-logos img {
-    display: block;
-    max-height: 52px;
-    max-width: 140px;
-    object-fit: contain;
-  }
-
-  .site-info-team {
-    display: grid;
-    gap: 18px;
-  }
-
-  .site-info-team-institution-group {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .site-info-team-institution {
-    font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 0.01em;
-    color: var(--text-primary);
-  }
-
-  .site-info-team-units {
-    display: grid;
-    gap: 10px;
-    padding-left: 8px;
-    border-left: 2px solid color-mix(in srgb, var(--border-ui) 40%, transparent);
-  }
-
-  .site-info-team-unit-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .site-info-team-unit {
-    font-size: 12px;
-    color: color-mix(in srgb, var(--text-primary) 78%, white 22%);
-    font-weight: 500;
-    margin: 0;
-  }
-
-  .site-info-team-members {
-    margin: 0;
-    padding-left: 14px;
-    list-style: none;
-    display: grid;
-    gap: 2px;
-  }
-
-  .site-info-team-members li {
-    font-size: 12px;
-    line-height: 1.35;
-    color: color-mix(in srgb, var(--text-primary) 85%, white 15%);
-  }
-
-  @media (max-width: 700px) {
-    .site-info-modal {
-      width: min(100vw - 24px, 920px);
-      max-height: min(88vh, 900px);
-      padding: 18px 18px 16px;
-    }
-
-    .site-info-head {
-      gap: 12px;
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-    }
-
-    .site-info-head h2 {
-      font-size: 22px;
-    }
   }
 
   @media (max-width: 700px) {

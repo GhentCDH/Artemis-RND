@@ -3,9 +3,9 @@
   import { browser } from '$app/environment';
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import type { MassartItem } from '$lib/artemis/shared/types';
-  import { MAIN_LAYER_LABELS } from '$lib/artemis/config/layers';
+  import { MAIN_LAYER_LABELS, MAIN_LAYER_META } from '$lib/artemis/config/layers';
   import SliderLayer from '$lib/components/SliderLayer.svelte';
-  import type { LayerMetadata, PaneId, SliderSource } from '$lib/components/timeslider/types';
+  import type { LayerMetadata, PaneId, SliderSource, CollectionInfo } from '$lib/components/timeslider/types';
 
   export let massartItems: MassartItem[] = [];
   export let layerMetadataByMainId: Record<string, LayerMetadata> = {};
@@ -18,6 +18,7 @@
   export let searchFocusMainId: string | null = null;
   export let searchFocusYear: number | null = null;
   export let searchFocusNonce = 0;
+  export let activeCollection: CollectionInfo | null = null;
 
   const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
     left: {
@@ -125,10 +126,20 @@
 
   type SourceDef = SliderSource;
   type SourceKey = SourceDef['key'];
+  type BulgeDirection = 'above' | 'below';
   type PaneState = { id: PaneId; year: number; label: string; color: string };
   const TIMELINE_AXIS_START = 1690;
   const TIMELINE_AXIS_END = 1930;
   const SCRUBBER_THUMB_SIZE = 28;
+  const MEANDER_MIN_WIDTH_PX = 24;
+  const MEANDER_MIN_SPAN_YEARS = 15;
+  const MEANDER_VISUALS: Partial<Record<SourceKey, { color?: string; direction: BulgeDirection }>> = {
+    hand: { direction: 'above' },
+    ferraris: { direction: 'below' },
+    primitief: { direction: 'above' },
+    vander: { direction: 'below' },
+    gered: { direction: 'above' },
+  };
 
   const defaultYear = 1774;
 
@@ -167,14 +178,11 @@
 
   let prevVisible: Record<string, boolean> = {};
   let prevPaneVisible: Record<PaneId, Record<string, boolean>> = { left: {}, right: {} };
-  let openMenuKey: SourceKey | null = null;
   let layerInfoModalKey: string | null = null;
 
   let hoveredSrc: SourceDef | null = null;
   let tooltipFixedStyle = '';
   let dragCleanup: (() => void) | null = null;
-  let menuCloseTimer: ReturnType<typeof setTimeout> | null = null;
-  const MENU_CLOSE_DELAY_MS = 260;
 
   $: massartByYear = massartItems.reduce<Map<number, MassartItem[]>>((acc, item) => {
     const y = parseInt(item.year ?? '0', 10);
@@ -193,14 +201,18 @@
   const axisEnd = TIMELINE_AXIS_END;
   const axisSpan = axisEnd - axisStart;
 
-  type TickKind = 'century' | 'decade';
+  type TickKind = 'endpoint' | 'interval';
 
   function buildTicks(start: number, end: number): { year: number; kind: TickKind }[] {
-    const result: { year: number; kind: TickKind }[] = [];
-    for (let y = Math.ceil(start / 10) * 10; y <= end; y += 10) {
-      result.push({ year: y, kind: y % 100 === 0 ? 'century' : 'decade' });
+    const byYear = new Map<number, TickKind>();
+    byYear.set(start, 'endpoint');
+    for (let y = Math.ceil(start / 50) * 50; y <= end; y += 50) {
+      if (y !== start && y !== end) byYear.set(y, 'interval');
     }
-    return result;
+    byYear.set(end, 'endpoint');
+    return [...byYear.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([year, kind]) => ({ year, kind }));
   }
 
   $: ticks = buildTicks(axisStart, axisEnd);
@@ -208,6 +220,46 @@
   function pct(year: number, aStart: number, aSpan: number): string {
     return `${((year - aStart) / aSpan) * 100}%`;
   }
+
+  function axisRatio(year: number): number {
+    return Math.max(0, Math.min(1, (year - axisStart) / axisSpan));
+  }
+
+  function axisOffsetForRatio(ratio: number): number {
+    const zeroAtEnds = Math.sin(Math.PI * ratio);
+    const primary = Math.sin((ratio * Math.PI * 2.15) + 0.35) * 7.5;
+    const secondary = Math.sin((ratio * Math.PI * 5.35) + 1.1) * 3.25;
+    return zeroAtEnds * (primary + secondary);
+  }
+
+  function axisOffsetForYear(year: number): number {
+    return axisOffsetForRatio(axisRatio(year));
+  }
+
+  function axisTickStyle(year: number): string {
+    return `left:${pct(year, axisStart, axisSpan)};--tick-top:${5 + axisOffsetForYear(year)}px`;
+  }
+
+  function axisCurvePath(): string {
+    const centerY = 14;
+    const points = Array.from({ length: 17 }, (_, index) => {
+      const ratio = index / 16;
+      return { x: ratio * 100, y: centerY + axisOffsetForRatio(ratio) };
+    });
+    const commands = [`M ${points[0].x} ${points[0].y}`];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const p0 = points[Math.max(0, i - 1)];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[Math.min(points.length - 1, i + 2)];
+      commands.push(
+        `C ${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6}, ${p2.x} ${p2.y}`
+      );
+    }
+    return commands.join(' ');
+  }
+
+  $: axisPath = axisCurvePath();
 
   function widthPct(start: number, end: number, aSpan: number): string {
     return `${((end - start) / aSpan) * 100}%`;
@@ -367,10 +419,10 @@
     const el = e.currentTarget as HTMLElement;
     const rect = el.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
-    if (src.lane <= 2) {
-      tooltipFixedStyle = `left:${cx}px;top:${rect.top - 8}px;transform:translate(-50%,-100%)`;
-    } else {
+    if (sourceBulgeDirection(src) === 'above') {
       tooltipFixedStyle = `left:${cx}px;top:${rect.bottom + 8}px;transform:translateX(-50%)`;
+    } else {
+      tooltipFixedStyle = `left:${cx}px;top:${rect.top - 8}px;transform:translate(-50%,-100%)`;
     }
   }
 
@@ -380,7 +432,7 @@
 
   function onTrackClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
-    if (target?.closest('.source-pill-wrap, .source-menu-popover, .img-dot, .ts-scrubber, .sub-menu, .sub-menu-header--toggle, .sub-pill, .sub-menu-checkbox-input, .source-folder-tab')) return;
+    if (target?.closest('.source-pill-wrap, .img-dot, .ts-scrubber')) return;
 
     const trackEl = (e.currentTarget as HTMLElement).closest('.ts-track') as HTMLElement | null;
     if (!trackEl) return;
@@ -419,6 +471,23 @@
     return SOURCES.find((src) => src.mainId === mainId);
   }
 
+  function buildCollectionInfo(src: SourceDef): CollectionInfo {
+    const meta = MAIN_LAYER_META[src.mainId];
+    return {
+      key: src.key,
+      mainId: src.mainId,
+      name: src.label,
+      color: src.color,
+      dateRange: meta?.date ?? `${src.start}–${src.end}`,
+      sublayers: src.sublayers.map(sub => ({
+        id: sub.id,
+        subId: sub.subId,
+        label: sub.label,
+        url: undefined,
+      })),
+    };
+  }
+
   function layerInfoKey(pane: PaneId, mainId: string): string {
     return `${pane}:${mainId}`;
   }
@@ -432,34 +501,6 @@
     event?.preventDefault();
     event?.stopPropagation();
     layerInfoModalKey = null;
-  }
-
-  function toggleMenu(event: MouseEvent, key: SourceKey) {
-    event.stopPropagation();
-    if (menuCloseTimer !== null) {
-      clearTimeout(menuCloseTimer);
-      menuCloseTimer = null;
-    }
-    openMenuKey = openMenuKey === key ? null : key;
-  }
-
-  function closeMenu(key: SourceKey) {
-    if (openMenuKey !== key) return;
-    openMenuKey = null;
-  }
-
-  function scheduleCloseMenu(key: SourceKey) {
-    if (menuCloseTimer !== null) clearTimeout(menuCloseTimer);
-    menuCloseTimer = setTimeout(() => {
-      menuCloseTimer = null;
-      closeMenu(key);
-    }, MENU_CLOSE_DELAY_MS);
-  }
-
-  function cancelCloseMenu() {
-    if (menuCloseTimer === null) return;
-    clearTimeout(menuCloseTimer);
-    menuCloseTimer = null;
   }
 
   function mainLayerInfoCard(mainId: string, fallbackTitle: string): LayerMetadata {
@@ -575,78 +616,66 @@
     return '18px 18px, 9px 9px';
   }
 
-  let measuredLabelWidthByKey: Partial<Record<SourceKey, number>> = {};
-
-  function measureSourceLabelWidths() {
-    if (!browser || typeof document === 'undefined') return;
-    const rootStyles = getComputedStyle(document.documentElement);
-    const fontFamily = rootStyles.getPropertyValue('--font-ui').trim() || 'sans-serif';
-    const measurer = document.createElement('span');
-    measurer.style.position = 'fixed';
-    measurer.style.left = '-9999px';
-    measurer.style.top = '0';
-    measurer.style.visibility = 'hidden';
-    measurer.style.pointerEvents = 'none';
-    measurer.style.whiteSpace = 'nowrap';
-    measurer.style.fontFamily = fontFamily;
-    measurer.style.fontSize = '10px';
-    measurer.style.fontWeight = '700';
-    measurer.style.lineHeight = '1.1';
-    measurer.style.letterSpacing = '0.01em';
-    document.body.appendChild(measurer);
-
-    const next: Partial<Record<SourceKey, number>> = {};
-    for (const src of SOURCES) {
-      measurer.textContent = src.label;
-      next[src.key] = Math.ceil(measurer.getBoundingClientRect().width);
-    }
-
-    document.body.removeChild(measurer);
-    measuredLabelWidthByKey = next;
+  function sourceMinWidthPx(_src: SourceDef): number {
+    return MEANDER_MIN_WIDTH_PX;
   }
 
-  function sourceEstimatedLabelWidthPx(label: string, key?: SourceKey): number {
-    const measuredWidth = key ? measuredLabelWidthByKey[key] : undefined;
-    if (measuredWidth && measuredWidth > 0) {
-      return Math.max(72, 52 + measuredWidth);
-    }
-    // Account for the text plus the permanent folder-tab affordance and
-    // horizontal padding used by SliderLayer.
-    return Math.max(72, 52 + label.length * 7);
+  function sourceVisualColor(src: SourceDef): string {
+    return MEANDER_VISUALS[src.key]?.color ?? src.color;
   }
 
-  function sourceMinWidthPx(src: SourceDef): number {
-    return sourceEstimatedLabelWidthPx(src.label, src.key);
+  function sourceBulgeDirection(src: SourceDef): BulgeDirection {
+    return MEANDER_VISUALS[src.key]?.direction ?? (src.lane <= 2 ? 'above' : 'below');
+  }
+
+  function sourceVisualYearRange(src: SourceDef): { start: number; end: number; center: number } {
+    const center = (src.start + src.end) / 2;
+    const span = Math.max(src.end - src.start, MEANDER_MIN_SPAN_YEARS);
+    return {
+      start: center - span / 2,
+      end: center + span / 2,
+      center,
+    };
+  }
+
+  function sourceAxisOffsets(src: SourceDef): { start: number; end: number; center: number } {
+    const visualRange = sourceVisualYearRange(src);
+    return {
+      start: axisOffsetForYear(visualRange.start),
+      end: axisOffsetForYear(visualRange.end),
+      center: axisOffsetForYear(visualRange.center),
+    };
   }
 
   let currentSourceKeys: Set<SourceKey> = new Set();
 
   function sourceBlockStyle(src: SourceDef, isCurrent: boolean): string {
-    const inclusiveEnd = Math.max(src.start, src.end + 1);
-    const spanYears = Math.max(1, inclusiveEnd - src.start);
-    const centerYear = src.start + spanYears / 2;
+    const visualRange = sourceVisualYearRange(src);
     const wrapperTransform = 'translateX(-50%)';
-    const currentBlockTransform = isCurrent
-      ? (src.lane <= 2 ? 'translateY(-3px) scaleY(1.18)' : 'translateY(3px) scaleY(1.18)')
-      : 'none';
-    const currentBlockTransformOrigin = isCurrent
-      ? (src.lane <= 2 ? 'bottom center' : 'top center')
-      : 'center center';
-    const currentShadow = isCurrent
-      ? '0 10px 22px rgba(0, 0, 0, 0.16), 0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 0 0 1px var(--pill-inset-active) inset'
-      : '0 0 0 1px color-mix(in srgb, var(--surface-outline-soft) 75%, transparent) inset, 0 5px 12px rgba(0, 0, 0, 0.10)';
-    const currentZ = isCurrent ? '2' : '1';
+    const currentZ = isCurrent ? '28' : '26';
+    const visualColor = sourceVisualColor(src);
     if (trackWidth <= 0) {
-      return `left:${pct(centerYear, axisStart, axisSpan)};--pill-width:${widthPct(src.start, inclusiveEnd, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-block-transform:${currentBlockTransform};--pill-block-transform-origin:${currentBlockTransformOrigin};--pill-shadow:${currentShadow};--pill-z:${currentZ}`;
+      return `left:${pct(visualRange.center, axisStart, axisSpan)};--pill-width:${widthPct(visualRange.start, visualRange.end, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--meander-color:${visualColor};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
     }
 
     const halfThumb = SCRUBBER_THUMB_SIZE / 2;
     const usableWidth = trackWidth - SCRUBBER_THUMB_SIZE;
-    const rangeWidthPx = (spanYears / axisSpan) * usableWidth;
+    const startPx = ((visualRange.start - axisStart) / axisSpan) * usableWidth + halfThumb;
+    const endPx = ((visualRange.end - axisStart) / axisSpan) * usableWidth + halfThumb;
+    const rangeWidthPx = Math.abs(endPx - startPx);
     const widthPx = Math.max(rangeWidthPx, sourceMinWidthPx(src));
-    const centerPx = ((centerYear - axisStart) / axisSpan) * usableWidth + halfThumb;
+    const centerPx = (startPx + endPx) / 2;
     const clampedCenterPx = Math.max(widthPx / 2, Math.min(trackWidth - widthPx / 2, centerPx));
-    return `left:${clampedCenterPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-block-transform:${currentBlockTransform};--pill-block-transform-origin:${currentBlockTransformOrigin};--pill-shadow:${currentShadow};--pill-z:${currentZ}`;
+    return `left:${clampedCenterPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--meander-color:${visualColor};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
+  }
+
+  function sourceMeanderWidth(src: SourceDef): number {
+    if (trackWidth <= 0) return sourceMinWidthPx(src);
+    const visualRange = sourceVisualYearRange(src);
+    const usableWidth = trackWidth - SCRUBBER_THUMB_SIZE;
+    const startPx = ((visualRange.start - axisStart) / axisSpan) * usableWidth + SCRUBBER_THUMB_SIZE / 2;
+    const endPx = ((visualRange.end - axisStart) / axisSpan) * usableWidth + SCRUBBER_THUMB_SIZE / 2;
+    return Math.max(Math.abs(endPx - startPx), sourceMinWidthPx(src));
   }
 
   function sourceMenuStyle(src: SourceDef, pane: PaneId = 'left'): string {
@@ -684,12 +713,9 @@
     // Measure once immediately so pill positioning does not switch from the
     // percentage fallback to pixel positioning on first interaction.
     syncTrackWidth();
-    measureSourceLabelWidths();
     void tick().then(syncTrackWidth);
-    void tick().then(measureSourceLabelWidths);
     if (browser && 'fonts' in document) {
       void (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready.then(() => {
-        measureSourceLabelWidths();
         syncTrackWidth();
       });
     }
@@ -735,7 +761,6 @@
 
   onDestroy(() => {
     dragCleanup?.();
-    cancelCloseMenu();
   });
 
   $: halfKnobYears = yearLeeway;
@@ -798,6 +823,7 @@
   $: activeSourceKeys = dualPaneEnabled
     ? new Set<SourceKey>([...leftPanelSources, ...rightPanelSources].map((s) => s.key))
     : new Set<SourceKey>(singlePanelSources.map((s) => s.key));
+  $: activeSourceKey = (dualPaneEnabled ? leftPanelSources : singlePanelSources)[0]?.key ?? null;
   $: leftActiveVisibility = SOURCES.reduce<Record<SourceKey, boolean>>((acc, src) => {
     acc[src.key] = Boolean(leftEnabledLayers[src.key] && leftVisibleSourceKeys.has(src.key));
     return acc;
@@ -811,8 +837,18 @@
     lane,
     sources: SOURCES.filter((source) => source.lane === lane),
   }));
-  $: topLanes = lanes.filter(({ lane }) => lane <= 2);
-  $: bottomLanes = lanes.filter(({ lane }) => lane >= 3);
+  $: topLanes = lanes
+    .map(({ lane, sources }) => ({
+      lane,
+      sources: sources.filter((source) => sourceBulgeDirection(source) === 'above'),
+    }))
+    .filter(({ sources }) => sources.length > 0);
+  $: bottomLanes = lanes
+    .map(({ lane, sources }) => ({
+      lane,
+      sources: sources.filter((source) => sourceBulgeDirection(source) === 'below'),
+    }))
+    .filter(({ sources }) => sources.length > 0);
 
   $: activePanesBySource = SOURCES.reduce<Record<SourceKey, PaneState[]>>((acc, src) => {
     const panes: PaneState[] = [];
@@ -825,6 +861,10 @@
     acc[src.key] = panes;
     return acc;
   }, {} as Record<SourceKey, PaneState[]>);
+
+  $: activeCollection = activeSourceKey
+    ? buildCollectionInfo(sourceByKey(activeSourceKey))
+    : null;
 
   $: {
     for (const src of SOURCES) {
@@ -944,42 +984,41 @@
       on:click={onTrackClick}
     ></button>
     {#each topLanes as lane}
-      <div class={`ts-row ts-row--lane-${lane.lane}`}>
-        {#each lane.sources as src}
-          {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-          {@const isCurrent = currentSourceKeys.has(src.key)}
-          <SliderLayer
-            {src}
-            {enabled}
-            isOpen={openMenuKey === src.key}
-            {isCurrent}
-            hasOverlap={sourceHasOverlap(src.key)}
-            loading={loadingLayers[src.mainId]}
-            {dualPaneEnabled}
-            leftEnabled={leftEnabledLayers[src.key]}
-            rightEnabled={rightEnabledLayers[src.key]}
-            sourceBlockStyle={sourceBlockStyle(src, isCurrent)}
-            sourceMenuStyle={sourceMenuStyle(src, 'left')}
-            layerInfoExpanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
-            onCancelCloseMenu={cancelCloseMenu}
-            onScheduleCloseMenu={scheduleCloseMenu}
-            onJumpToSource={jumpToSource}
-            onPillEnter={onPillEnter}
-            onPillLeave={onPillLeave}
-            onToggleMenu={toggleMenu}
-            onInfoButtonClick={onInfoButtonClick}
-            onToggleLayerEnabled={toggleLayerEnabled}
-            onToggleSublayer={toggleSublayer}
-            {isSublayerEnabled}
-            layerInfoKeyFor={layerInfoKey}
-          />
-        {/each}
-      </div>
+      <div class={`ts-row ts-row--lane-${lane.lane}`}></div>
     {/each}
     
     <div class="ts-axis-line">
+      <svg class="ts-axis-river" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        <path class="ts-axis-river-bank" d={axisPath}></path>
+        <path class="ts-axis-river-current" d={axisPath}></path>
+      </svg>
+
+      {#each SOURCES as src}
+        {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
+        {@const isCurrent = currentSourceKeys.has(src.key)}
+        {@const axisOffsets = sourceAxisOffsets(src)}
+        <SliderLayer
+          {src}
+          {enabled}
+          {isCurrent}
+          isDimmed={currentSourceKeys.size > 0 && !isCurrent}
+          meanderColor={sourceVisualColor(src)}
+          bulgeDirection={sourceBulgeDirection(src)}
+          meanderWidth={sourceMeanderWidth(src)}
+          startAxisOffset={axisOffsets.start}
+          endAxisOffset={axisOffsets.end}
+          centerAxisOffset={axisOffsets.center}
+          hasOverlap={sourceHasOverlap(src.key)}
+          loading={loadingLayers[src.mainId]}
+          sourceBlockStyle={sourceBlockStyle(src, isCurrent)}
+          onJumpToSource={jumpToSource}
+          onPillEnter={onPillEnter}
+          onPillLeave={onPillLeave}
+        />
+      {/each}
+
       {#each ticks as tick}
-        <span class="ts-tick ts-tick--{tick.kind}" style="left:{pct(tick.year,axisStart,axisSpan)}">
+        <span class="ts-tick ts-tick--{tick.kind}" style={axisTickStyle(tick.year)}>
           <span class="ts-tick-label">{tick.year}</span>
         </span>
       {/each}
@@ -1028,37 +1067,7 @@
     </div>
 
     {#each bottomLanes as lane}
-      <div class={`ts-row ts-row--lane-${lane.lane}`}>
-        {#each lane.sources as src}
-          {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
-          {@const isCurrent = currentSourceKeys.has(src.key)}
-          <SliderLayer
-            {src}
-            {enabled}
-            isOpen={openMenuKey === src.key}
-            {isCurrent}
-            hasOverlap={sourceHasOverlap(src.key)}
-            loading={loadingLayers[src.mainId]}
-            {dualPaneEnabled}
-            leftEnabled={leftEnabledLayers[src.key]}
-            rightEnabled={rightEnabledLayers[src.key]}
-            sourceBlockStyle={sourceBlockStyle(src, isCurrent)}
-            sourceMenuStyle={sourceMenuStyle(src, 'left')}
-            layerInfoExpanded={layerInfoModalKey === layerInfoKey('left', src.mainId)}
-            onCancelCloseMenu={cancelCloseMenu}
-            onScheduleCloseMenu={scheduleCloseMenu}
-            onJumpToSource={jumpToSource}
-            onPillEnter={onPillEnter}
-            onPillLeave={onPillLeave}
-            onToggleMenu={toggleMenu}
-            onInfoButtonClick={onInfoButtonClick}
-            onToggleLayerEnabled={toggleLayerEnabled}
-            onToggleSublayer={toggleSublayer}
-            {isSublayerEnabled}
-            layerInfoKeyFor={layerInfoKey}
-          />
-        {/each}
-      </div>
+      <div class={`ts-row ts-row--lane-${lane.lane}`}></div>
     {/each}
   </div>
 </div>
@@ -1168,15 +1177,42 @@
   .ts-axis-line {
     position: relative;
     height: 10px;
-    background: var(--timeline-track-bg);
-    border-radius: var(--radius-pill);
+    background: transparent;
     z-index: 20;
     isolation: isolate;
     overflow: visible;
     pointer-events: auto;
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, var(--surface-inset-strong) 80%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--surface-outline-soft) 90%, transparent);
+  }
+
+  .ts-axis-river {
+    position: absolute;
+    left: 0;
+    top: -9px;
+    width: 100%;
+    height: 28px;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .ts-axis-river-bank,
+  .ts-axis-river-current {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .ts-axis-river-bank {
+    stroke: #8fb8df;
+    stroke-width: var(--river-stroke-width);
+    opacity: 0.46;
+  }
+
+  .ts-axis-river-current {
+    stroke: #8db6db;
+    stroke-width: calc(var(--river-stroke-width) * 0.42);
+    opacity: 0.86;
   }
 
   .ts-scrub-indicator {
@@ -1377,7 +1413,7 @@
 
   .ts-tick {
     position: absolute;
-    top: 100%;
+    top: var(--tick-top, 5px);
     transform: translateX(-50%);
     display: flex;
     flex-direction: column;
@@ -1392,8 +1428,8 @@
     width: 1px;
   }
 
-  .ts-tick--decade::before { height: 8px; background: var(--timeline-tick); }
-  .ts-tick--century::before { height: 18px; background: var(--timeline-tick-strong); }
+  .ts-tick--interval::before { height: 14px; background: var(--timeline-tick); }
+  .ts-tick--endpoint::before { height: 20px; background: var(--timeline-tick-strong); }
 
   .ts-tick-label {
     font-family: var(--font-mono);
@@ -1403,7 +1439,7 @@
     white-space: nowrap;
   }
 
-  :global(.ts-tick--century) .ts-tick-label {
+  :global(.ts-tick--endpoint) .ts-tick-label {
     color: var(--timeline-label-strong);
     font-weight: 600;
   }
