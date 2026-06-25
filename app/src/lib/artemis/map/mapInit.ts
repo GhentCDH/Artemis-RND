@@ -144,7 +144,27 @@ function getCssColor(token: string, fallback: string): string {
   return value || fallback;
 }
 
-function getBaseMapStyle(theme: BaseMapTheme): maplibregl.StyleSpecification {
+let baselayerDataPromise: Promise<GeoJSON.FeatureCollection> | null = null;
+let baselayerDataCache: GeoJSON.FeatureCollection | null = null;
+
+function loadBaselayerData(): Promise<GeoJSON.FeatureCollection> {
+  if (baselayerDataCache) return Promise.resolve(baselayerDataCache);
+  if (baselayerDataPromise) return baselayerDataPromise;
+
+  baselayerDataPromise = fetch("/Baselayer.geojson")
+    .then(res => {
+      if (!res.ok) throw new Error(`Failed to load baselayer: ${res.statusText}`);
+      return res.json();
+    })
+    .then(data => {
+      baselayerDataCache = data;
+      return data;
+    });
+
+  return baselayerDataPromise;
+}
+
+function getBaseMapStyle(theme: BaseMapTheme, baselayerData: GeoJSON.FeatureCollection | null = null): maplibregl.StyleSpecification {
   const isDark = theme === "dark";
   const backgroundColor = getCssColor("--map-background", isDark ? "#15120d" : "#f6f2ea");
   const waterFillColor = getCssColor("--map-water-fill", isDark ? "#29434b" : "#c5d9dc");
@@ -155,7 +175,7 @@ function getBaseMapStyle(theme: BaseMapTheme): maplibregl.StyleSpecification {
     sources: {
       [BASE_WATER_SOURCE_ID]: {
         type: "geojson",
-        data: "/Baselayer.geojson"
+        data: baselayerData || { type: "FeatureCollection", features: [] }
       }
     },
     layers: [
@@ -205,6 +225,13 @@ export function createMapContextWithTheme(container: HTMLElement, theme: BaseMap
   });
   mapThemeByInstance.set(nextMap, theme);
 
+  loadBaselayerData().then(baselayerData => {
+    const updatedStyle = getBaseMapStyle(theme, baselayerData);
+    nextMap.setStyle(updatedStyle);
+  }).catch(err => {
+    console.error("Failed to load baselayer:", err);
+  });
+
   // Resize once style is loaded (helps when container size settles after layout mount)
   nextMap.once("load", () => {
     try {
@@ -220,7 +247,12 @@ export function createMapContextWithTheme(container: HTMLElement, theme: BaseMap
 
 export function setBaseMapTheme(targetMap: maplibregl.Map, theme: BaseMapTheme): boolean {
   if (mapThemeByInstance.get(targetMap) === theme) return false;
-  targetMap.setStyle(getBaseMapStyle(theme));
+  loadBaselayerData().then(baselayerData => {
+    const updatedStyle = getBaseMapStyle(theme, baselayerData);
+    targetMap.setStyle(updatedStyle);
+  }).catch(err => {
+    console.error("Failed to load baselayer:", err);
+  });
   mapThemeByInstance.set(targetMap, theme);
   return true;
 }
