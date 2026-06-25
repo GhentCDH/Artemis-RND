@@ -67,35 +67,18 @@
   $: axisY = nominalAxisY + centerAxisOffset;
   $: waveProgress = clamp((meanderWidth - 24) / 96, 0, 1);
   $: waveFloor = trackWaveFloor(src.lane);
-  $: primaryWave = Math.min(62, Math.max(lerp(minPrimaryWave, maxPrimaryWave, waveProgress), waveFloor.primary));
-  $: secondaryWave = Math.min(52, Math.max(lerp(minSecondaryWave, maxSecondaryWave, waveProgress), waveFloor.secondary));
+  $: subtleWave = Math.max(2, Math.min(4, (meanderWidth - 24) / 100));
   $: meanderSeed = hashString(`${src.key}:${src.start}:${src.end}:${bulgeDirection}`);
-  $: firstPeakX = seededRange(meanderSeed, 1, 18, 30);
-  $: midX = seededRange(meanderSeed, 2, 43, 58);
-  $: secondPeakX = seededRange(meanderSeed, 3, 70, 84);
-  $: firstControlX = seededRange(meanderSeed, 4, 5, 14);
-  $: firstPeakControlX = seededRange(meanderSeed, 5, 6, 18);
-  $: midControlInX = seededRange(meanderSeed, 6, 6, 20);
-  $: midControlOutX = seededRange(meanderSeed, 7, 6, 20);
-  $: endControlX = seededRange(meanderSeed, 8, 7, 17);
-  $: firstWaveScale = seededRange(meanderSeed, 9, 0.88, 1.08);
-  $: midWaveScale = seededRange(meanderSeed, 10, 0.82, 1.16);
-  $: secondWaveScale = seededRange(meanderSeed, 11, 0.9, 1.12);
-  $: primaryY = bulgeDirection === 'above' ? axisY - primaryWave : axisY + primaryWave;
-  $: secondaryY = bulgeDirection === 'above' ? axisY - secondaryWave : axisY + secondaryWave;
-  $: firstPeakY = bulgeDirection === 'above' ? axisY - primaryWave * firstWaveScale : axisY + primaryWave * firstWaveScale;
-  $: midWaveY = bulgeDirection === 'above' ? axisY - secondaryWave * midWaveScale : axisY + secondaryWave * midWaveScale;
-  $: secondPeakY = bulgeDirection === 'above' ? axisY - primaryWave * secondWaveScale : axisY + primaryWave * secondWaveScale;
+  $: apexWave = seededRange(meanderSeed, 1, 8, 15);
+  $: apexY = bulgeDirection === 'above' ? axisY - apexWave : axisY + apexWave;
+  $: leftWobbleOffset = seededRange(meanderSeed, 2, 0, subtleWave);
+  $: rightWobbleOffset = seededRange(meanderSeed, 3, 0, subtleWave);
   $: meanderPath = [
     `M 0 ${startY}`,
-    `C ${firstControlX} ${startY}, ${firstPeakX - firstPeakControlX} ${firstPeakY}, ${firstPeakX} ${firstPeakY}`,
-    `C ${firstPeakX + midControlInX} ${firstPeakY}, ${midX - midControlOutX} ${midWaveY}, ${midX} ${midWaveY}`,
-    `C ${midX + midControlOutX} ${midWaveY}, ${secondPeakX - midControlInX} ${secondPeakY}, ${secondPeakX} ${secondPeakY}`,
-    `C ${secondPeakX + endControlX} ${secondPeakY}, ${100 - endControlX} ${endY}, 100 ${endY}`,
+    `C 25 ${startY + (bulgeDirection === 'above' ? -leftWobbleOffset : leftWobbleOffset)}, 25 ${apexY}, 50 ${apexY}`,
+    `C 75 ${apexY}, 75 ${endY + (bulgeDirection === 'above' ? -rightWobbleOffset : rightWobbleOffset)}, 100 ${endY}`,
   ].join(' ');
-  $: dotTrackY = bulgeDirection === 'above'
-    ? nominalAxisY - waveFloor.secondary
-    : nominalAxisY + waveFloor.secondary;
+  $: dotTrackY = apexY;
   $: dotTop = `${(dotTrackY / viewBoxHeight) * 100}%`;
 </script>
 
