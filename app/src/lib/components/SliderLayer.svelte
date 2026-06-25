@@ -67,12 +67,12 @@
   $: axisY = nominalAxisY + centerAxisOffset;
   $: waveProgress = clamp((meanderWidth - 24) / 96, 0, 1);
   $: waveFloor = trackWaveFloor(src.lane);
-  $: subtleWave = Math.max(2, Math.min(4, (meanderWidth - 24) / 100));
-  $: meanderSeed = hashString(`${src.key}:${src.start}:${src.end}:${bulgeDirection}`);
-  $: apexWave = seededRange(meanderSeed, 1, 20, 32);
+  $: subtleWave = Math.max(1, Math.min(3, (meanderWidth - 24) / 120));
+  $: apexWave = waveFloor.primary * 0.65;
   $: apexY = bulgeDirection === 'above' ? axisY - apexWave : axisY + apexWave;
-  $: leftWobbleOffset = seededRange(meanderSeed, 2, 0, subtleWave);
-  $: rightWobbleOffset = seededRange(meanderSeed, 3, 0, subtleWave);
+  $: meanderSeed = hashString(`${src.key}:${src.start}:${src.end}:${bulgeDirection}`);
+  $: leftWobbleOffset = seededRange(meanderSeed, 1, 0, subtleWave);
+  $: rightWobbleOffset = seededRange(meanderSeed, 2, 0, subtleWave);
   $: meanderPath = [
     `M 0 ${startY}`,
     `C 25 ${startY + (bulgeDirection === 'above' ? -leftWobbleOffset : leftWobbleOffset)}, 25 ${apexY}, 50 ${apexY}`,
