@@ -12,7 +12,6 @@
   export let yearLeeway: number = 3;
   export let loadingLayers: Record<string, boolean> = {};
   export let dualPaneEnabled = false;
-  export let disabledPane: PaneId | null = null;
   export let searchFocusMainId: string | null = null;
   export let searchFocusNonce = 0;
   export let activeCollection: CollectionInfo | null = null;
@@ -127,7 +126,6 @@
   type PaneState = { id: PaneId; year: number; label: string; color: string };
   const TIMELINE_AXIS_START = 1690;
   const TIMELINE_AXIS_END = 1930;
-  const SCRUBBER_THUMB_SIZE = 28;
   const MEANDER_MIN_WIDTH_PX = 24;
   const MEANDER_MIN_SPAN_YEARS = 15;
   const MEANDER_VISUALS: Partial<Record<SourceKey, { color?: string; direction: BulgeDirection }>> = {
@@ -138,18 +136,9 @@
     gered: { direction: 'above' },
   };
 
-  const defaultYear = 1774;
-
-  let sliderYear = defaultYear;
   let trackEl: HTMLDivElement | null = null;
   let trackWidth = 0;
-  let localLeftYear = defaultYear;
-  let localRightYear = defaultYear;
-  let lastLeftYearProp: number | undefined = undefined;
-  let lastRightYearProp: number | undefined = undefined;
   let lastSearchFocusNonce = 0;
-  let dualPaneModePrev = dualPaneEnabled;
-  let dualPaneYearsInitialized = dualPaneEnabled;
 
   let leftEnabledLayers: Record<string, boolean> = Object.fromEntries(
     SOURCES.map(s => [s.key, true])
@@ -263,155 +252,6 @@
     return `${((end - start) / aSpan) * 100}%`;
   }
 
-  function paneSourcesForYear(year: number): SourceDef[] {
-    const visible = SOURCES.filter(
-      s => year >= s.start - halfKnobYears && year <= s.end + halfKnobYears
-    );
-    return visible;
-  }
-
-  function setPaneYear(pane: PaneId, year: number, emit = true) {
-    const prevYear = pane === 'left' ? localLeftYear : localRightYear;
-    if (pane === 'left') {
-      localLeftYear = year;
-    } else {
-      localRightYear = year;
-    }
-    if (emit) {
-      dispatch('year-change', { pane, year });
-    }
-  }
-
-  function yearForPane(pane: PaneId): number {
-    if (!dualPaneEnabled) return sliderYear;
-    return pane === 'left' ? localLeftYear : localRightYear;
-  }
-
-  function scrubberPctForPane(pane: PaneId): number {
-    return ((yearForPane(pane) - axisStart) / axisSpan) * 100;
-  }
-
-  function scrubberCenterPx(year: number): number {
-    if (trackWidth <= 0) return 0;
-    const ratio = Math.max(0, Math.min(1, (year - axisStart) / axisSpan));
-    const usableWidth = Math.max(0, trackWidth - SCRUBBER_THUMB_SIZE);
-    return ratio * usableWidth + SCRUBBER_THUMB_SIZE / 2;
-  }
-
-  function scrubberIndicatorStyle(year: number, color?: string, badgeBg?: string, badgeText?: string): string {
-    const ratio = Math.max(0, Math.min(1, (year - axisStart) / axisSpan));
-    const leftStyle = trackWidth > 0
-      ? `left:${scrubberCenterPx(year)}px`
-      : `left:calc(${ratio} * (100% - ${SCRUBBER_THUMB_SIZE}px) + ${SCRUBBER_THUMB_SIZE / 2}px)`;
-    const bits = [leftStyle];
-    if (color) bits.push(`--pane-color:${color}`);
-    if (badgeBg) bits.push(`--pane-badge-bg:${badgeBg}`);
-    if (badgeText) bits.push(`--pane-badge-text:${badgeText}`);
-    return bits.join(';');
-  }
-
-  function applyDraggedYear(pane: PaneId, clientX: number) {
-    const trackEl = document.querySelector('.ts-track') as HTMLElement | null;
-    if (!trackEl) return;
-    const rect = trackEl.getBoundingClientRect();
-    const year = yearFromTrackClientX(clientX, rect);
-    if (!dualPaneEnabled) {
-      setSingleYear(year);
-      return;
-    }
-    setPaneYear(pane, year);
-  }
-
-  function startKnobDrag(pane: PaneId, event: PointerEvent) {
-    if (dualPaneEnabled && disabledPane === pane) return;
-    event.preventDefault();
-    dragCleanup?.();
-    applyDraggedYear(pane, event.clientX);
-
-    const onMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      applyDraggedYear(pane, moveEvent.clientX);
-    };
-
-    const onEnd = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onEnd);
-      window.removeEventListener('pointercancel', onEnd);
-      dragCleanup = null;
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onEnd);
-    window.addEventListener('pointercancel', onEnd);
-    dragCleanup = onEnd;
-  }
-
-  function onSliderInput(pane: PaneId, e: Event) {
-    const year = parseFloat((e.target as HTMLInputElement).value);
-    if (!dualPaneEnabled) {
-      sliderYear = year;
-      dispatch('year-change', { pane: 'left', year });
-      return;
-    }
-    setPaneYear(pane, year);
-  }
-
-  function setSingleYear(year: number) {
-    sliderYear = year;
-    dispatch('year-change', { pane: 'left', year });
-  }
-
-  function yearFromTrackClientX(clientX: number, rect: DOMRect): number {
-    const usableWidth = Math.max(1, rect.width - SCRUBBER_THUMB_SIZE);
-    const offsetX = Math.max(0, Math.min(usableWidth, clientX - rect.left - SCRUBBER_THUMB_SIZE / 2));
-    const ratio = offsetX / usableWidth;
-    return Math.round(axisStart + ratio * axisSpan);
-  }
-
-  function closestPaneForTrackYear(year: number): PaneId {
-    const candidates: PaneId[] = dualPaneEnabled
-      ? (['left', 'right'] as PaneId[]).filter((pane) => disabledPane !== pane)
-      : ['left'];
-
-    if (candidates.length === 0) return 'left';
-    if (candidates.length === 1) return candidates[0];
-
-    const leftDistance = Math.abs(yearForPane('left') - year);
-    const rightDistance = Math.abs(yearForPane('right') - year);
-    return rightDistance <= leftDistance ? 'right' : 'left';
-  }
-
-  function jumpToYear(year: number): PaneId {
-    if (!dualPaneEnabled) {
-      setSingleYear(year);
-      return 'left';
-    }
-
-    const pane = closestPaneForTrackYear(year);
-    setPaneYear(pane, year);
-    return pane;
-  }
-
-  function jumpToSource(src: SourceDef, e: MouseEvent) {
-    let targetYear: number = src.repr;
-    const el = e.currentTarget as HTMLElement;
-    const tEl = el.closest('.ts-track') as HTMLElement | null;
-    if (tEl) {
-      const rect = tEl.getBoundingClientRect();
-      const rawYear = yearFromTrackClientX(e.clientX, rect);
-      targetYear = Math.max(src.start, Math.min(src.end, rawYear));
-    }
-
-    const pane = jumpToYear(targetYear);
-    setLayerEnabled(pane, src.key, true);
-
-    const overlapping = paneSourcesForYear(targetYear)
-      .filter((candidate) => candidate.key !== src.key);
-    for (const candidate of overlapping) {
-      setLayerEnabled(pane, candidate.key, false);
-    }
-  }
-
   function onPillEnter(src: SourceDef, e: MouseEvent) {
     hoveredSrc = src;
     const el = e.currentTarget as HTMLElement;
@@ -442,20 +282,10 @@
     }
   }
 
-  function onTrackClick(e: MouseEvent) {
-    const target = e.target as HTMLElement | null;
-    if (target?.closest('.source-pill-wrap, .img-dot, .ts-scrubber')) return;
-
-    const trackEl = (e.currentTarget as HTMLElement).closest('.ts-track') as HTMLElement | null;
-    if (!trackEl) return;
-    const rect = trackEl.getBoundingClientRect();
-    const nextYear = yearFromTrackClientX(e.clientX, rect);
-    jumpToYear(nextYear);
-  }
-
   function isDotNear(yr: number): boolean {
-    if (!dualPaneEnabled) return Math.abs(yr - sliderYear) <= yearLeeway;
-    return visiblePanes.some((pane) => Math.abs(yr - pane.year) <= yearLeeway);
+    if (!activeSourceKey) return false;
+    const activeSrc = sourceByKey(activeSourceKey as SourceKey);
+    return activeSrc && Math.abs(yr - activeSrc.repr) <= yearLeeway;
   }
 
   function focusDot(items: MassartItem[], pane: PaneId = 'left') {
@@ -471,8 +301,7 @@
   }
 
   function onPhotoDotClick(year: number, items: MassartItem[]) {
-    const pane = jumpToYear(year);
-    focusDot(items, pane);
+    focusDot(items, 'left');
   }
 
   function sourceByKey(key: SourceKey): SourceDef {
@@ -668,10 +497,8 @@
       return `left:${pct(visualRange.center, axisStart, axisSpan)};--pill-width:${widthPct(visualRange.start, visualRange.end, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--meander-color:${visualColor};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
     }
 
-    const halfThumb = SCRUBBER_THUMB_SIZE / 2;
-    const usableWidth = trackWidth - SCRUBBER_THUMB_SIZE;
-    const startPx = ((visualRange.start - axisStart) / axisSpan) * usableWidth + halfThumb;
-    const endPx = ((visualRange.end - axisStart) / axisSpan) * usableWidth + halfThumb;
+    const startPx = ((visualRange.start - axisStart) / axisSpan) * trackWidth;
+    const endPx = ((visualRange.end - axisStart) / axisSpan) * trackWidth;
     const rangeWidthPx = Math.abs(endPx - startPx);
     const widthPx = Math.max(rangeWidthPx, sourceMinWidthPx(src));
     const centerPx = (startPx + endPx) / 2;
@@ -682,9 +509,8 @@
   function sourceMeanderWidth(src: SourceDef): number {
     if (trackWidth <= 0) return sourceMinWidthPx(src);
     const visualRange = sourceVisualYearRange(src);
-    const usableWidth = trackWidth - SCRUBBER_THUMB_SIZE;
-    const startPx = ((visualRange.start - axisStart) / axisSpan) * usableWidth + SCRUBBER_THUMB_SIZE / 2;
-    const endPx = ((visualRange.end - axisStart) / axisSpan) * usableWidth + SCRUBBER_THUMB_SIZE / 2;
+    const startPx = ((visualRange.start - axisStart) / axisSpan) * trackWidth;
+    const endPx = ((visualRange.end - axisStart) / axisSpan) * trackWidth;
     return Math.max(Math.abs(endPx - startPx), sourceMinWidthPx(src));
   }
 
@@ -753,12 +579,6 @@
     };
   });
 
-  onDestroy(() => {
-    dragCleanup?.();
-  });
-
-  $: halfKnobYears = yearLeeway;
-
   $: if (searchFocusNonce !== lastSearchFocusNonce) {
     lastSearchFocusNonce = searchFocusNonce;
     if (searchFocusMainId) {
@@ -768,13 +588,6 @@
       }
     }
   }
-
-  $: visiblePanes = (dualPaneEnabled
-    ? [
-        { id: 'left', year: localLeftYear, label: PANE_META.left.label, color: PANE_META.left.color },
-        { id: 'right', year: localRightYear, label: PANE_META.right.label, color: PANE_META.right.color },
-      ]
-    : []) as PaneState[];
 
   $: leftActiveVisibility = SOURCES.reduce<Record<SourceKey, boolean>>((acc, src) => {
     acc[src.key] = Boolean(leftEnabledLayers[src.key] && activeSourceKey === src.key);

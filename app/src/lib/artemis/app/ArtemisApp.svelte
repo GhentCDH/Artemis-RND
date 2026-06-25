@@ -1712,7 +1712,6 @@
         {massartItems}
         {layerMetadataByMainId}
         dualPaneEnabled={dualPaneEnabled}
-        disabledPane={hasViewerPane && isSplitLayout ? viewerPane : null}
         {searchFocusMainId}
         {searchFocusNonce}
         yearLeeway={MASSART_LEEWAY}
