@@ -144,9 +144,11 @@ function loadBaselayerData(): Promise<GeoJSON.FeatureCollection> {
   if (baselayerDataCache) return Promise.resolve(baselayerDataCache);
   if (baselayerDataPromise) return baselayerDataPromise;
 
-  baselayerDataPromise = fetch("/Baselayer.geojson")
+  const url = `${window.location.pathname.split('/').slice(0, -1).join('/')}/Baselayer.geojson`.replace(/\/+/g, '/');
+
+  baselayerDataPromise = fetch(url)
     .then(res => {
-      if (!res.ok) throw new Error(`Failed to load baselayer: ${res.statusText}`);
+      if (!res.ok) throw new Error(`Failed to load baselayer from ${url}: ${res.statusText}`);
       return res.json();
     })
     .then(data => {
@@ -236,6 +238,15 @@ export function destroyMapContext() {
   map = null;
 }
 
+function bringMassartPinsToFront(map: maplibregl.Map): void {
+  try {
+    if (map.getLayer(MASSART_LAYER_INACTIVE)) map.moveLayer(MASSART_LAYER_INACTIVE);
+    if (map.getLayer(MASSART_LAYER_ACTIVE)) map.moveLayer(MASSART_LAYER_ACTIVE);
+  } catch {
+    // ignore if layers don't exist or can't be moved
+  }
+}
+
 export function setHistCartLayerVisible(map: maplibregl.Map | null | undefined, key: HistCartLayerKey, visible: boolean): void {
   const cfg = HISTCART_LAYERS[key];
   if (!cfg || !isMapStyleUsable(map)) return;
@@ -262,6 +273,7 @@ export function setHistCartLayerVisible(map: maplibregl.Map | null | undefined, 
         },
         beforeId
       );
+      bringMassartPinsToFront(map);
     }
     return;
   }
@@ -308,6 +320,7 @@ export function setLandUsageLayerVisible(map: maplibregl.Map | null | undefined,
     }
     if (!hasLayer) {
       map.addLayer({ id: cfg.layerId, type: "raster", source: cfg.sourceId, paint: { "raster-opacity": 1 } });
+      bringMassartPinsToFront(map);
     }
     return;
   }
@@ -719,6 +732,7 @@ export function setMassartPins(
         "icon-opacity": 1,
       }
     });
+    map.moveLayer(MASSART_LAYER_INACTIVE);
   }
 
   if (!map.getLayer(MASSART_LAYER_ACTIVE)) {
@@ -736,6 +750,7 @@ export function setMassartPins(
         "icon-opacity": 1,
       }
     });
+    map.moveLayer(MASSART_LAYER_ACTIVE);
   }
 
   updateMassartActiveYear(map, year, leeway);
