@@ -1,11 +1,7 @@
-/* ============================================================
-   Artemis UI theme — Warm Ochre
-   ============================================================ */
 
 :root {
   /* --- Typography ----------------------------------------- */
   --font-ui:   "DM Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "DM Mono", "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
 
   /* --- Core Colors ---------------------------------------- */
   --text-primary:   #1a1814;
@@ -63,6 +59,8 @@
   --timeline-tick-strong: rgba(120, 100, 60, 0.52);
   --timeline-label:       rgba(80, 68, 44, 0.4);
   --timeline-label-strong: rgba(80, 68, 44, 0.68);
+  --timeline-layer-color: #8db6db;
+  --timeline-layer-active-color: #3a8edc;
 
   /* --- Toolbar Buttons ------------------------------------ */
   --toolbar-button-bg:           rgba(253, 252, 249, 0.94);
@@ -72,9 +70,10 @@
   --toolbar-button-active-border: #a8904f;
 
   /* --- Split View ----------------------------------------- */
-  --split-pane-edge-shadow: rgba(120, 100, 60, 0.16);
-  --split-divider-color:    rgba(120, 100, 60, 0.2);
-  --split-divider-width:    2px;
+  --split-pane-edge-shadow:       rgba(60, 88, 120, 0.16);
+  --split-pane-edge-shadow-width: 5px;
+  --split-divider-color:          rgba(93, 125, 193, 0.46);
+  --split-divider-width:          1px;
 
   /* --- Photo Chip ----------------------------------------- */
   --photo-chip-bg:         #ffffff;
@@ -83,9 +82,6 @@
   --photo-chip-shadow-hover: 0 0 0 3px rgba(212, 168, 75, 0.28), 0 4px 12px rgba(86, 54, 8, 0.3);
   --photo-chip-shadow-multi: 0 0 0 3px rgba(212, 168, 75, 0.34), 0 4px 12px rgba(86, 54, 8, 0.28);
   --photo-chip-shadow-near:  0 0 0 4px rgba(245, 158, 11, 0.32), 0 0 0 8px rgba(245, 158, 11, 0.14), 0 6px 16px rgba(124, 72, 1, 0.34);
-
-  /* --- Scrubber Badge ------------------------------------ */
-  --scrubber-badge-ring: color-mix(in srgb, var(--pane-color) 14%, transparent);
 
   /* --- Viewer -------------------------------------------- */
   --viewer-backdrop:     rgba(30, 22, 10, 0.42);
@@ -108,13 +104,6 @@
   --viewer-chip-border:     color-mix(in srgb, var(--text-primary) 12%, transparent);
   --viewer-chip-border-hover: color-mix(in srgb, #a8904f 32%, transparent);
 
-  /* --- Startup Screen ------------------------------------ */
-  --startup-overlay-bg:    linear-gradient(180deg, rgba(245, 242, 235, 0.96), rgba(255, 255, 255, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 36%);
-  --startup-card-bg:       rgba(255,255,255,0.95);
-  --startup-card-border:   rgba(0,0,0,0.1);
-  --startup-loader-fill:   linear-gradient(180deg, #d4a84b, #c07b28);
-  --startup-title-color:   #171717;
-
   /* --- Bubble / Image Info Card -------------------------- */
   --bubble-bg:              rgba(255, 255, 255, 0.98);
   --bubble-border:          rgba(0, 0, 0, 0.12);
@@ -134,158 +123,8 @@
   --bubble-action-bg-hover: #927b3f;
   --bubble-action-text:     #ffffff;
 
-  /* --- Pane Colors ---------------------------------------- */
-  --pane-left-color:      #8f7a3e;
-  --pane-left-badge-bg:   #efe4bd;
-  --pane-left-badge-text: #5f4f1f;
-  --pane-left-panel-tint: rgba(143, 122, 62, 0.16);
-  --pane-right-color:     #b46b3f;
-  --pane-right-badge-bg:  #f3d8c8;
-  --pane-right-badge-text: #7a4222;
-  --pane-right-panel-tint: rgba(180, 107, 63, 0.14);
-
-  /* --- Layer Colors --------------------------------------- */
-  --layer-hand-color:        #2f6f9f;
-  --layer-frickx-color:      #3757b8;
-  --layer-villaret-color:    #1d83aa;
-  --layer-ferraris-color:    #287fa0;
-  --layer-primitief-color:   #514fc1;
-  --layer-vander-color:      #148fbd;
-  --layer-gereduceerd-color: #3166ae;
-  --layer-popp-color:        #4b78a8;
-  --layer-ngi1873-color:     #206f8e;
-  --layer-ngi1904-color:     #157f98;
-
   /* --- Map ------------------------------------------------ */
   --river-stroke-width: 15px;
-}
-
-html[data-theme='dark'] {
-  --text-primary:   #f3ead8;
-  --text-secondary: rgba(243, 234, 216, 0.86);
-  --text-muted:     rgba(223, 205, 168, 0.58);
-  --text-ok:        #9eb986;
-  --text-error:     #d4957d;
-
-  --panel-bg:     #18140e;
-  --panel-border: rgba(220, 200, 160, 0.14);
-  --card-bg:      #221c14;
-  --overlay-bg:   rgba(18, 14, 8, 0.96);
-
-  --border-subtle: rgba(223, 205, 168, 0.08);
-  --border-ui:     rgba(223, 205, 168, 0.24);
-  --border-light:  rgba(223, 205, 168, 0.14);
-
-  --result-bg:    #221c14;
-  --result-hover: #2d2419;
-
-  --surface-floating:     rgba(24, 20, 14, 0.96);
-  --surface-raised:       #221c14;
-  --surface-muted:        rgba(223, 205, 168, 0.08);
-  --surface-outline:      rgba(223, 205, 168, 0.28);
-  --surface-outline-soft: rgba(223, 205, 168, 0.16);
-  --surface-focus:        rgba(223, 205, 168, 0.56);
-
-  --problem-border:      rgba(212, 125, 92, 0.26);
-  --problem-bg:          rgba(76, 34, 24, 0.54);
-  --problem-error-color: #efb29a;
-
-  --shadow-sm:         0 1px 3px rgba(0, 0, 0, 0.42);
-  --shadow-md:         0 4px 20px rgba(0, 0, 0, 0.34), 0 1px 4px rgba(0, 0, 0, 0.22);
-  --shadow-lg:         0 6px 24px rgba(0, 0, 0, 0.38);
-  --shadow-card:       0 12px 30px rgba(0, 0, 0, 0.34), 0 2px 8px rgba(0, 0, 0, 0.2);
-  --shadow-viewer:     0 24px 80px rgba(0, 0, 0, 0.5);
-  --shadow-floating-ui: 0 24px 44px rgba(0, 0, 0, 0.42), 0 8px 18px rgba(0, 0, 0, 0.24);
-  --shadow-timeline:   0 28px 48px rgba(0, 0, 0, 0.42), 0 10px 20px rgba(0, 0, 0, 0.24);
-
-  --timeline-panel-bg:     #16120d;
-  --timeline-tick:         rgba(223, 205, 168, 0.28);
-  --timeline-tick-strong:  rgba(223, 205, 168, 0.56);
-  --timeline-label:        rgba(223, 205, 168, 0.44);
-  --timeline-label-strong: rgba(243, 234, 216, 0.74);
-
-  --toolbar-button-bg:           rgba(24, 20, 14, 0.94);
-  --toolbar-button-hover-bg:     #2b2218;
-  --toolbar-button-active-bg:    #2a6183;
-  --toolbar-button-active-text:  #0f0f10;
-  --toolbar-button-active-border: #4f8da8;
-
-  --split-pane-edge-shadow: rgb(8, 137, 206);
-  --split-divider-color:    rgb(77, 177, 224);
-  --split-divider-width:    100px;
-
-  --photo-chip-bg:         #121214;
-  --photo-chip-border:     rgba(255, 255, 255, 0.22);
-  --photo-chip-shadow:     0 0 0 2px rgba(212, 168, 75, 0.24), 0 2px 8px rgba(0, 0, 0, 0.34);
-  --photo-chip-shadow-hover: 0 0 0 3px rgba(212, 168, 75, 0.32), 0 4px 12px rgba(0, 0, 0, 0.38);
-  --photo-chip-shadow-multi: 0 0 0 3px rgba(212, 168, 75, 0.38), 0 4px 12px rgba(0, 0, 0, 0.36);
-  --photo-chip-shadow-near:  0 0 0 4px rgba(245, 158, 11, 0.34), 0 0 0 8px rgba(245, 158, 11, 0.12), 0 6px 16px rgba(0, 0, 0, 0.4);
-
-  --scrubber-badge-ring: color-mix(in srgb, var(--pane-color) 14%, transparent);
-
-  --viewer-backdrop:     rgba(0, 0, 0, 0.6);
-  --viewer-bg:           var(--panel-bg);
-  --viewer-topbar-bg:    var(--card-bg);
-  --viewer-canvas-bg:    var(--panel-bg);
-  --viewer-meta-bg:      color-mix(in srgb, var(--viewer-bg) 96%, black);
-  --viewer-body-bg:      linear-gradient(180deg, rgba(22, 22, 24, 0.95), rgba(12, 12, 14, 0.95));
-  --viewer-inline-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 30px 64px rgba(0, 0, 0, 0.42), 0 10px 26px rgba(0, 0, 0, 0.26);
-  --viewer-side-shadow:   22px 0 30px -26px rgba(0, 0, 0, 0.42);
-  --viewer-side-shadow-mirrored: -22px 0 30px -26px rgba(0, 0, 0, 0.42);
-  --viewer-toggle-bg:        #a8904f;
-  --viewer-toggle-bg-hover:  #b89e5a;
-  --viewer-toggle-border:    #cfb06d;
-  --viewer-toggle-text:      #1a150f;
-  --viewer-action-bg:        color-mix(in srgb, var(--viewer-topbar-bg) 88%, black);
-  --viewer-action-bg-hover:  color-mix(in srgb, var(--viewer-topbar-bg) 80%, white);
-  --viewer-chip-bg:         color-mix(in srgb, #2b2418 90%, black);
-  --viewer-chip-bg-hover:   color-mix(in srgb, #3a3020 88%, black);
-  --viewer-chip-border:     color-mix(in srgb, var(--text-primary) 16%, transparent);
-  --viewer-chip-border-hover: color-mix(in srgb, #cfb06d 36%, transparent);
-
-  --startup-overlay-bg:  linear-gradient(180deg, rgba(18, 18, 20, 0.96), rgba(10, 10, 12, 0.92)), radial-gradient(circle at top left, rgba(212, 168, 75, 0.12), transparent 36%);
-  --startup-card-bg:     rgba(18,18,20,0.95);
-  --startup-card-border: rgba(255,255,255,0.12);
-  --startup-loader-fill: linear-gradient(180deg, #e0b55f, #c68a39);
-  --startup-title-color: #f5f5f5;
-
-  --bubble-bg:              rgba(18, 18, 20, 0.98);
-  --bubble-border:          rgba(255, 255, 255, 0.14);
-  --bubble-card-bg:         rgba(26,26,28,0.9);
-  --bubble-card-border:     rgba(255,255,255,0.1);
-  --bubble-close:           rgba(255,255,255,0.56);
-  --bubble-kicker:          #cfb06d;
-  --bubble-title:           var(--text-primary);
-  --bubble-meta:            rgba(255,255,255,0.64);
-  --bubble-meta-strong:     rgba(255,255,255,0.56);
-  --bubble-meta-chip-bg:    rgba(255,255,255,0.08);
-  --bubble-preview-bg:      #141416;
-  --bubble-preview-border:  rgba(255,255,255,0.1);
-  --bubble-status:          rgba(255,255,255,0.56);
-  --bubble-status-error:    #ff9d9d;
-  --bubble-action-bg:       #a8904f;
-  --bubble-action-bg-hover: #b89e5a;
-  --bubble-action-text:     #111214;
-
-  --pane-left-color:      #8f7a3e;
-  --pane-left-badge-bg:   #efe4bd;
-  --pane-left-badge-text: #5f4f1f;
-  --pane-left-panel-tint: rgba(143, 122, 62, 0.16);
-  --pane-right-color:     #b46b3f;
-  --pane-right-badge-bg:  #f3d8c8;
-  --pane-right-badge-text: #7a4222;
-  --pane-right-panel-tint: rgba(180, 107, 63, 0.14);
-
-  --layer-hand-color:        #78b5e8;
-  --layer-frickx-color:      #7d91ff;
-  --layer-villaret-color:    #58c4ee;
-  --layer-ferraris-color:    #67addf;
-  --layer-primitief-color:   #a0a0ff;
-  --layer-vander-color:      #42d2f2;
-  --layer-gereduceerd-color: #75a1ef;
-  --layer-popp-color:        #92b7e4;
-  --layer-ngi1873-color:     #69c7d7;
-  --layer-ngi1904-color:     #57b8c7;
 }
 
 html {
@@ -293,10 +132,6 @@ html {
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   color-scheme: light;
-}
-
-html[data-theme='dark'] {
-  color-scheme: dark;
 }
 
 *,
@@ -308,5 +143,6 @@ html[data-theme='dark'] {
 body {
   min-height: 100%;
   font-synthesis: none;
+  font-family: var(--font-ui);
   color: var(--text-primary);
 }

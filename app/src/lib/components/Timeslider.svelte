@@ -19,23 +19,6 @@
   export let clearLeftCollectionNonce = 0;
   export let clearRightCollectionNonce = 0;
 
-  const PANE_META: Record<PaneId, { label: string; color: string; badgeBg: string; badgeText: string; panelTint: string }> = {
-    left: {
-      label: 'Left',
-      color: 'var(--pane-left-color)',
-      badgeBg: 'var(--pane-left-badge-bg)',
-      badgeText: 'var(--pane-left-badge-text)',
-      panelTint: 'var(--pane-left-panel-tint)',
-    },
-    right: {
-      label: 'Right',
-      color: 'var(--pane-right-color)',
-      badgeBg: 'var(--pane-right-badge-bg)',
-      badgeText: 'var(--pane-right-badge-text)',
-      panelTint: 'var(--pane-right-panel-tint)',
-    },
-  };
-
   const dispatch = createEventDispatcher<{
     mainToggle:     { mainId: string; enabled: boolean };
     sublayerChange: { subId: string; enabled: boolean };
@@ -49,7 +32,7 @@
   const SOURCES: SliderSource[] = [
     {
       key: 'hand', mainId: 'HanddrawnCollection', label: MAIN_LAYER_LABELS.HanddrawnCollection,
-      start: 1700, end: 1715, repr: 1707, color: 'var(--layer-hand-color)', lane: 1,
+      start: 1700, end: 1715, repr: 1707, color: 'var(--timeline-layer-color)', lane: 1,
       sublayers: [
         { id: 'iiif', subId: 'HanddrawnCollection-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'HanddrawnCollection-parcels', label: 'Parcels', defaultOn: false },
@@ -57,21 +40,21 @@
     },
     {
       key: 'frickx', mainId: 'Frickx', label: MAIN_LAYER_LABELS.Frickx,
-      start: 1712, end: 1712, repr: 1712, color: 'var(--layer-frickx-color)', lane: 3,
+      start: 1712, end: 1712, repr: 1712, color: 'var(--timeline-layer-color)', lane: 3,
       sublayers: [
         { id: 'wmts', subId: 'Frickx-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
       key: 'villaret', mainId: 'Villaret', label: MAIN_LAYER_LABELS.Villaret,
-      start: 1745, end: 1748, repr: 1746, color: 'var(--layer-villaret-color)', lane: 4,
+      start: 1745, end: 1748, repr: 1746, color: 'var(--timeline-layer-color)', lane: 4,
       sublayers: [
         { id: 'wmts', subId: 'Villaret-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
       key: 'ferraris', mainId: 'Ferraris', label: MAIN_LAYER_LABELS.Ferraris,
-      start: 1770, end: 1778, repr: 1774, color: 'var(--layer-ferraris-color)', lane: 2,
+      start: 1770, end: 1778, repr: 1774, color: 'var(--timeline-layer-color)', lane: 2,
       sublayers: [
         { id: 'wmts', subId: 'Ferraris-wmts', label: 'Map', defaultOn: true },
         { id: 'landuse', subId: 'Ferraris-landusage', label: 'Land use', defaultOn: false },
@@ -79,7 +62,7 @@
     },
     {
       key: 'primitief', mainId: 'PrimitiefKadaster', label: MAIN_LAYER_LABELS.PrimitiefKadaster,
-      start: 1808, end: 1834, repr: 1814, color: 'var(--layer-primitief-color)', lane: 3,
+      start: 1808, end: 1834, repr: 1814, color: 'var(--timeline-layer-color)', lane: 3,
       sublayers: [
         { id: 'iiif', subId: 'PrimitiefKadaster-iiif', label: 'Map', defaultOn: true },
         { id: 'parcels', subId: 'PrimitiefKadaster-parcels', label: 'Parcels', defaultOn: false },
@@ -87,7 +70,7 @@
     },
     {
       key: 'vander', mainId: 'Vandermaelen', label: MAIN_LAYER_LABELS.Vandermaelen,
-      start: 1846, end: 1854, repr: 1850, color: 'var(--layer-vander-color)', lane: 4,
+      start: 1846, end: 1854, repr: 1850, color: 'var(--timeline-layer-color)', lane: 4,
       sublayers: [
         { id: 'wmts', subId: 'Vandermaelen-wmts', label: 'Map', defaultOn: true },
         { id: 'landuse', subId: 'Vandermaelen-landusage', label: 'Land use', defaultOn: false },
@@ -95,28 +78,28 @@
     },
     {
       key: 'gered', mainId: 'GereduceerdeKadaster', label: MAIN_LAYER_LABELS.GereduceerdeKadaster,
-      start: 1847, end: 1855, repr: 1851, color: 'var(--layer-gereduceerd-color)', lane: 1,
+      start: 1847, end: 1855, repr: 1851, color: 'var(--timeline-layer-color)', lane: 1,
       sublayers: [
         { id: 'iiif', subId: 'GereduceerdeKadaster-iiif', label: 'Map', defaultOn: true },
       ],
     },
     {
       key: 'popp', mainId: 'Popp', label: MAIN_LAYER_LABELS.Popp,
-      start: 1842, end: 1879, repr: 1860, color: 'var(--layer-popp-color)', lane: 2,
+      start: 1842, end: 1879, repr: 1860, color: 'var(--timeline-layer-color)', lane: 2,
       sublayers: [
         { id: 'wmts', subId: 'Popp-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
       key: 'ngi1873', mainId: 'NGI1873', label: MAIN_LAYER_LABELS.NGI1873,
-      start: 1873, end: 1873, repr: 1873, color: 'var(--layer-ngi1873-color)', lane: 3,
+      start: 1873, end: 1873, repr: 1873, color: 'var(--timeline-layer-color)', lane: 3,
       sublayers: [
         { id: 'wmts', subId: 'NGI1873-wmts', label: 'Map', defaultOn: true },
       ],
     },
     {
       key: 'ngi1904', mainId: 'NGI1904', label: MAIN_LAYER_LABELS.NGI1904,
-      start: 1904, end: 1904, repr: 1904, color: 'var(--layer-ngi1904-color)', lane: 1,
+      start: 1904, end: 1904, repr: 1904, color: 'var(--timeline-layer-color)', lane: 1,
       sublayers: [
         { id: 'wmts', subId: 'NGI1904-wmts', label: 'Map', defaultOn: true },
       ],
@@ -126,17 +109,16 @@
   type SourceDef = SliderSource;
   type SourceKey = SourceDef['key'];
   type BulgeDirection = 'above' | 'below';
-  type PaneState = { id: PaneId; year: number; label: string; color: string };
   const TIMELINE_AXIS_START = 1690;
   const TIMELINE_AXIS_END = 1930;
   const MEANDER_MIN_WIDTH_PX = 24;
   const MEANDER_MIN_SPAN_YEARS = 15;
-  const MEANDER_VISUALS: Partial<Record<SourceKey, { color?: string; direction: BulgeDirection }>> = {
-    hand: { direction: 'above' },
-    ferraris: { direction: 'below' },
-    primitief: { direction: 'above' },
-    vander: { direction: 'below' },
-    gered: { direction: 'above' },
+  const MEANDER_DIRECTIONS: Partial<Record<SourceKey, BulgeDirection>> = {
+    hand: 'above',
+    ferraris: 'below',
+    primitief: 'above',
+    vander: 'below',
+    gered: 'above',
   };
 
   let trackEl: HTMLDivElement | null = null;
@@ -505,12 +487,8 @@
     return MEANDER_MIN_WIDTH_PX;
   }
 
-  function sourceVisualColor(src: SourceDef): string {
-    return MEANDER_VISUALS[src.key]?.color ?? src.color;
-  }
-
   function sourceBulgeDirection(src: SourceDef): BulgeDirection {
-    return MEANDER_VISUALS[src.key]?.direction ?? (src.lane <= 2 ? 'above' : 'below');
+    return MEANDER_DIRECTIONS[src.key] ?? (src.lane <= 2 ? 'above' : 'below');
   }
 
   function sourceVisualYearRange(src: SourceDef): { start: number; end: number; center: number } {
@@ -527,9 +505,8 @@
     const visualRange = sourceVisualYearRange(src);
     const wrapperTransform = 'translateX(-50%)';
     const currentZ = isCurrent ? '28' : '26';
-    const visualColor = sourceVisualColor(src);
     if (trackWidth <= 0) {
-      return `left:${pct(visualRange.center, axisStart, axisSpan)};--pill-width:${widthPct(visualRange.start, visualRange.end, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--meander-color:${visualColor};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
+      return `left:${pct(visualRange.center, axisStart, axisSpan)};--pill-width:${widthPct(visualRange.start, visualRange.end, axisSpan)};--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
     }
 
     const startPx = ((visualRange.start - axisStart) / axisSpan) * trackWidth;
@@ -538,12 +515,7 @@
     const widthPx = Math.max(rangeWidthPx, sourceMinWidthPx(src));
     const centerPx = (startPx + endPx) / 2;
     const clampedCenterPx = Math.max(widthPx / 2, Math.min(trackWidth - widthPx / 2, centerPx));
-    return `left:${clampedCenterPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--meander-color:${visualColor};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
-  }
-
-  function sourceMenuStyle(src: SourceDef, pane: PaneId = 'left'): string {
-    const paneTint = pane === 'right' ? 'var(--pane-right-panel-tint)' : 'var(--pane-left-panel-tint)';
-    return `--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pane-header-tint:${paneTint}`;
+    return `left:${clampedCenterPx}px;--pill-width:${widthPx}px;--pill-min-width:${sourceMinWidthPx(src)}px;--c:${src.color};--pattern:${sourcePattern(src.key)};--pattern-size:${sourcePatternSize(src.key)};--pill-wrapper-transform:${wrapperTransform};--pill-z:${currentZ}`;
   }
 
   onMount(() => {
@@ -769,7 +741,6 @@
           {enabled}
           {isCurrent}
           isDimmed={hasActiveSelection && !isCurrent}
-          meanderColor={sourceVisualColor(src)}
           bulgeDirection={sourceBulgeDirection(src)}
           hasOverlap={false}
           loading={loadingLayers[src.mainId]}
@@ -920,13 +891,13 @@
   }
 
   .ts-axis-river-bank {
-    stroke: #8fb8df;
+    stroke: var(--timeline-layer-color);
     stroke-width: var(--river-stroke-width);
     opacity: 0.46;
   }
 
   .ts-axis-river-current {
-    stroke: #8db6db;
+    stroke: var(--timeline-layer-color);
     stroke-width: calc(var(--river-stroke-width) * 0.42);
     opacity: 0.86;
   }
@@ -992,7 +963,7 @@
   .ts-tick--endpoint::before { height: 20px; background: var(--timeline-tick-strong); }
 
   .ts-tick-label {
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 9px;
     color: var(--timeline-label);
     margin-top: 2px;
@@ -1016,7 +987,7 @@
     background: var(--surface-floating);
     border: 1px solid var(--surface-outline-soft);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 9px;
     font-weight: 600;
     color: var(--text-secondary);
@@ -1046,7 +1017,7 @@
     overflow: auto;
     padding: 22px 24px 20px;
     color: var(--text-primary);
-    /* Override ui-panel-overlay dark overlay bg with the warm panel surface */
+    /* Override ui-panel-overlay with the warm panel surface */
     background: var(--surface-floating);
     backdrop-filter: blur(6px);
     border-color: var(--surface-outline-soft);

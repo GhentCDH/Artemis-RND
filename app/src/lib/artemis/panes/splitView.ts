@@ -100,8 +100,7 @@ export async function ensureRightPaneMap(opts: {
   rightMap: maplibregl.Map | null;
   rightMapInitInFlight: boolean;
   awaitTick: () => Promise<void>;
-  createMapContextWithTheme: (container: HTMLElement, themeMode: 'light' | 'dark') => maplibregl.Map;
-  themeMode: 'light' | 'dark';
+  createMapContext: (container: HTMLElement) => maplibregl.Map;
   leftMap: maplibregl.Map;
   setRightMapInitInFlight: (value: boolean) => void;
   setRightMap: (value: maplibregl.Map | null) => void;
@@ -115,8 +114,7 @@ export async function ensureRightPaneMap(opts: {
     rightMap,
     rightMapInitInFlight,
     awaitTick,
-    createMapContextWithTheme,
-    themeMode,
+    createMapContext,
     leftMap,
     setRightMapInitInFlight,
     setRightMap,
@@ -129,7 +127,7 @@ export async function ensureRightPaneMap(opts: {
   setRightMapInitInFlight(true);
   await awaitTick();
 
-  const nextRightMap = createMapContextWithTheme(rightMapDiv, themeMode);
+  const nextRightMap = createMapContext(rightMapDiv);
   setRightMap(nextRightMap);
   nextRightMap.on('load', async () => {
     setRightMapReady(true);

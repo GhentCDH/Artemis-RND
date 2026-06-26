@@ -3,8 +3,6 @@ import maplibregl from "maplibre-gl";
 import { ngiTileUrl } from "$lib/artemis/config/ngi";
 
 let map: maplibregl.Map | null = null;
-type BaseMapTheme = "light" | "dark";
-const mapThemeByInstance = new WeakMap<maplibregl.Map, BaseMapTheme>();
 
 export type HistCartLayerKey =
   | "ngi1904"
@@ -133,10 +131,6 @@ function firstWarpedLayerId(map: maplibregl.Map): string | undefined {
   return layers.find((l) => l.id.startsWith("warped-layer-"))?.id;
 }
 
-export function createMapContext(container: HTMLElement): maplibregl.Map {
-  return createMapContextWithTheme(container, "light");
-}
-
 function getCssColor(token: string, fallback: string): string {
   if (typeof document === "undefined") return fallback;
   const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
@@ -163,10 +157,9 @@ function loadBaselayerData(): Promise<GeoJSON.FeatureCollection> {
   return baselayerDataPromise;
 }
 
-function getBaseMapStyle(theme: BaseMapTheme, baselayerData: GeoJSON.FeatureCollection | null = null): maplibregl.StyleSpecification {
-  const isDark = theme === "dark";
-  const backgroundColor = getCssColor("--map-background", isDark ? "#15120d" : "#f6f2ea");
-  const waterFillColor = getCssColor("--map-water-fill", isDark ? "#29434b" : "#c5d9dc");
+function getBaseMapStyle(baselayerData: GeoJSON.FeatureCollection | null = null): maplibregl.StyleSpecification {
+  const backgroundColor = getCssColor("--map-background", "#f6f2ea");
+  const waterFillColor = getCssColor("--map-water-fill", "#c5d9dc");
 
   return {
     version: 8,
@@ -197,20 +190,19 @@ function getBaseMapStyle(theme: BaseMapTheme, baselayerData: GeoJSON.FeatureColl
   };
 }
 
-export function createMapContextWithTheme(container: HTMLElement, theme: BaseMapTheme = "light"): maplibregl.Map {
+export function createMapContext(container: HTMLElement): maplibregl.Map {
   const nextMap = new maplibregl.Map({
     container,
-    style: getBaseMapStyle(theme),
+    style: getBaseMapStyle(),
     center: [4.23, 51.10], // Bornem, Scheldt valley
     zoom: 10,
     attributionControl: false,
     pitchWithRotate: false,
     maxPitch: 0
   });
-  mapThemeByInstance.set(nextMap, theme);
 
   loadBaselayerData().then(baselayerData => {
-    const updatedStyle = getBaseMapStyle(theme, baselayerData);
+    const updatedStyle = getBaseMapStyle(baselayerData);
     nextMap.setStyle(updatedStyle);
   }).catch(err => {
     console.error("Failed to load baselayer:", err);
@@ -229,25 +221,13 @@ export function createMapContextWithTheme(container: HTMLElement, theme: BaseMap
   return nextMap;
 }
 
-export function setBaseMapTheme(targetMap: maplibregl.Map, theme: BaseMapTheme): boolean {
-  if (mapThemeByInstance.get(targetMap) === theme) return false;
-  loadBaselayerData().then(baselayerData => {
-    const updatedStyle = getBaseMapStyle(theme, baselayerData);
-    targetMap.setStyle(updatedStyle);
-  }).catch(err => {
-    console.error("Failed to load baselayer:", err);
-  });
-  mapThemeByInstance.set(targetMap, theme);
-  return true;
-}
-
 export function destroyMapContextInstance(targetMap: maplibregl.Map | null | undefined) {
   targetMap?.remove();
 }
 
-export function ensureMapContext(container: HTMLElement, theme: BaseMapTheme = "light"): maplibregl.Map {
+export function ensureMapContext(container: HTMLElement): maplibregl.Map {
   if (map) return map;
-  map = createMapContextWithTheme(container, theme);
+  map = createMapContext(container);
   return map;
 }
 

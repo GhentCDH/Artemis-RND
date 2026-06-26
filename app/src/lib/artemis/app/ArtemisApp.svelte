@@ -7,7 +7,7 @@
   import type maplibregl from 'maplibre-gl';
 
   import {
-    ensureMapContext, destroyMapContext, createMapContextWithTheme, destroyMapContextInstance, setBaseMapTheme,
+    ensureMapContext, destroyMapContext, createMapContext, destroyMapContextInstance,
     setHistCartLayerVisible, setHistCartLayerOpacity,
     setLandUsageLayerVisible, setLandUsageLayerOpacity, getLandUsageLayerId,
     setPrimitiveLayerVisible, isPrimitiveLayerVisible,
@@ -36,7 +36,6 @@
     getIiifMainLayerIds as getIiifMainLayerIdsData,
     loadIiifLayerIntoPane,
     scheduleMainSync,
-    warmInitialIiifLayers as warmInitialIiifLayersData,
   } from '$lib/artemis/iiif/layerLifecycle';
   import {
     handleManifestSelection,
@@ -86,7 +85,6 @@
 
   type PaneId = 'left' | 'right';
   type ViewMode = 'single' | 'split';
-  type ThemeMode = 'light' | 'dark';
   let mapDiv: HTMLElement;
   let map: maplibregl.Map;
   let mapStageEl: HTMLElement;
@@ -96,8 +94,6 @@
   let rightMapInitInFlight = false;
   let suppressSyncPane: PaneId | null = null;
   let viewMode: ViewMode = 'single';
-  let themeMode: ThemeMode = 'light';
-  const THEME_STORAGE_KEY = 'artemis-theme-mode';
   let scaleWidthPx = 0;
   let scaleLabel = '';
   let siteMetadata: RuntimeSiteMetadata = {
@@ -122,9 +118,7 @@
   // ─── Config ────────────────────────────────────────────────────────────────
 
   const DEFAULT_BASE_URL = 'https://ghentcdh.github.io/Artemis-RnD-Data/build';
-  const FEATURE_FLAGS: { startupPreloadScreen: boolean; parallelIiifLoading: boolean; spriteDebugMode: boolean } = {
-    // Flip to false to bypass the startup preload/loading-screen concept.
-    startupPreloadScreen: false,
+  const FEATURE_FLAGS: { parallelIiifLoading: boolean; spriteDebugMode: boolean } = {
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
     parallelIiifLoading: false,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
@@ -288,11 +282,6 @@
     setViewMode(viewMode === 'split' ? 'single' : 'split');
   }
 
-  function applyThemeMode(next: ThemeMode) {
-    themeMode = next;
-    document.documentElement.dataset.theme = next;
-  }
-
   function formatScaleDistance(distanceMeters: number): string {
     if (distanceMeters >= 1000) {
       const km = distanceMeters / 1000;
@@ -402,14 +391,6 @@
     }
   }
 
-  async function applyThemeToMap(targetMap: maplibregl.Map, paneId: PaneId | 'main') {
-    const changed = setBaseMapTheme(targetMap, themeMode);
-    if (!changed) return;
-    await new Promise<void>((resolve) => targetMap.once('style.load', () => resolve()));
-    await rehydratePaneMap(targetMap, paneId);
-  }
-
-
   function log(_level: 'INFO' | 'WARN' | 'ERROR', _msg: string) {}
 
   // ─── Layer state ───────────────────────────────────────────────────────────
@@ -479,11 +460,6 @@
   let imageCollectionBubbleLngLat: { lon: number; lat: number } | null = null;
   let imageCollectionBubblePane: PaneId = 'left';
   let imageCollectionBubblePlaceBelow = false;
-  let initialWarmupPending = FEATURE_FLAGS.startupPreloadScreen;
-  let initialWarmupRunning = false;
-  let initialWarmupDone = 0;
-  let initialWarmupTotal = 0;
-  let initialWarmupLabel = 'Preparing IIIF layers';
   $: dualPaneEnabled = viewMode !== 'single';
   $: isSplitLayout = viewMode === 'split';
   $: hasViewerPane = viewerOpen && viewerItem !== null;
@@ -745,33 +721,6 @@
     });
   }
 
-  async function warmInitialIiifLayers() {
-	    await warmInitialIiifLayersData({
-	      startupPreloadScreen: FEATURE_FLAGS.startupPreloadScreen,
-	      initialWarmupPending,
-	      initialWarmupRunning,
-      mainLayerOrder,
-      mainLayerLabels: MAIN_LAYER_LABELS,
-      mainLayerSubs: MAIN_LAYER_SUBS,
-      subLayerDefs: SUB_LAYER_DEFS,
-      getIiifInfoForSub,
-      setInitialWarmupState: ({ running, total, done, label, pending }) => {
-        if (running != null) initialWarmupRunning = running;
-        if (total != null) initialWarmupTotal = total;
-        if (done != null) initialWarmupDone = done;
-        if (label != null) initialWarmupLabel = label;
-        if (pending != null) initialWarmupPending = pending;
-      },
-      setMainLayerLoading: (mainId, value) => {
-        mainLayerLoading = { ...mainLayerLoading, [mainId]: value };
-      },
-      loadIiifLayer,
-	      parkLayerGroup: async (groupId) => {
-	        await parkLayerGroup(map, groupId);
-	      },
-	    });
-	  }
-
   function shouldShowIiifGroup(mainId: string, iiifSubId: string): boolean {
     return Boolean(mainLayerEnabled[mainId] && subLayerEnabled[iiifSubId]);
   }
@@ -959,8 +908,6 @@
         normalizeSearchText,
         asFiniteNumber,
       });
-
-      await warmInitialIiifLayers();
 
       // Re-trigger load for any main layers that were marked enabled before the index was
       // ready (e.g. set by Timeslider's onMount firing before layers were populated).
@@ -1367,8 +1314,7 @@
       rightMap,
       rightMapInitInFlight,
       awaitTick: tick,
-      createMapContextWithTheme,
-      themeMode,
+      createMapContext,
       leftMap: map,
       setRightMapInitInFlight: (value) => {
         rightMapInitInFlight = value;
@@ -1437,14 +1383,7 @@
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   onMount(() => {
-    try {
-      const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-      applyThemeMode(storedTheme === 'dark' ? 'dark' : 'light');
-    } catch {
-      applyThemeMode('light');
-    }
-
-	    map = ensureMapContext(mapDiv, themeMode);
+	    map = ensureMapContext(mapDiv);
 	    map.on('load', () => {
 	      updateScaleIndicator(map);
 	      logViewLevel(map, 'left');
@@ -1595,13 +1534,6 @@
     destroyMapContext();
   });
 
-  $: if (map && themeMode) {
-    void applyThemeToMap(map, 'main');
-  }
-
-  $: if (rightMap && themeMode) {
-    void applyThemeToMap(rightMap, 'right');
-  }
 </script>
 
 <div class="wrap">
@@ -1662,19 +1594,6 @@
         <div class="split-divider" aria-hidden="true"></div>
       {/if}
     </div>
-
-    {#if initialWarmupPending || initialWarmupRunning}
-      <div class="startup-overlay" role="status" aria-live="polite">
-        <div class="startup-card">
-          <div class="startup-loader" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-          <div class="startup-title">Preparing Maps</div>
-        </div>
-      </div>
-    {/if}
 
     <ToponymSearch
       toponymIndex={toponymIndex}
@@ -1855,7 +1774,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 18px;
+    width: var(--split-pane-edge-shadow-width);
     pointer-events: none;
     z-index: 3;
   }
@@ -1886,68 +1805,6 @@
   .map-canvas {
     width: 100%;
     height: 100%;
-  }
-
-  .startup-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 90;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    background: var(--startup-overlay-bg);
-    backdrop-filter: blur(4px);
-  }
-
-  .startup-card {
-    width: min(280px, calc(100vw - 32px));
-    padding: 24px 24px 22px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--startup-card-border);
-    background: var(--startup-card-bg);
-    box-shadow: var(--shadow-card);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-  }
-
-  .startup-loader {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 18px;
-  }
-
-  .startup-loader span {
-    width: 10px;
-    height: 10px;
-    border-radius: var(--radius-pill);
-    background: var(--startup-loader-fill);
-    animation: startup-bounce 0.9s ease-in-out infinite;
-  }
-
-  .startup-loader span:nth-child(2) { animation-delay: 0.12s; }
-  .startup-loader span:nth-child(3) { animation-delay: 0.24s; }
-
-  .startup-title {
-    font-size: 24px;
-    line-height: 1.05;
-    font-weight: 700;
-    color: var(--startup-title-color);
-    text-align: center;
-  }
-
-  @keyframes startup-bounce {
-    0%, 80%, 100% {
-      transform: translateY(0);
-      opacity: 0.5;
-    }
-    40% {
-      transform: translateY(-5px);
-      opacity: 1;
-    }
   }
 
   .timeslider-wrap {

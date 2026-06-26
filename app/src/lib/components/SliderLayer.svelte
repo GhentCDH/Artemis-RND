@@ -7,7 +7,6 @@
   export let hasOverlap = false;
   export let loading = false;
   export let isDimmed = false;
-  export let meanderColor = '';
   export let bulgeDirection: 'above' | 'below' = 'above';
   export let sourceBlockStyle = '';
   export let onMeanderClick: (src: SliderSource, event: MouseEvent | KeyboardEvent) => void = () => {};
@@ -18,6 +17,8 @@
   const viewBoxHeight = 72;
   const axisYAbove = 64;
   const axisYBelow = 8;
+  $: activeGradientId = `meander-active-gradient-${src.key}`;
+
   function trackWaveFloor(lane: number): { primary: number; secondary: number } {
     if (lane === 1 || lane === 4) return { primary: 58, secondary: 46 };
     if (lane === 2 || lane === 3) return { primary: 46, secondary: 32 };
@@ -52,7 +53,7 @@
   data-source-key={src.key}
   role="group"
   aria-label={`${src.label} timeline controls`}
-  style={`${sourceBlockStyle};--meander-color:${meanderColor || src.color}`}
+  style={sourceBlockStyle}
 >
   <button
     data-source-key={src.key}
@@ -74,6 +75,13 @@
       aria-hidden="true"
       focusable="false"
     >
+      <defs>
+        <linearGradient id={activeGradientId} x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="currentColor"></stop>
+          <stop class="meander-active-stop" offset="50%"></stop>
+          <stop offset="100%" stop-color="currentColor"></stop>
+        </linearGradient>
+      </defs>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <path
         class="meander-hit"
@@ -84,7 +92,7 @@
         on:mouseleave={onPillLeave}
       ></path>
       <path class="meander-river" d={meanderPath}></path>
-      <path class="meander-current" d={meanderPath}></path>
+      <path class="meander-current" d={meanderPath} style={isCurrent ? `stroke:url(#${activeGradientId})` : ''}></path>
       <path class="meander-flow" d={meanderPath}></path>
     </svg>
     <span class="meander-dot" style={`top:${dotTop}`}></span>
@@ -113,7 +121,7 @@
     padding: 0;
     margin: 0;
     pointer-events: none;
-    color: var(--meander-color, var(--c));
+    color: var(--c);
     transition: opacity 200ms ease, filter 200ms ease;
   }
 
@@ -183,6 +191,10 @@
     stroke-width: var(--river-stroke-width);
   }
 
+  .meander-active-stop {
+    stop-color: var(--timeline-layer-active-color);
+  }
+
   .meander-current {
     opacity: 0.92;
     stroke-width: calc(var(--river-stroke-width) * 0.42);
@@ -245,5 +257,6 @@
   .source-block.is-current .meander-dot {
     width: 10px;
     height: 10px;
+    background: var(--timeline-layer-active-color);
   }
 </style>

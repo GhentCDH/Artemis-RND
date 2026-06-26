@@ -219,7 +219,7 @@
   }
 
   .period-row {
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 12px;
     color: var(--text-muted);
     margin-left: 18px;
