@@ -79,6 +79,7 @@
   import Timeslider from '$lib/components/Timeslider.svelte';
   import MapInfoWindow from '$lib/components/MapInfoWindow.svelte';
   import BrandingPanel from '$lib/components/BrandingPanel.svelte';
+  import ImagesInViewPanel from '$lib/components/ImagesInViewPanel.svelte';
   import type { CollectionInfo } from '$lib/components/timeslider/types';
 
   // ─── Map ───────────────────────────────────────────────────────────────────
@@ -204,6 +205,9 @@
   let massartSpriteRects: Record<string, { x: number; y: number; width: number; height: number }> = {};
   let massartSpriteSheetUrl = '';
   let massartSpriteSheetSize: [number, number] = [0, 0];
+  let imagesInView: Array<MassartItem & { spriteRef?: any }> = [];
+  let imagesInViewPanelOpen = false;
+  let closeImagesPanel = false;
 
   async function loadMassartData() {
     try {
@@ -235,6 +239,38 @@
       sheetHeight: massartSpriteSheetSize[1],
       ...rect,
     };
+  }
+
+  function computeImagesInView() {
+    if (!map || massartItems.length === 0) { imagesInView = []; return; }
+    const bounds = map.getBounds();
+    const w = bounds.getWest(), e = bounds.getEast();
+    const s = bounds.getSouth(), n = bounds.getNorth();
+    const inBounds = massartItems.filter(
+      item => item.lat != null && item.lon != null &&
+              item.lat >= s && item.lat <= n &&
+              item.lon >= w && item.lon <= e
+    );
+    inBounds.sort((a, b) => {
+      const ya = parseInt(a.year ?? '9999');
+      const yb = parseInt(b.year ?? '9999');
+      return ya - yb;
+    });
+    imagesInView = inBounds.map(item => ({
+      ...item,
+      spriteRef: massartSpriteRef(item),
+    }));
+  }
+
+  function setMassartPinsVisible(visible: boolean) {
+    if (!map) return;
+    const visibility = visible ? 'visible' : 'none';
+    if (map.getLayer('massart-pins-inactive')) {
+      map.setLayoutProperty('massart-pins-inactive', 'visibility', visibility);
+    }
+    if (map.getLayer('massart-pins-active')) {
+      map.setLayoutProperty('massart-pins-active', 'visibility', visibility);
+    }
   }
 
   function onTimelineImageFocus(e: CustomEvent<{ pane: PaneId; title: string; lon: number; lat: number }>) {
@@ -1071,7 +1107,7 @@
   function onMassartClick(item: MassartItem) {
     if (item.lat != null && item.lon != null) {
       flashLocationMarker(map, item.lon, item.lat);
-      flyToCoordinates({ lon: item.lon, lat: item.lat }, 11);
+      flyToCoordinates(item.lon, item.lat, `Photo "${item.title ?? 'Untitled'}"`);
     }
   }
 
@@ -1424,6 +1460,7 @@
       loadMassartData().then(() => {
         if (massartItems.length > 0) {
           setMassartPins(map, massartItems, massartYear, MASSART_LEEWAY);
+          computeImagesInView();
 
           // Click on a pin → open an anchored info bubble for that photo.
           for (const layerId of getMassartClickLayerIds()) {
@@ -1520,6 +1557,7 @@
 	      syncCamera('left');
 	      updateScaleIndicator(map);
 	      logViewLevel(map, 'left');
+	      computeImagesInView();
 	    };
 
     map.on('mousemove', onMouseMove);
@@ -1695,6 +1733,31 @@
 
     <BrandingPanel {siteMetadata} />
 
+    <ImagesInViewPanel
+      items={imagesInView}
+      forceClose={closeImagesPanel}
+      on:click={(e) => {
+        const item = e.detail;
+        openViewer({
+          title: item.title,
+          sourceManifestUrl: item.manifestUrl,
+          imageServiceUrl: item.imageServiceUrl,
+          layerLabel: '',
+          centerLon: item.lon,
+          centerLat: item.lat,
+          spriteRef: item.spriteRef,
+        }, 'left');
+      }}
+      on:open={() => {
+        imagesInViewPanelOpen = true;
+        setMassartPinsVisible(true);
+      }}
+      on:close={() => {
+        imagesInViewPanelOpen = false;
+        setMassartPinsVisible(false);
+      }}
+    />
+
     {#if imageCollectionBubbleItem}
       <ImageCollectionBubble
         item={imageCollectionBubbleItem}
@@ -1712,6 +1775,11 @@
             height: e.detail.placeholderHeight,
           });
           closeImageCollectionBubble();
+          closeImagesPanel = true;
+          // Reset the signal after a tick so the panel can process it
+          void Promise.resolve().then(() => {
+            closeImagesPanel = false;
+          });
         }}
       />
     {/if}

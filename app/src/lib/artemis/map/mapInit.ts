@@ -654,11 +654,11 @@ function makeMassartIcon(size: number, accent: string): ImageData | null {
 
 function ensureMassartIcons(map: maplibregl.Map): void {
   if (!map.hasImage(MASSART_ICON_INACTIVE)) {
-    const inactive = makeMassartIcon(18, "#D4A84B");
+    const inactive = makeMassartIcon(18, "#4F84A8");
     if (inactive) map.addImage(MASSART_ICON_INACTIVE, inactive, { pixelRatio: 2 });
   }
   if (!map.hasImage(MASSART_ICON_ACTIVE)) {
-    const active = makeMassartIcon(22, "#F59E0B");
+    const active = makeMassartIcon(22, "#4F84A8");
     if (active) map.addImage(MASSART_ICON_ACTIVE, active, { pixelRatio: 2 });
   }
 }
@@ -709,14 +709,14 @@ export function setMassartPins(
       id: MASSART_LAYER_INACTIVE,
       type: "symbol",
       source: MASSART_SOURCE_ID,
-      filter: massartInactiveFilter(year, leeway),
       layout: {
         "icon-image": MASSART_ICON_INACTIVE,
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
+        "visibility": "none",
       },
       paint: {
-        "icon-opacity": 0.42,
+        "icon-opacity": 1,
       }
     });
   }
@@ -726,11 +726,11 @@ export function setMassartPins(
       id: MASSART_LAYER_ACTIVE,
       type: "symbol",
       source: MASSART_SOURCE_ID,
-      filter: massartActiveFilter(year, leeway),
       layout: {
         "icon-image": MASSART_ICON_ACTIVE,
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
+        "visibility": "none",
       },
       paint: {
         "icon-opacity": 1,
@@ -754,8 +754,7 @@ export function updateMassartActiveYear(
 }
 
 export function getMassartClickLayerIds(): string[] {
-  // Only the active-year pin layer should be interactive.
-  return [MASSART_LAYER_ACTIVE];
+  return [MASSART_LAYER_INACTIVE, MASSART_LAYER_ACTIVE];
 }
 
 const FLASH_STYLE_ID = 'location-flash-marker-style';

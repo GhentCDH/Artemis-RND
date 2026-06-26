@@ -161,16 +161,6 @@
   let hoveredSrc: SourceDef | null = null;
   let tooltipFixedStyle = '';
 
-  $: massartByYear = massartItems.reduce<Map<number, MassartItem[]>>((acc, item) => {
-    const y = parseInt(item.year ?? '0', 10);
-    if (y > 1000) {
-      const arr = acc.get(y) ?? [];
-      arr.push(item);
-      acc.set(y, arr);
-    }
-    return acc;
-  }, new Map());
-
   // Hardcoded stable axis bounds:
   // historical map eras start at 1700; current Massart dataset spans 1904-1912.
   // We keep the decade-padded range fixed to avoid runtime layout churn.
@@ -306,28 +296,6 @@
       rightActiveSourceKey = rightActiveSourceKey === key ? null : rightActiveSourceKey;
       nextComparePane = 'right';
     }
-  }
-
-  function isDotNear(yr: number): boolean {
-    if (!leftActiveSourceKey) return false;
-    const activeSrc = sourceByKey(leftActiveSourceKey as SourceKey);
-    return activeSrc && Math.abs(yr - activeSrc.repr) <= yearLeeway;
-  }
-
-  function focusDot(items: MassartItem[], pane: PaneId = 'left') {
-    const firstItem = items[0];
-    if (firstItem && Number.isFinite(firstItem.lon) && Number.isFinite(firstItem.lat)) {
-      dispatch('focus-image', {
-        pane,
-        title: firstItem.title,
-        lon: Number(firstItem.lon),
-        lat: Number(firstItem.lat),
-      });
-    }
-  }
-
-  function onPhotoDotClick(year: number, items: MassartItem[]) {
-    focusDot(items, 'left');
   }
 
   function sourceByKey(key: SourceKey): SourceDef {
@@ -758,18 +726,6 @@
           <span class="ts-tick-label">{tick.year}</span>
         </span>
       {/each}
-
-      {#each [...massartByYear.entries()] as [yr, items]}
-        <button
-          class="img-dot"
-          class:img-dot--multi={items.length > 1}
-          class:img-dot--near={isDotNear(yr)}
-          style="left:{pct(yr,axisStart,axisSpan)}"
-          title="{yr} · {items.length} photo{items.length > 1 ? 's' : ''}"
-          aria-label="Massart photos {yr}"
-          on:click={() => onPhotoDotClick(yr, items)}
-        ></button>
-      {/each}
     </div>
 
     {#each bottomLanes as lane}
@@ -902,46 +858,6 @@
     stroke: var(--timeline-layer-color);
     stroke-width: calc(var(--river-stroke-width) * 0.42);
     opacity: 0.86;
-  }
-
-  .img-dot {
-    position: absolute;
-    top: 50%;
-    transform: translate(-50%, -50%) scale(1);
-    width: 18px;
-    height: 18px;
-    border-radius: var(--radius-xs);
-    background-color: var(--photo-chip-background);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Crect x='2.25' y='3' width='13.5' height='12' rx='2' fill='%23d4a84b'/%3E%3Ccircle cx='6.2' cy='7.1' r='1.35' fill='white'/%3E%3Cpath d='M4.2 13l3.1-3.2 2.1 2 2.2-2.5 2.2 3.7H4.2z' fill='white'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: center;
-    border: 1.5px solid var(--photo-chip-border);
-    padding: 0;
-    cursor: pointer;
-    z-index: 9;
-    pointer-events: auto;
-    box-shadow: var(--photo-chip-shadow);
-    transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
-  }
-
-  .img-dot:hover {
-    transform: translate(-50%, -50%) scale(1.35);
-    box-shadow: var(--photo-chip-shadow-hover);
-  }
-
-  .img-dot--multi {
-    width: 20px;
-    height: 20px;
-    box-shadow: var(--photo-chip-shadow-multi);
-  }
-
-  .img-dot--near {
-    width: 22px;
-    height: 22px;
-    background-color: var(--photo-chip-background);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Crect x='2.5' y='3.25' width='17' height='15' rx='2.4' fill='%23f59e0b'/%3E%3Ccircle cx='7.7' cy='8.5' r='1.65' fill='white'/%3E%3Cpath d='M5.2 15.9l4-4.1 2.7 2.5 2.8-3.2 2.8 4.8H5.2z' fill='white'/%3E%3C/svg%3E");
-    transform: translate(-50%, -50%) scale(1.18);
-    box-shadow: var(--photo-chip-shadow-near);
   }
 
   .ts-tick {
