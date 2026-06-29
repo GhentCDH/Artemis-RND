@@ -1,40 +1,44 @@
 
 :root {
   /* --- Typography ----------------------------------------- */
-  --font-ui:   "DM Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui:   "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-readable: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --text-readable: #9aa2a6;
+  --text-readable-size: 12px;
+  --text-readable-line-height: 1.25;
 
   /* --- Core Colors ---------------------------------------- */
-  --text-primary:   #252525;
-  --text-secondary: #545454;
+  --text-primary:   #555555;
+  --text-secondary: #6a6a6a;
   --text-muted:     #757575;
   --text-ok:        #4a7a4a;
   --text-error:     #8b3a2a;
   --accent-color:   #6366f1;
 
   /* --- Borders -------------------------------------------- */
-  --border-subtle: rgba(120, 100, 60, 0.09);
-  --border-ui:     rgba(120, 100, 60, 0.28);
-  --border-light:  rgba(120, 100, 60, 0.14);
+  --border-subtle: rgba(109, 92, 58, 0.1);
+  --border-ui:     rgba(109, 92, 58, 0.22);
+  --border-light:  rgba(109, 92, 58, 0.14);
 
   /* --- Shared Surfaces ------------------------------------ */
-  --raised-surface-background:       #ffffff;
-  --muted-surface-background:        rgba(120, 100, 60, 0.08);
-  --control-border-hover:      rgba(120, 100, 60, 0.3);
-  --control-focus-ring:        rgba(120, 100, 60, 0.5);
+  --raised-surface-background:       #f8f5ed;
+  --muted-surface-background:        rgba(109, 92, 58, 0.07);
+  --control-border-hover:      rgba(109, 92, 58, 0.26);
+  --control-focus-ring:        rgba(61, 120, 158, 0.46);
   --overlay-panel-background:  rgba(28, 22, 10, 0.94);
-  --list-row-background:    #eae6de;
-  --list-row-background-hover: #e0dbd0;
-  --control-shadow: 0 1px 3px rgba(40, 30, 10, 0.16);
+  --list-row-background:    #f0ece2;
+  --list-row-background-hover: #ebe5d8;
+  --control-shadow: 0 1px 3px rgba(48, 38, 20, 0.08);
 
   /* --- Window Primitive ----------------------------------- */
-  --window-background: rgb(255, 255, 255);
-  --window-header-background: #ffffff;
-  --window-border: rgba(120, 100, 60, 0.14);
-  --window-shadow: 0 24px 44px rgba(40, 30, 10, 0.18), 0 8px 18px rgba(40, 30, 10, 0.08);
+  --window-background: #f8f5ed;
+  --window-header-background: #f8f5ed;
+  --window-border: rgba(109, 92, 58, 0.18);
+  --window-shadow: 0 1px 3px rgba(48, 38, 20, 0.12), 0 8px 18px rgba(48, 38, 20, 0.1);
   --window-backdrop-background: rgba(0, 0, 0, 0.4);
 
   /* --- Tooltip -------------------------------------------- */
-  --tooltip-background: rgb(255, 255, 255);
+  --tooltip-background: var(--window-background);
   --tooltip-text: var(--text-primary);
   --tooltip-border: var(--window-border);
   --tooltip-shadow: var(--window-shadow);
@@ -45,7 +49,7 @@
   --problem-error-color: #7a3020;
 
   /* --- Corner Radii ---------------------------------------- */
-  --radius-base: 8px;
+  --radius-base: 4px;
   --radius-xs:   calc(var(--radius-base) * 0.75);
   --radius-sm:   var(--radius-base);
   --radius-md:   calc(var(--radius-base) * 1.5);
@@ -54,21 +58,34 @@
 
   /* --- Button Primitive ----------------------------------- */
   --button-text: var(--text-primary);
-  --button-background: var(--window-header-background);
-  --button-background-hover: hsl(0, 0%, 98%);
+  --button-background: #fbf8f1;
+  --button-background-hover: #f2ede3;
   --button-border: var(--border-ui);
-  --button-primary-background: #4f84a8;
-  --button-primary-background-hover: #395d8a;
+  --button-primary-background: #3f789f;
+  --button-primary-background-hover: #326481;
   --button-primary-text: #ffffff;
   --button-active-background: var(--button-primary-background);
+  --button-inactive-tint-background: #edf4f6;
+  --button-inactive-tint-border: rgba(63, 120, 159, 0.18);
 
   /* --- Timeline ------------------------------------------- */
-  --timeline-tick:        rgba(120, 100, 60, 0.22);
-  --timeline-tick-strong: rgba(120, 100, 60, 0.52);
-  --timeline-label:       rgba(80, 68, 44, 0.4);
-  --timeline-label-strong: rgba(80, 68, 44, 0.68);
-  --timeline-layer-color: #8db6db;
-  --timeline-layer-active-color: #3a8edc;
+  --timeline-layer-color: #8fa8b7;
+  --timeline-layer-active-color: #2f6f99;
+
+  /* --- Map ------------------------------------------------- */
+  --map-background: var(--window-background);
+  --map-water-fill: #607d91;
+
+  /* --- Ticks ---------------------------------------------- */
+  --timeline-tick-line-color: rgba(120, 100, 60, 0.1);
+  --timeline-tick-line-strong-color: rgba(120, 100, 60, 0.52);
+  --timeline-tick-line-width: 1px;
+  --timeline-tick-label-color: rgba(80, 68, 44, 0.6);
+  --timeline-tick-label-strong-color: rgba(80, 68, 44, 0.75);
+  --timeline-tick-label-size: 10px;
+  --timeline-tick-label-gap: 8px;
+  --timeline-tick-label-offset-y: 7px;
+  --timeline-tick-label-font: var(--font-ui);
 
   /* --- Split View ----------------------------------------- */
   --split-pane-edge-shadow:       rgba(60, 88, 120, 0.16);
@@ -109,7 +126,7 @@
   --bubble-status-error:    rgba(132, 43, 43, 0.82);
 
   /* --- Map ------------------------------------------------ */
-  --river-stroke-width: 15px;
+  --river-stroke-width: 10px;
 }
 
 html {

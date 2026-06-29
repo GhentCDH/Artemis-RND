@@ -8,6 +8,7 @@
 
   import {
     ensureMapContext, destroyMapContext, createMapContext, destroyMapContextInstance,
+    setBaselayer,
     setHistCartLayerVisible, setHistCartLayerOpacity,
     setLandUsageLayerVisible, setLandUsageLayerOpacity, getLandUsageLayerId,
     setPrimitiveLayerVisible, isPrimitiveLayerVisible,
@@ -80,6 +81,8 @@
   import MapInfoWindow from '$lib/components/MapInfoWindow.svelte';
   import BrandingPanel from '$lib/components/BrandingPanel.svelte';
   import ImagesInViewPanel from '$lib/components/ImagesInViewPanel.svelte';
+  import Window from '$lib/artemis/ui/primitives/Window.svelte';
+  import Button from '$lib/artemis/ui/primitives/Button.svelte';
   import type { CollectionInfo } from '$lib/components/timeslider/types';
 
   // ─── Map ───────────────────────────────────────────────────────────────────
@@ -109,12 +112,88 @@
   let searchFocusMainId: MainLayerId | null = null;
   let searchFocusYear: number | null = null;
   let searchFocusNonce = 0;
+  let searchModalOpen = false;
   let activeCollection: CollectionInfo | null = null;
   let rightActiveCollection: CollectionInfo | null = null;
   let clearLeftCollectionNonce = 0;
   let clearRightCollectionNonce = 0;
   let mapInfoWindowOpen = false;
   let rightMapInfoWindowOpen = false;
+  let baselayersMenuOpen = false;
+  let selectedBaselayer = 'scheldt';
+  let customBaselayers: Array<{ id: string; label: string; tileUrl: string }> = [];
+  let customBaselayerFormOpen = false;
+  let customBaselayerUrl = '';
+  let customBaselayerLabel = '';
+  let customBaselayerChecking = false;
+  let customBaselayerCheckPassed = false;
+  let customBaselayerCheckError = '';
+  let customBaselayerResolvedTileUrl = '';
+
+  function resolveWmtsTileUrl(rawUrl: string): string {
+    const parsed = new URL(rawUrl);
+    const layer = parsed.searchParams.get('layers') ?? parsed.searchParams.get('layer') ?? '';
+    const base = `${parsed.origin}${parsed.pathname}`;
+    return `${base}?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0` +
+      `&LAYER=${encodeURIComponent(layer)}&STYLE=&FORMAT=image/png` +
+      `&TILEMATRIXSET=GoogleMapsVL&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
+  }
+
+  function isWmtsUrl(url: string): boolean {
+    return /wmts/i.test(url);
+  }
+
+  async function addCustomBaselayer() {
+    customBaselayerChecking = true;
+    customBaselayerCheckPassed = false;
+    customBaselayerCheckError = '';
+    customBaselayerResolvedTileUrl = '';
+    try {
+      const url = customBaselayerUrl.trim();
+      if (!url) throw new Error('URL is required');
+      if (!customBaselayerLabel.trim()) throw new Error('Label is required');
+
+      let tileUrl: string;
+      if (isWmtsUrl(url)) {
+        tileUrl = resolveWmtsTileUrl(url);
+      } else if (url.includes('{z}') && url.includes('{x}') && url.includes('{y}')) {
+        tileUrl = url;
+      } else {
+        throw new Error('Provide a WMTS URL (e.g. …/wmts?layers=…) or an XYZ tile URL with {z}/{x}/{y}');
+      }
+
+      const testUrl = tileUrl.replace('{z}', '10').replace('{y}', '341').replace('{x}', '526');
+      const res = await fetch(testUrl, { method: 'HEAD', signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error(`Tile request returned ${res.status}`);
+
+      const id = `custom-${Date.now()}`;
+      customBaselayers = [...customBaselayers, { id, label: customBaselayerLabel.trim(), tileUrl }];
+      switchBaselayer(id, tileUrl);
+      customBaselayerFormOpen = false;
+    } catch (e: any) {
+      customBaselayerCheckError = e?.message ?? 'Failed';
+    } finally {
+      customBaselayerChecking = false;
+    }
+  }
+
+  function openCustomBaselayerForm() {
+    baselayersMenuOpen = false;
+    customBaselayerUrl = '';
+    customBaselayerLabel = '';
+    customBaselayerCheckPassed = false;
+    customBaselayerCheckError = '';
+    customBaselayerResolvedTileUrl = '';
+    customBaselayerFormOpen = true;
+  }
+
+  // Search button cycling text with terminal effect
+  const SEARCH_PROMPTS = ['Search Maps', 'Search Places', 'Search Manifest'];
+  let currentPromptIndex = 1;
+  let displayText = 'Search Places';
+  let isRemoving = false;
+  let promptCycleTimer: ReturnType<typeof setTimeout> | null = null;
+  let charRemovalTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -297,6 +376,22 @@
     void syncMapsAfterLayoutChange(nextMode);
   }
 
+  function switchBaselayer(layerId: string, customTileUrl?: string) {
+    mainLayerEnabled = makeInitialMainLayerEnabled();
+    subLayerEnabled = makeInitialSubLayerEnabled();
+    activeCollection = null;
+    rightActiveCollection = null;
+    clearLeftCollectionNonce += 1;
+    clearRightCollectionNonce += 1;
+    selectedBaselayer = layerId;
+
+    const id = (layerId === 'scheldt' || layerId === 'osm') ? layerId : 'custom';
+    setBaselayer(map, id, () => { void rehydratePaneMap(map, 'main'); }, customTileUrl);
+    if (rightMap) {
+      setBaselayer(rightMap, id, () => { void rehydratePaneMap(rightMap!, 'right'); }, customTileUrl);
+    }
+  }
+
   function waitForAnimationFrame() {
     return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   }
@@ -428,6 +523,109 @@
   }
 
   function log(_level: 'INFO' | 'WARN' | 'ERROR', _msg: string) {}
+
+  // Screenshot functionality
+  function captureScreenshot() {
+    if (!map) return;
+
+    function isCanvasReadable(canvas: HTMLCanvasElement): boolean {
+      try { canvas.toDataURL(); return true; } catch { return false; }
+    }
+
+    function drawCanvasAtScreenPos(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, stageRect: DOMRect, dpr: number) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.round((rect.left - stageRect.left) * dpr);
+      const y = Math.round((rect.top  - stageRect.top)  * dpr);
+      ctx.drawImage(canvas, x, y, canvas.width, canvas.height);
+    }
+
+    function doCapture() {
+      const stageRect = mapStageEl!.getBoundingClientRect();
+
+      // Derive true DPR from map canvas vs its container CSS size
+      const mapCanvas = map.getCanvas();
+      const mapContainer = mapDiv as HTMLElement;
+      const dpr = mapContainer.clientWidth > 0 ? mapCanvas.width / mapContainer.clientWidth : (window.devicePixelRatio || 1);
+
+      // Export canvas covers the full stage at physical resolution
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width  = Math.round(stageRect.width  * dpr);
+      exportCanvas.height = Math.round(stageRect.height * dpr);
+      const ctx = exportCanvas.getContext('2d');
+      if (!ctx) return;
+
+      // Draw all map canvases at their actual screen positions
+      const mapCanvases = Array.from(mapStageEl!.querySelectorAll<HTMLCanvasElement>('.map-canvas canvas'));
+      for (const c of mapCanvases) {
+        drawCanvasAtScreenPos(ctx, c, stageRect, dpr);
+      }
+
+      // Composite all OSD viewer canvases on top at their actual screen positions
+      if (hasViewerPane) {
+        const osdCanvases = Array.from(mapStageEl!.querySelectorAll<HTMLCanvasElement>('.viewer-body canvas'));
+        for (const c of osdCanvases) {
+          if (!isCanvasReadable(c)) continue;
+          const rect = c.getBoundingClientRect();
+          const x = Math.round((rect.left - stageRect.left) * dpr);
+          const y = Math.round((rect.top  - stageRect.top)  * dpr);
+          // Fill with --window-background from theme.css before compositing transparent OSD canvas
+          ctx.fillStyle = '#f8f5ed';
+          ctx.fillRect(x, y, c.width, c.height);
+          drawCanvasAtScreenPos(ctx, c, stageRect, dpr);
+        }
+      }
+
+      exportCanvas.toBlob((blob) => { if (blob) downloadBlob(blob); }, 'image/png');
+    }
+
+    // Capture during render frame before WebGL clears the buffer
+    if (isSplitLayout && rightMap) {
+      // Trigger repaint on both, capture once both have rendered
+      let leftDone = false;
+      let rightDone = false;
+      const tryCapture = () => { if (leftDone && rightDone) doCapture(); };
+      map.once('render', () => { leftDone = true; tryCapture(); });
+      rightMap.once('render', () => { rightDone = true; tryCapture(); });
+      map.triggerRepaint();
+      rightMap.triggerRepaint();
+    } else {
+      map.once('render', doCapture);
+      map.triggerRepaint();
+    }
+  }
+
+  function buildScreenshotFilename(): string {
+    const center = map.getCenter();
+    const lat = center.lat.toFixed(4);
+    const lon = center.lng.toFixed(4);
+
+    const activeLabels = mainLayerOrder
+      .filter(id => mainLayerEnabled[id])
+      .map(id => MAIN_LAYER_LABELS[id] ?? id)
+      .join('+')
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_+\-]/g, '');
+
+    const layerPart = activeLabels || 'no-layers';
+
+    if (hasViewerPane && viewerItem?.title) {
+      const manifestLabel = viewerItem.title.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-]/g, '');
+      return `Artemis_${lat}N_${lon}E_${layerPart}_${manifestLabel}.png`;
+    }
+
+    return `Artemis_${lat}N_${lon}E_${layerPart}.png`;
+  }
+
+  function downloadBlob(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = buildScreenshotFilename();
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }
 
   // ─── Layer state ───────────────────────────────────────────────────────────
 
@@ -1423,9 +1621,62 @@
     closeImageCollectionBubble();
   }
 
+  $: if (viewerOpen && map && massartItems.length > 0) {
+    setMassartPinsVisible(true);
+  }
+
+  // ─── Search prompt cycling with terminal effect ────────────────────────
+
+  function startCharacterRemoval() {
+    isRemoving = true;
+    function removeChar() {
+      if (displayText.length > 0) {
+        displayText = displayText.slice(0, -1);
+        charRemovalTimer = setTimeout(removeChar, 50);
+      } else {
+        isRemoving = false;
+        currentPromptIndex = (currentPromptIndex + 1) % SEARCH_PROMPTS.length;
+        scheduleNextPrompt();
+      }
+    }
+    removeChar();
+  }
+
+  function scheduleNextPrompt() {
+    if (charRemovalTimer) clearTimeout(charRemovalTimer);
+    const currentPrompt = SEARCH_PROMPTS[currentPromptIndex];
+    let charIndex = 0;
+
+    function addChar() {
+      if (charIndex < currentPrompt.length) {
+        displayText = currentPrompt.slice(0, charIndex + 1);
+        charIndex++;
+        charRemovalTimer = setTimeout(addChar, 100);
+      } else {
+        charRemovalTimer = setTimeout(startCharacterRemoval, 2000);
+      }
+    }
+
+    addChar();
+  }
+
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   onMount(() => {
+    // Start search prompt cycling after 5 seconds
+    promptCycleTimer = setTimeout(() => {
+      scheduleNextPrompt();
+    }, 5000);
+
+    // Close baselayers menu when clicking outside
+    const handleDocumentClick = (e: MouseEvent) => {
+      const baselayersWrapper = document.querySelector('.baselayers-menu-wrapper');
+      if (baselayersWrapper && !baselayersWrapper.contains(e.target as Node)) {
+        baselayersMenuOpen = false;
+      }
+    };
+    document.addEventListener('click', handleDocumentClick);
+
 	    map = ensureMapContext(mapDiv);
 	    map.on('load', () => {
 	      updateScaleIndicator(map);
@@ -1571,6 +1822,9 @@
       map.off('mouseout',  onMouseOut);
       map.off('click',     onClick);
       map.off('move',      onMapMove);
+      if (promptCycleTimer) clearTimeout(promptCycleTimer);
+      if (charRemovalTimer) clearTimeout(charRemovalTimer);
+      document.removeEventListener('click', handleDocumentClick);
     };
   });
 
@@ -1641,10 +1895,14 @@
     </div>
 
     <ToponymSearch
+      bind:isModalOpen={searchModalOpen}
       toponymIndex={toponymIndex}
       manifestSearchIndex={manifestSearchIndex}
       massartIndex={massartItems}
-      activeMapIds={new Set(Object.entries(mainLayerEnabled).filter(([_, enabled]) => enabled).map(([id]) => id))}
+      activeMapIds={new Set([
+        ...Object.entries(mainLayerEnabled).filter(([_, enabled]) => enabled).map(([id]) => id),
+        ...Object.entries(rightMainLayerVisible).filter(([_, enabled]) => enabled).map(([id]) => id),
+      ])}
       loading={toponymLoading}
       error={toponymError}
       on:fly-to-toponym={(e) => onFlyToToponym(e.detail)}
@@ -1673,16 +1931,107 @@
             aria-pressed={isSplitLayout}
             on:click={toggleSplitMode}
           >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
+          <button
+            class="search-toggle"
+            type="button"
+            aria-label="Open search"
+            on:click={() => { searchModalOpen = true; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.35-4.35"></path>
+            </svg>
+            {#if displayText}
+              <span class="search-prompt">{displayText}</span>
+            {/if}
+          </button>
           {#if anyLayerLoading}
             <span class="toolbar-loading-ring" aria-label="Loading map layer" role="status"></span>
           {/if}
         </div>
-        {#if scaleLabel}
-          <div class="map-scale" aria-label={`Map scale indicator: ${scaleLabel} in the real world`}>
-            <span class="map-scale-label">{scaleLabel}</span>
-            <div class="map-scale-bar" style={`width:${scaleWidthPx}px;`}></div>
+        <div class="timeslider-toolbar-right">
+          {#if scaleLabel}
+            <div class="map-scale" aria-label={`Map scale indicator: ${scaleLabel} in the real world`}>
+              <span class="map-scale-label">{scaleLabel}</span>
+              <div class="map-scale-bar" style={`width:${scaleWidthPx}px;`}></div>
+            </div>
+          {/if}
+          <div class="baselayers-menu-wrapper">
+            <button
+              class="baselayers-toggle"
+              type="button"
+              title="Select base layer"
+              aria-label="Select base layer"
+              aria-expanded={baselayersMenuOpen}
+              on:click={() => (baselayersMenuOpen = !baselayersMenuOpen)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h2m2 0h2m2 0h2m2 0h2m2 0h2" />
+                <path d="M3 7h18M3 17h18" />
+              </svg>
+            </button>
+            {#if baselayersMenuOpen}
+              <div class="baselayers-menu">
+                <div class="baselayers-window">
+                  <div class="baselayers-content">
+                    <div class="baselayer-section">
+                      <Button
+                        class="baselayer-option"
+                        variant="chrome"
+                        active={selectedBaselayer === 'scheldt'}
+                        on:click={() => { switchBaselayer('scheldt'); baselayersMenuOpen = false; }}
+                      >
+                        Scheldt Gemapt
+                      </Button>
+                      <Button
+                        class="baselayer-option"
+                        variant="chrome"
+                        active={selectedBaselayer === 'osm'}
+                        on:click={() => { switchBaselayer('osm'); baselayersMenuOpen = false; }}
+                      >
+                        OpenStreetMap
+                      </Button>
+                      {#each customBaselayers as custom (custom.id)}
+                        <Button
+                          class="baselayer-option"
+                          variant="chrome"
+                          active={selectedBaselayer === custom.id}
+                          on:click={() => { switchBaselayer(custom.id, custom.tileUrl); baselayersMenuOpen = false; }}
+                        >
+                          {custom.label}
+                        </Button>
+                      {/each}
+                    </div>
+                    <div class="baselayer-separator"></div>
+                    <div class="baselayer-section">
+                      <Button
+                        class="baselayer-add-button"
+                        variant="chrome"
+                        title="Add custom base layer"
+                        aria-label="Add custom base layer"
+                        on:click={openCustomBaselayerForm}
+                      >
+                        Add Custom
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/if}
           </div>
-        {/if}
+          <button
+            class="screenshot-toggle"
+            type="button"
+            title="Screenshot without UI"
+            aria-label="Screenshot without UI"
+            on:click={captureScreenshot}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+          </button>
+        </div>
       </div>
       <Timeslider
         {massartItems}
@@ -1733,30 +2082,39 @@
 
     <BrandingPanel {siteMetadata} />
 
-    <ImagesInViewPanel
-      items={imagesInView}
-      forceClose={closeImagesPanel}
-      on:click={(e) => {
-        const item = e.detail;
-        openViewer({
-          title: item.title,
-          sourceManifestUrl: item.manifestUrl,
-          imageServiceUrl: item.imageServiceUrl,
-          layerLabel: '',
-          centerLon: item.lon,
-          centerLat: item.lat,
-          spriteRef: item.spriteRef,
-        }, 'left');
-      }}
-      on:open={() => {
-        imagesInViewPanelOpen = true;
-        setMassartPinsVisible(true);
-      }}
-      on:close={() => {
-        imagesInViewPanelOpen = false;
-        setMassartPinsVisible(false);
-      }}
-    />
+    {#if !viewerOpen}
+      <ImagesInViewPanel
+        items={imagesInView}
+        forceClose={closeImagesPanel}
+        on:click={(e) => {
+          const item = e.detail;
+          openViewer({
+            title: item.title,
+            sourceManifestUrl: item.manifestUrl,
+            imageServiceUrl: item.imageServiceUrl,
+            layerLabel: '',
+            centerLon: item.lon,
+            centerLat: item.lat,
+            spriteRef: item.spriteRef,
+          }, 'left');
+        }}
+        on:open={() => {
+          imagesInViewPanelOpen = true;
+          setMassartPinsVisible(true);
+        }}
+        on:close={() => {
+          imagesInViewPanelOpen = false;
+          setMassartPinsVisible(false);
+        }}
+      />
+    {:else}
+      <div style="display: contents;">
+        <!-- Pins stay active when viewer is open -->
+        {#if map && massartItems.length > 0}
+          <!-- Silently maintain pin visibility -->
+        {/if}
+      </div>
+    {/if}
 
     {#if imageCollectionBubbleItem}
       <ImageCollectionBubble
@@ -1782,6 +2140,49 @@
           });
         }}
       />
+    {/if}
+
+    {#if customBaselayerFormOpen}
+      <div class="custom-baselayer-backdrop" on:click|self={() => { customBaselayerFormOpen = false; }} role="presentation"></div>
+      <div class="custom-baselayer-modal">
+        <Window variant="floating" showClose={true} title="Add Custom Base Layer" on:close={() => { customBaselayerFormOpen = false; }}>
+          <div class="custom-baselayer-form">
+            <div class="custom-baselayer-field">
+              <label class="custom-baselayer-label" for="custom-url">URL</label>
+              <input
+                id="custom-url"
+                class="custom-baselayer-input"
+                type="text"
+                placeholder={"WMTS: https://…/wmts?layers=… or XYZ: https://…/{z}/{x}/{y}.png"}
+                bind:value={customBaselayerUrl}
+                on:input={() => { customBaselayerCheckPassed = false; customBaselayerCheckError = ''; customBaselayerResolvedTileUrl = ''; }}
+              />
+            </div>
+            <div class="custom-baselayer-field">
+              <label class="custom-baselayer-label" for="custom-label">Label</label>
+              <input
+                id="custom-label"
+                class="custom-baselayer-input"
+                type="text"
+                placeholder="My Base Layer"
+                bind:value={customBaselayerLabel}
+              />
+            </div>
+            {#if customBaselayerCheckError}
+              <p class="custom-baselayer-error">{customBaselayerCheckError}</p>
+            {/if}
+            <div class="custom-baselayer-actions">
+              <Button
+                variant="primary"
+                disabled={customBaselayerChecking || !customBaselayerUrl.trim() || !customBaselayerLabel.trim()}
+                on:click={addCustomBaselayer}
+              >
+                {customBaselayerChecking ? 'Checking…' : 'Add'}
+              </Button>
+            </div>
+          </div>
+        </Window>
+      </div>
     {/if}
 
   </main>
@@ -1889,9 +2290,9 @@
 
   .timeslider-wrap {
     position: absolute;
-    bottom: 12px;
-    left: 12px;
-    right: 12px;
+    bottom: 14px;
+    left: 0;
+    right: 0;
     z-index: 4;
     pointer-events: none;
   }
@@ -1902,6 +2303,7 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 8px;
+    padding: 0 12px;
     pointer-events: none;
   }
 
@@ -1909,6 +2311,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+  }
+
+  .timeslider-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     min-width: 0;
   }
 
@@ -1948,7 +2357,7 @@
     border: 1px solid var(--window-border);
     color: var(--text-secondary);
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1;
     letter-spacing: 0.02em;
     box-shadow: var(--control-shadow);
@@ -1981,7 +2390,7 @@
     background: var(--button-background);
     color: var(--text-primary);
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 400;
     letter-spacing: 0.01em;
     box-shadow: var(--control-shadow);
     cursor: pointer;
@@ -1998,6 +2407,228 @@
     background: var(--button-active-background);
     border-color: var(--button-active-background);
     color: var(--button-primary-text);
+  }
+
+  .search-toggle {
+    padding: 11px 18px;
+    min-width: 170px;
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-xs);
+    background: var(--button-background);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--control-shadow);
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+    pointer-events: auto;
+  }
+
+  .search-toggle:hover {
+    transform: translateY(-1px);
+    background: var(--button-background-hover);
+  }
+
+  .search-toggle svg {
+    flex-shrink: 0;
+  }
+
+  .search-prompt {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
+  }
+
+  .screenshot-toggle {
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-xs);
+    background: var(--button-background);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--control-shadow);
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+    pointer-events: auto;
+  }
+
+  .screenshot-toggle:hover {
+    transform: translateY(-1px);
+    background: var(--button-background-hover);
+  }
+
+  .screenshot-toggle svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .baselayers-menu-wrapper {
+    position: relative;
+  }
+
+  .baselayers-toggle {
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-xs);
+    background: var(--button-background);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--control-shadow);
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+    pointer-events: auto;
+  }
+
+  .baselayers-toggle:hover {
+    transform: translateY(-1px);
+    background: var(--button-background-hover);
+  }
+
+  .baselayers-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    z-index: 100;
+    pointer-events: auto;
+  }
+
+  .baselayers-window {
+    background: var(--window-background);
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--window-shadow);
+    min-width: 180px;
+    overflow: hidden;
+  }
+
+  .baselayers-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 6px;
+  }
+
+  .baselayer-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  :global(.baselayers-window .artemis-button) {
+    width: 100%;
+    justify-content: flex-start;
+    border-radius: var(--radius-xs);
+    font-size: 13px;
+    padding: 10px 14px;
+    min-height: 38px;
+  }
+
+  :global(.baselayers-window .baselayer-add-button) {
+    justify-content: center;
+    font-size: 16px;
+  }
+
+  .baselayer-separator {
+    height: 1px;
+    background: var(--window-border);
+    margin: 4px 0;
+  }
+
+  :global(.baselayers-window .baselayer-add-button) {
+    justify-content: flex-start;
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+  }
+
+  :global(.baselayers-window .baselayer-add-button:hover:not(:disabled)) {
+    color: var(--text-secondary);
+  }
+
+  .custom-baselayer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  .custom-baselayer-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 200;
+    width: min(420px, calc(100vw - 32px));
+  }
+
+  .custom-baselayer-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .custom-baselayer-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .custom-baselayer-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+
+  .custom-baselayer-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-xs);
+    background: var(--button-background);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+
+  .custom-baselayer-input:focus {
+    border-color: var(--button-primary-background);
+  }
+
+  .custom-baselayer-error {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-error, #c0392b);
+  }
+
+  .custom-baselayer-success {
+    margin: 0;
+    font-size: 12px;
+    color: var(--button-primary-background);
+  }
+
+  .custom-baselayer-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
   }
 
   @media (max-width: 700px) {

@@ -129,7 +129,7 @@
   .artemis-window-heading h2 {
     margin: 0;
     font-size: 16px;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1.2;
   }
 
@@ -150,5 +150,9 @@
   .artemis-window-body {
     min-height: 0;
     flex: 1 1 auto;
+  }
+
+  :global(.artemis-window .artemis-button) {
+    box-shadow: none;
   }
 </style>

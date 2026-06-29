@@ -3,7 +3,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { normalizeSearchText, scoreText } from '$lib/artemis/search/text';
-  import Tooltip from '$lib/components/Tooltip.svelte';
+  import { MAIN_LAYER_LABELS } from '$lib/artemis/config/layers';
   import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/shared/types';
 
   export let toponymIndex: ToponymIndexItem[] = [];
@@ -12,6 +12,7 @@
   export let activeMapIds: Set<string> = new Set();
   export let loading = false;
   export let error: string | null = null;
+  export let isModalOpen = false;
 
   const dispatch = createEventDispatcher<{
     'fly-to-toponym': ToponymIndexItem;
@@ -102,7 +103,11 @@
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.preventDefault();
-      closeMenu();
+      if (isModalOpen) {
+        closeModal();
+      } else {
+        closeMenu();
+      }
     }
   }
 
@@ -116,6 +121,14 @@
     cancelPendingClose();
     menuOpen = false;
     locked = false;
+    inputEl?.blur();
+  }
+
+  function closeModal(clearQuery = true) {
+    isModalOpen = false;
+    menuOpen = false;
+    locked = false;
+    if (clearQuery) query = '';
     inputEl?.blur();
   }
 
@@ -139,7 +152,7 @@
   }
 
   function handleDocumentPointerMove(event: PointerEvent) {
-    if (!menuOpen) return;
+    if (!menuOpen || isModalOpen) return;
     if (pointerWithinLeeway(event)) {
       cancelPendingClose();
       return;
@@ -149,6 +162,7 @@
 
   function handleDocumentPointerDown(event: PointerEvent) {
     if (!menuOpen) return;
+    if (isModalOpen) return;
     if (panelEl?.contains(event.target as Node)) return;
     closeMenu();
   }
@@ -175,24 +189,21 @@
   function selectToponym(item: ToponymIndexItem) {
     locked = true;
     query = item.text;
-    menuOpen = false;
-    inputEl?.blur();
+    closeModal(false);
     dispatch('fly-to-toponym', item);
   }
 
   function selectManifest(result: ManifestSearchItem & { score: number }) {
     locked = true;
     query = result.text;
-    menuOpen = false;
-    inputEl?.blur();
+    closeModal(false);
     dispatch('manifest-click', result);
   }
 
   function selectMassart(result: any & { score: number }) {
     locked = true;
     query = result.title;
-    menuOpen = false;
-    inputEl?.blur();
+    closeModal(false);
     dispatch('massart-click', result);
   }
 
@@ -202,6 +213,10 @@
     document.addEventListener('pointerdown', handleDocumentPointerDown);
   });
 
+  $: if (isModalOpen && inputEl) {
+    setTimeout(() => inputEl?.focus(), 0);
+  }
+
   onDestroy(() => {
     if (typeof document !== 'undefined') {
       document.removeEventListener('pointermove', handleDocumentPointerMove);
@@ -210,10 +225,24 @@
     cancelPendingClose();
   });
 
+  $: activeLayersList = Array.from(activeMapIds)
+    .map(id => MAIN_LAYER_LABELS[id] || id)
+    .sort()
+    .join(', ') || 'none';
+
   $: { query; activeOnly; toponymIndex; manifestSearchIndex; massartIndex; updateResults(); }
 </script>
 
-<section class="toponym-search-panel" role="search" aria-label="Toponym and manifest search" bind:this={panelEl} on:pointerenter={onPanelPointerEnter}>
+{#if isModalOpen}
+  <div class="search-modal-backdrop" on:click|self={() => closeModal()} role="presentation"></div>
+
+  <section
+    class="toponym-search-panel is-modal"
+    role="search"
+    aria-label="Toponym and manifest search"
+    bind:this={panelEl}
+    on:pointerenter={onPanelPointerEnter}
+  >
   <div class="ui-panel toponym-search-row">
     <input
       bind:this={inputEl}
@@ -245,9 +274,26 @@
     <div class="ui-panel toponym-feedback toponym-search-error">{error}</div>
   {/if}
 
-  {#if menuOpen && !locked}
+  {#if (menuOpen && !locked) || isModalOpen}
     <div class="ui-panel toponym-results" role="listbox" aria-label="Search results">
       <div class="result-controls">
+        <button
+          type="button"
+          class="active-only-button"
+          class:active={activeOnly}
+          on:click={() => (activeOnly = !activeOnly)}
+          aria-label="Toggle active layers only filter"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="rifle-scope">
+            <circle cx="12" cy="12" r="8" />
+            <circle cx="12" cy="12" r="5" />
+            <line x1="12" y1="2" x2="12" y2="5" />
+            <line x1="12" y1="19" x2="12" y2="22" />
+            <line x1="2" y1="12" x2="5" y2="12" />
+            <line x1="19" y1="12" x2="22" y2="12" />
+          </svg>
+          <span class="active-only-label">Search only active layers ({activeLayersList})</span>
+        </button>
         <div class="result-tabs">
           <button
             type="button"
@@ -282,24 +328,6 @@
             Images
           </button>
         </div>
-        <Tooltip content="Search active only">
-          <button
-            type="button"
-            class="active-only-button"
-            class:active={activeOnly}
-            on:click={() => (activeOnly = !activeOnly)}
-            aria-label="Toggle active layers only filter"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="rifle-scope">
-              <circle cx="12" cy="12" r="8" />
-              <circle cx="12" cy="12" r="5" />
-              <line x1="12" y1="2" x2="12" y2="5" />
-              <line x1="12" y1="19" x2="12" y2="22" />
-              <line x1="2" y1="12" x2="5" y2="12" />
-              <line x1="19" y1="12" x2="22" y2="12" />
-            </svg>
-          </button>
-        </Tooltip>
       </div>
 
       {#if query.trim()}
@@ -360,26 +388,55 @@
       {/if}
     </div>
   {/if}
-</section>
+  </section>
+{/if}
 
 <style>
+  .search-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: color-mix(in srgb, black 20%, transparent);
+    backdrop-filter: blur(3px);
+  }
+
   .toponym-search-panel {
     position: absolute;
     top: 14px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 4;
-    width: min(560px, calc(100vw - 28px));
+    width: min(460px, calc(100vw - 28px));
     display: flex;
     flex-direction: column;
     gap: 6px;
+    pointer-events: auto;
+  }
+
+  .toponym-search-panel.is-modal {
+    position: fixed;
+    top: 42.5%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    width: min(520px, calc(100vw - 32px));
+    height: min(80vh, 600px);
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
   }
 
   .toponym-search-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 6px 9px;
+    flex-shrink: 0;
+  }
+
+  .toponym-search-panel.is-modal .toponym-search-row {
+    padding: 12px 12px;
   }
 
   .toponym-search-status {
@@ -418,13 +475,19 @@
     padding: 0;
     max-height: calc(100vh - 120px);
     overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .toponym-search-panel.is-modal .toponym-results {
+    max-height: none;
   }
 
   .result-controls {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 6px 6px 0 6px;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 5px 0;
     border-bottom: 1px solid var(--border-subtle);
   }
 
@@ -436,11 +499,11 @@
 
   .result-tab {
     flex: 1;
-    padding: 6px 8px;
+    padding: 5px 7px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     text-align: center;
     cursor: pointer;
@@ -456,40 +519,37 @@
   }
 
   .result-tab.active {
-    color: var(--text-primary);
-    border-bottom-color: var(--accent-color, #6366f1);
+    color: var(--button-primary-background);
+    border-bottom-color: var(--button-primary-background);
   }
 
   .active-only-button {
-    border: 1px solid transparent;
-    background: transparent;
-    padding: 4px 6px;
+    border: 1px solid var(--window-border);
+    background: var(--button-background);
+    padding: 8px 12px;
     cursor: pointer;
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: var(--text-secondary);
-    transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+    gap: 8px;
+    color: var(--text-primary);
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
     position: relative;
-    width: 24px;
-    height: 24px;
     border-radius: var(--radius-xs);
+    font-size: 12px;
+    font-weight: 400;
+    width: fit-content;
+    box-shadow: var(--control-shadow);
   }
 
   .active-only-button:hover {
-    color: var(--text-primary);
-    background: var(--muted-surface-background);
+    background: var(--button-background-hover);
   }
 
   .active-only-button.active {
-    color: white;
-    background: var(--accent-color, #6366f1);
-    border-color: var(--accent-color, #6366f1);
-  }
-
-  .active-only-button.active:hover {
-    background: var(--accent-color, #6366f1);
+    background: var(--button-active-background);
+    border-color: var(--button-active-background);
+    color: var(--button-primary-text);
   }
 
   .rifle-scope {
@@ -497,12 +557,18 @@
     height: 16px;
     stroke-linecap: round;
     stroke-linejoin: round;
+    flex-shrink: 0;
+  }
+
+  .active-only-label {
+    white-space: nowrap;
+    font-size: 11px;
   }
 
   .result-category {
     display: flex;
     flex-direction: column;
-    padding: 8px 0 0 0;
+    padding: 6px 0 0;
   }
 
   .result-category-title {
@@ -516,11 +582,13 @@
   }
 
   .result-source-header {
-    padding: 4px 8px 4px 16px;
+    padding: 3px 7px 3px 14px;
     margin: 0;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
+    font-family: var(--font-readable);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
     background: transparent;
     border: none;
   }
@@ -530,7 +598,7 @@
   }
 
   .result-item {
-    padding: 5px 8px 5px 28px;
+    padding: 4px 7px 4px 24px;
     margin: 0;
     background: transparent;
     width: 100%;
@@ -542,18 +610,27 @@
   }
 
   .toponym-text {
+    font-family: var(--font-readable);
     font-size: 12px;
-    font-weight: 500;
-    color: var(--text-primary);
+    font-weight: 400;
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
   }
 
   .toponym-feedback {
     padding: 6px 8px;
-    font-size: 11px;
-    color: var(--text-muted);
+    font-family: var(--font-readable);
+    font-size: 12px;
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
+    flex-shrink: 0;
   }
 
   .toponym-search-error { color: var(--text-error); }
+
+  .toponym-search-panel.is-modal .toponym-feedback {
+    padding: 0 12px;
+  }
 
   @media (max-width: 900px) {
     .toponym-search-panel { top: 10px; width: calc(100vw - 20px); }

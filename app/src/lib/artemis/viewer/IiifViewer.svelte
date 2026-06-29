@@ -41,6 +41,8 @@
   let _resizeObserver: ResizeObserver | null = null;
   let containerWidth = 0;
   let containerHeight = 0;
+  let isFullscreen = false;
+  let viewerRoot: HTMLElement | undefined;
 
   function buildSpriteStyle(ref: SpriteRef): string {
     const maxWidth = Math.max(containerWidth, 320);
@@ -75,6 +77,8 @@
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
     updateContainerSize();
     if (typeof ResizeObserver !== 'undefined') {
       _resizeObserver = new ResizeObserver(() => updateContainerSize());
@@ -138,6 +142,7 @@
       visibilityRatio: 0.5,
       minZoomLevel: 0.1,
       gestureSettingsMouse: { scrollToZoom: true },
+      crossOriginPolicy: 'Anonymous',
     } as OpenSeadragonType.Options);
 
     viewer.addOnceHandler('open', () => {
@@ -164,6 +169,8 @@
 
   onDestroy(() => {
     window.removeEventListener("keydown", onKeyDown);
+    document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
     _resizeObserver?.disconnect();
     if (_tileImageRef && _onTileLoaded) {
       _tileImageRef.removeHandler('fully-loaded-change', _onTileLoaded);
@@ -172,7 +179,33 @@
   });
 
   function onKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") dispatch("close");
+    if (e.key === "Escape" && !isFullscreen) dispatch("close");
+  }
+
+  async function toggleFullscreen() {
+    if (!viewerRoot) return;
+
+    try {
+      if (!isFullscreen) {
+        if (viewerRoot.requestFullscreen) {
+          await viewerRoot.requestFullscreen();
+        } else if ((viewerRoot as any).webkitRequestFullscreen) {
+          await (viewerRoot as any).webkitRequestFullscreen();
+        }
+      } else {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitFullscreenElement) {
+          await (document as any).webkitExitFullscreen();
+        }
+      }
+    } catch (err: any) {
+      console.error('Fullscreen error:', err);
+    }
+  }
+
+  function handleFullscreenChange() {
+    isFullscreen = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
   }
 
   function resolveDisplayYear(): string {
@@ -199,22 +232,49 @@
   class="viewer-root"
   class:viewer-root--inline={inline}
   class:viewer-backdrop={!inline}
+  class:viewer-root--fullscreen={isFullscreen}
   on:click|self={() => !inline && dispatch("close")}
   role="presentation"
+  bind:this={viewerRoot}
 >
   <div class="viewer-window" class:viewer-window--inline={inline}>
     {#if !inline}
       <div class="viewer-topbar">
         <span class="viewer-title">{title}</span>
-        <button class="ui-icon-btn viewer-close" type="button" on:click={() => dispatch("close")} aria-label="Close">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-        </button>
+        <div class="viewer-topbar-actions">
+          <button class="ui-icon-btn viewer-close" type="button" on:click={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+            {#if isFullscreen}
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 5.5h3M2 2h4v4M14 10.5h-3M14 14h-4v-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            {:else}
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 6V2h4M14 6v4h-4M2 10v4h4M14 10v-4h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            {/if}
+          </button>
+          <button class="ui-icon-btn viewer-close" type="button" on:click={() => dispatch("close")} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
     {/if}
     {#if inline}
       <div class="viewer-inline-header" class:viewer-inline-header--mirrored={mirrored}>
+        <button class="viewer-fullscreen-btn" type="button" on:click={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+          {#if isFullscreen}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2 5.5h3M2 2h4v4M14 10.5h-3M14 14h-4v-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          {:else}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2 6V2h4M14 6v4h-4M2 10v4h4M14 10v-4h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          {/if}
+          <span>Fullscreen</span>
+        </button>
         <div class="viewer-inline-header-copy">
           <div class="viewer-inline-title">{manifestDetails?.title || title || 'Untitled document'}</div>
           {#if resolveDisplayYear()}
@@ -428,33 +488,59 @@
 
   .viewer-inline-header {
     position: absolute;
-    top: 14px;
-    left: 14px;
-    right: 14px;
+    top: 10px;
+    left: 10px;
+    right: 10px;
     z-index: 4;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 12px;
-    padding: 12px 14px;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 9px;
     background: color-mix(in srgb, var(--window-header-background) 92%, transparent);
     border: 1px solid var(--window-border);
     border-radius: var(--radius-sm);
     backdrop-filter: blur(8px);
   }
 
-  .viewer-inline-header--mirrored {
-    justify-content: flex-start;
+  .viewer-fullscreen-btn {
+    flex-shrink: 0;
+    order: -2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+
+  .viewer-fullscreen-btn:hover {
+    background: var(--button-background-hover);
+  }
+
+  .viewer-fullscreen-btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
 
   .viewer-inline-header-copy {
     min-width: 0;
-    max-width: min(360px, calc(100% - 96px));
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100% - 160px);
     display: flex;
     flex-direction: column;
     gap: 2px;
-    align-items: flex-end;
-    text-align: right;
+    align-items: center;
+    text-align: center;
     justify-content: center;
   }
 
@@ -463,9 +549,14 @@
     text-align: left;
   }
 
+  .viewer-inline-actions {
+    flex-shrink: 0;
+    order: 0;
+  }
+
   .viewer-inline-title {
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 400;
     line-height: 1.1;
     color: var(--text-primary);
   }
@@ -473,7 +564,7 @@
   .viewer-inline-year,
   .viewer-meta-year {
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 400;
     color: var(--text-primary);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -482,8 +573,15 @@
   .viewer-inline-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
+  }
+
+  .viewer-inline-actions :global(.ui-btn-primary) {
+    min-height: 26px;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 400;
   }
 
   .viewer-inline-header--mirrored .viewer-inline-actions {
@@ -518,13 +616,13 @@
   }
 
   .viewer-window--inline .viewer-close {
-    padding: 8px;
+    padding: 4px;
     color: var(--text-primary);
   }
 
   .viewer-window--inline .viewer-close svg {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
   }
 
   .viewer-body {
@@ -541,7 +639,7 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 260px;
   }
 
   .viewer-main--meta-collapsed {
@@ -549,7 +647,7 @@
   }
 
   .viewer-main--mirrored {
-    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 
   .viewer-main--mirrored.viewer-main--meta-collapsed {
@@ -560,11 +658,11 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    padding: 18px 18px 20px;
+    padding: 12px 12px 14px;
     background: var(--viewer-meta-bg);
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     z-index: 2;
   }
 
@@ -596,7 +694,7 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     padding-right: 2px;
   }
 
@@ -607,10 +705,17 @@
   }
 
   .viewer-meta-heading {
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.25;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.3;
     color: var(--text-primary);
+  }
+
+  .viewer-meta :global(.ui-label) {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: color-mix(in srgb, var(--text-primary) 62%, transparent);
   }
 
   .viewer-meta-summary,
@@ -618,9 +723,11 @@
   .viewer-meta-value,
   .viewer-meta-entry dd {
     margin: 0;
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--text-secondary);
+    font-family: var(--font-readable);
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.35;
+    color: var(--text-readable);
     overflow-wrap: anywhere;
   }
 
@@ -631,9 +738,11 @@
   }
 
   .viewer-meta-link {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-family: var(--font-readable);
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.35;
+    color: var(--button-primary-background);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
@@ -642,13 +751,20 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
   .viewer-meta-entry {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid color-mix(in srgb, var(--window-border) 54%, transparent);
+  }
+
+  .viewer-meta-entry:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 
   .viewer-meta-status-error {
@@ -667,14 +783,23 @@
   }
 
   .viewer-close--meta {
-    padding: 8px;
+    padding: 4px;
     color: var(--text-primary);
   }
 
   .viewer-meta-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .viewer-meta-actions :global(.ui-btn-primary),
+  .viewer-meta-actions :global(.ui-btn) {
+    min-height: 28px;
+    padding: 6px 9px;
+    font-size: 11px;
+    font-weight: 400;
+    gap: 6px;
   }
 
   .viewer-history-list {
@@ -738,6 +863,28 @@
   :global(.viewer-body .openseadragon-container),
   :global(.viewer-body .openseadragon-canvas) {
     background: var(--window-background) !important;
+  }
+
+  .viewer-root--fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+  }
+
+  .viewer-root--fullscreen .viewer-window {
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+
+  .viewer-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .viewer-topbar-actions .viewer-close:last-child {
+    margin-left: auto;
   }
 
   @media (max-width: 900px) {

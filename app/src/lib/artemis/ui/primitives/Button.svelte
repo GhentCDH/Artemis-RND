@@ -31,7 +31,7 @@
     box-shadow: none;
     font-family: var(--font-ui);
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 400;
     line-height: 1.1;
     cursor: pointer;
     display: inline-flex;
@@ -78,7 +78,7 @@
     border-color: var(--button-primary-background);
     background: var(--button-primary-background);
     color: var(--button-primary-text);
-    font-weight: 700;
+    font-weight: 400;
   }
 
   .artemis-button--primary:hover:not(:disabled) {

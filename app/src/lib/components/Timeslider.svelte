@@ -166,18 +166,12 @@
   const axisEnd = TIMELINE_AXIS_END;
   const axisSpan = axisEnd - axisStart;
 
-  type TickKind = 'endpoint' | 'interval';
-
-  function buildTicks(start: number, end: number): { year: number; kind: TickKind }[] {
-    const byYear = new Map<number, TickKind>();
-    byYear.set(start, 'endpoint');
+  function buildTicks(start: number, end: number): number[] {
+    const years: number[] = [];
     for (let y = Math.ceil(start / 50) * 50; y <= end; y += 50) {
-      if (y !== start && y !== end) byYear.set(y, 'interval');
+      years.push(y);
     }
-    byYear.set(end, 'endpoint');
-    return [...byYear.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([year, kind]) => ({ year, kind }));
+    return years;
   }
 
   $: ticks = buildTicks(axisStart, axisEnd);
@@ -187,7 +181,7 @@
   }
 
   function axisTickStyle(year: number): string {
-    return `left:${pct(year, axisStart, axisSpan)};--tick-top:5px`;
+    return `left:${pct(year, axisStart, axisSpan)}`;
   }
 
   function axisCurvePath(): string {
@@ -469,6 +463,41 @@
     };
   }
 
+  function visualRangesOverlap(a: SourceDef, b: SourceDef): boolean {
+    const aRange = sourceVisualYearRange(a);
+    const bRange = sourceVisualYearRange(b);
+    return aRange.start < bRange.end && bRange.start < aRange.end;
+  }
+
+  function assignTimelineLanes(sources: SourceDef[]): SourceDef[] {
+    const assignedByKey = new Map<SourceKey, number>();
+
+    for (const direction of ['above', 'below'] as const) {
+      const innerLane = direction === 'above' ? 2 : 3;
+      const outerLane = direction === 'above' ? 1 : 4;
+      const innerLaneSources: SourceDef[] = [];
+
+      const directionSources = sources
+        .filter((source) => sourceBulgeDirection(source) === direction)
+        .sort((a, b) => sourceVisualYearRange(a).start - sourceVisualYearRange(b).start);
+
+      for (const source of directionSources) {
+        const collidesWithInner = innerLaneSources.some((innerSource) => visualRangesOverlap(source, innerSource));
+        if (collidesWithInner) {
+          assignedByKey.set(source.key, outerLane);
+        } else {
+          assignedByKey.set(source.key, innerLane);
+          innerLaneSources.push(source);
+        }
+      }
+    }
+
+    return sources.map((source) => ({
+      ...source,
+      lane: assignedByKey.get(source.key) ?? source.lane,
+    }));
+  }
+
   function sourceBlockStyle(src: SourceDef, isCurrent: boolean): string {
     const visualRange = sourceVisualYearRange(src);
     const wrapperTransform = 'translateX(-50%)';
@@ -565,9 +594,10 @@
     return acc;
   }, {} as Record<SourceKey, boolean>);
 
+  $: timelineSources = assignTimelineLanes(SOURCES);
   $: lanes = [1, 2, 3, 4].map((lane) => ({
     lane,
-    sources: SOURCES.filter((source) => source.lane === lane),
+    sources: timelineSources.filter((source) => source.lane === lane),
   }));
   $: topLanes = lanes
     .map(({ lane, sources }) => ({
@@ -700,7 +730,7 @@
         <path class="ts-axis-river-current" d={axisPath}></path>
       </svg>
 
-      {#each SOURCES as src}
+      {#each timelineSources as src}
         {@const enabled = !dualPaneEnabled ? leftEnabledLayers[src.key] : (leftEnabledLayers[src.key] || rightEnabledLayers[src.key])}
         {@const isCurrent = leftActiveSourceKey === src.key || (dualPaneEnabled && rightActiveSourceKey === src.key)}
         {@const hasActiveSelection = leftActiveSourceKey !== null || (dualPaneEnabled && rightActiveSourceKey !== null)}
@@ -719,16 +749,19 @@
         />
       {/each}
 
-      {#each ticks as tick}
-        <span class="ts-tick ts-tick--{tick.kind}" style={axisTickStyle(tick.year)}>
-          <span class="ts-tick-label">{tick.year}</span>
-        </span>
-      {/each}
     </div>
 
     {#each bottomLanes as lane}
       <div class={`ts-row ts-row--lane-${lane.lane}`}></div>
     {/each}
+
+    <div class="ts-ticks" aria-hidden="true">
+      {#each ticks as tick}
+        <span class="ts-tick" style={axisTickStyle(tick)}>
+          <span class="ts-tick-label">{tick}</span>
+        </span>
+      {/each}
+    </div>
   </div>
 </div>
 
@@ -788,8 +821,11 @@
   .timeslider {
     background: var(--window-background);
     border: 0.5px solid var(--window-border);
-    border-radius: var(--radius-md);
-    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 0;
+    padding: 12px 16px 10px;
     user-select: none;
     font-family: var(--font-ui);
     box-shadow: var(--window-shadow);
@@ -801,6 +837,7 @@
     display: flex;
     flex-direction: column;
     overflow: visible;
+    padding-bottom: 15px;
   }
 
   .ts-row {
@@ -814,7 +851,7 @@
   .ts-row--lane-2,
   .ts-row--lane-3,
   .ts-row--lane-4 {
-    height: 19.5px;
+    height: 24px;
   }
 
   .ts-axis-line {
@@ -829,9 +866,9 @@
 
   .ts-axis-river {
     position: absolute;
-    left: 0;
+    left: -64px;
     top: -9px;
-    width: 100%;
+    width: calc(100% + 128px);
     height: 28px;
     overflow: visible;
     pointer-events: none;
@@ -847,48 +884,53 @@
   }
 
   .ts-axis-river-bank {
-    stroke: var(--timeline-layer-color);
-    stroke-width: var(--river-stroke-width);
-    opacity: 0.46;
+    opacity: 0;
+    stroke-width: 0;
   }
 
   .ts-axis-river-current {
     stroke: var(--timeline-layer-color);
     stroke-width: calc(var(--river-stroke-width) * 0.42);
-    opacity: 0.86;
+    opacity: 1;
   }
 
   .ts-tick {
     position: absolute;
-    top: var(--tick-top, 5px);
+    top: 0;
+    bottom: 0;
     transform: translateX(-50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    width: var(--timeline-tick-line-width);
     pointer-events: none;
     z-index: 1;
   }
 
   .ts-tick::before {
     content: '';
-    display: block;
-    width: 1px;
+    position: absolute;
+    top: 0;
+    bottom: var(--timeline-tick-label-gap);
+    left: 50%;
+    width: var(--timeline-tick-line-width);
+    transform: translateX(-50%);
+    background: var(--timeline-tick-line-color);
   }
 
-  .ts-tick--interval::before { height: 14px; background: var(--timeline-tick); }
-  .ts-tick--endpoint::before { height: 20px; background: var(--timeline-tick-strong); }
+  .ts-ticks {
+    position: absolute;
+    inset: 0;
+    z-index: 35;
+    pointer-events: none;
+  }
 
   .ts-tick-label {
-    font-family: var(--font-ui);
-    font-size: 9px;
-    color: var(--timeline-label);
-    margin-top: 2px;
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translate(-50%, var(--timeline-tick-label-offset-y));
+    font-family: var(--timeline-tick-label-font);
+    font-size: var(--timeline-tick-label-size);
+    color: var(--timeline-tick-label-color);
     white-space: nowrap;
-  }
-
-  :global(.ts-tick--endpoint) .ts-tick-label {
-    color: var(--timeline-label-strong);
-    font-weight: 600;
   }
 
   :global(.pill-hover-tip) {
@@ -963,15 +1005,15 @@
   }
 
   .layer-info-body {
-    font-family: var(--font-ui);
+    font-family: var(--font-readable);
   }
 
   .layer-info-body p {
     margin: 0 0 14px;
     max-width: 64ch;
-    font-size: 14px;
-    line-height: 1.68;
-    color: color-mix(in srgb, var(--text-primary) 94%, white 6%);
+    font-size: var(--text-readable-size);
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
   }
 
   @media (max-width: 700px) {

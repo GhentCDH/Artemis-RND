@@ -80,8 +80,7 @@
 
 </script>
 
-{#if isOpen && collectionKey}
-  <div transition:fade={{ duration: 180 }}>
+<div class="map-info-window-container" class:is-open={isOpen && collectionKey}>
     <Window
       class={`map-info-window ${pane === 'right' ? 'is-right' : ''}`}
       variant="floating"
@@ -100,47 +99,51 @@
 
       <!-- Sublayer rows -->
       <div class="sublayers-list">
-        {#each sublayers as sub}
-          <div class="sublayer-buttons">
-            <Button
-              class="sublayer-toggle"
-              variant="chrome"
-              active={currentSublayerState[sub.id] ?? false}
-              aria-label={`Toggle ${sub.label} layer`}
-              on:click={() => toggleSublayer(sub.id)}
-            >
-              {sub.label}
-            </Button>
-            <Button
-              class="sublayer-copy"
-              variant="chrome"
-              active={copiedSubId === sub.id}
-              title="Copy layer source"
-              aria-label={`Copy ${sub.label} source`}
-              on:click={() => copyUrl(sub.id)}
-            >
-              {#if copiedSubId === sub.id}
-                ✓
-              {:else}
-                🔗
-              {/if}
-            </Button>
+        <svg class="sublayer-wave" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path d="M 0 14 C 18 14, 18 6, 36 6 S 54 14, 72 14 S 90 6, 108 6"></path>
+        </svg>
+        {#each sublayers as sub, index}
+          <div class="sublayer-row">
+            <div class="sublayer-actions">
+              <Button
+                class="sublayer-toggle"
+                variant="chrome"
+                active={currentSublayerState[sub.id] ?? false}
+                aria-label={`Toggle ${sub.label} layer`}
+                on:click={() => toggleSublayer(sub.id)}
+              >
+                {sub.label}
+              </Button>
+              <Button
+                class="sublayer-copy"
+                variant="chrome"
+                active={copiedSubId === sub.id}
+                title="Copy layer source"
+                aria-label={`Copy ${sub.label} source`}
+                on:click={() => copyUrl(sub.id)}
+              >
+                {#if copiedSubId === sub.id}
+                  Copied
+                {:else}
+                  <span class="link-icon" aria-hidden="true">↗</span>
+                  Link
+                {/if}
+              </Button>
+            </div>
+            {#if index === sublayers.length - 1}
+              <Button
+                class="info-dropdown-toggle"
+                variant="chrome"
+                active={infoDropdownOpen}
+                aria-label="Toggle collection info"
+                on:click={() => (infoDropdownOpen = !infoDropdownOpen)}
+              >
+                <span class="info-dropdown-label">INFO</span>
+                <span class="dropdown-arrow">›</span>
+              </Button>
+            {/if}
           </div>
         {/each}
-      </div>
-
-      <div class="info-dropdown-header">
-        <span class="info-dropdown-label">about this map</span>
-        <Button
-          class="info-dropdown-toggle"
-          variant="chrome"
-          iconOnly={true}
-          active={infoDropdownOpen}
-          aria-label="Toggle collection info"
-          on:click={() => (infoDropdownOpen = !infoDropdownOpen)}
-        >
-          <span class="dropdown-arrow">▼</span>
-        </Button>
       </div>
       {#if infoDropdownOpen && collectionInfo}
         <div class="info-dropdown-content">
@@ -149,19 +152,27 @@
       {/if}
     </Window>
   </div>
-{/if}
 
 <style>
+  .map-info-window-container {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+  }
+
+  .map-info-window-container.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   :global(.map-info-window) {
     position: fixed;
-    top: 82px;
+    top: 16px;
     left: 16px;
-    z-index: 50;
-    box-shadow: none;
-    min-width: 240px;
-    max-width: 280px;
-    background: white;
-    border-color: rgba(0, 0, 0, 0.1);
+    z-index: 52;
+    min-width: 220px;
+    max-width: 290px;
+    overflow: visible;
   }
 
   :global(.map-info-window.is-right) {
@@ -171,20 +182,42 @@
   @media (max-width: 900px) {
     :global(.map-info-window.is-right) {
       left: 16px;
-      top: 268px;
+      top: 16px;
     }
   }
 
   :global(.map-info-window .artemis-window-header) {
-    padding: 12px 12px 0;
+    padding: 12px 14px 2px;
     border-bottom: 0;
     background: transparent;
+  }
+
+  :global(.map-info-window .artemis-window-actions) {
+    align-self: flex-start;
+  }
+
+  :global(.map-info-window .artemis-window-actions .artemis-button) {
+    width: 20px;
+    height: 20px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 18px;
+    font-weight: 400;
+    box-shadow: none;
+  }
+
+  :global(.map-info-window .artemis-window-actions .artemis-button:hover:not(:disabled)) {
+    background: transparent;
+    color: var(--text-primary);
   }
 
   .header-left {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 12px;
     min-width: 0;
   }
 
@@ -194,7 +227,7 @@
     height: 10px;
     border-radius: 50%;
     background: var(--c);
-    margin-top: 2px;
+    margin-top: calc((15px * 1.2 - 10px) / 2);
   }
 
   .header-text {
@@ -207,7 +240,8 @@
   .collection-name {
     font-family: var(--font-ui);
     font-size: 15px;
-    font-weight: 500;
+    font-weight: 400;
+    line-height: 1.2;
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -217,64 +251,63 @@
   .collection-date {
     font-family: var(--font-ui);
     font-size: 12px;
-    color: var(--text-muted);
+    color: color-mix(in srgb, var(--button-primary-background) 82%, var(--text-primary));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   :global(.map-info-window .artemis-window-body) {
-    padding: 8px 12px 12px;
+    padding: 4px 14px 10px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-  }
-
-  .info-dropdown-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: space-between;
+    gap: 5px;
   }
 
   .info-dropdown-label {
     font-family: var(--font-ui);
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.16em;
     color: var(--text-muted);
-    text-transform: lowercase;
+    text-transform: uppercase;
   }
 
-  :global(.info-dropdown-toggle) {
+  :global(.map-info-window .info-dropdown-toggle) {
     width: auto;
     height: auto;
-    padding: 0;
+    padding: 2px 0;
     min-height: 0;
-    border: none;
+    border: 0;
     background: transparent;
     color: var(--text-muted);
-    font-size: 12px;
+    gap: 6px;
+    box-shadow: none;
   }
 
-  :global(.info-dropdown-toggle:hover:not(:disabled)) {
+  :global(.map-info-window .info-dropdown-toggle:hover:not(:disabled)) {
     background: transparent;
     color: var(--text-primary);
+    border: 0;
+    box-shadow: none;
   }
 
-  :global(.info-dropdown-toggle.is-active) {
+  :global(.map-info-window .info-dropdown-toggle.is-active) {
     background: transparent;
-    border: none;
+    border: 0;
     color: var(--text-primary);
+    box-shadow: none;
   }
 
   .dropdown-arrow {
-    font-size: 8px;
+    font-size: 15px;
+    line-height: 1;
     transition: transform 150ms ease;
     display: inline-block;
-    margin-left: 4px;
   }
 
-  :global(.info-dropdown-toggle.is-active .dropdown-arrow) {
-    transform: rotate(180deg);
+  :global(.map-info-window .info-dropdown-toggle.is-active .dropdown-arrow) {
+    transform: rotate(90deg);
   }
 
   .info-dropdown-content {
@@ -288,25 +321,99 @@
   }
 
   .sublayers-list {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
+    isolation: isolate;
   }
 
-  .sublayer-buttons {
+  .sublayer-wave {
+    position: absolute;
+    left: -38px;
+    right: -38px;
+    bottom: 10px;
+    width: calc(100% + 76px);
+    height: 28px;
+    z-index: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .sublayer-wave path {
+    fill: none;
+    stroke: color-mix(in srgb, var(--button-primary-background) 18%, transparent);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+  }
+
+  .sublayer-row {
+    position: relative;
+    z-index: 2;
     display: flex;
-    gap: 4px;
-    align-items: stretch;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    min-height: 30px;
   }
 
-  :global(.sublayer-toggle) {
-    flex: 4;
+  .sublayer-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    position: relative;
+    z-index: 2;
   }
 
-  :global(.sublayer-copy) {
-    flex: 1;
+  :global(.map-info-window .sublayer-toggle) {
+    flex: 0 0 70px;
+    width: 70px;
+    min-height: 28px;
+    padding: 6px 0;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 400;
+    box-shadow: none;
+  }
+
+  :global(.map-info-window .sublayer-toggle:not(.is-active)) {
+    border-color: var(--button-inactive-tint-border);
+    background: var(--button-inactive-tint-background);
+    color: var(--text-primary);
+  }
+
+  :global(.map-info-window .sublayer-toggle:not(.is-active):hover:not(:disabled)) {
+    border-color: var(--control-border-hover);
+    background: var(--button-background-hover);
+  }
+
+  :global(.map-info-window .sublayer-copy) {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: center;
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: color-mix(in srgb, var(--button-primary-background) 90%, #1f5f8b);
+    box-shadow: none;
+    font-size: 12px;
+    font-weight: 500;
+    gap: 6px;
+  }
+
+  :global(.map-info-window .sublayer-copy:hover:not(:disabled)),
+  :global(.map-info-window .sublayer-copy.is-active) {
+    border: 0;
+    background: transparent;
+    color: var(--button-primary-background-hover);
+    box-shadow: none;
+  }
+
+  .link-icon {
+    font-size: 12px;
+    line-height: 1;
   }
 </style>

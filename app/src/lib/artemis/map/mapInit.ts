@@ -159,6 +159,8 @@ function loadBaselayerData(): Promise<GeoJSON.FeatureCollection> {
   return baselayerDataPromise;
 }
 
+export type BaselayerId = 'scheldt' | 'osm' | 'custom';
+
 function getBaseMapStyle(baselayerData: GeoJSON.FeatureCollection | null = null): maplibregl.StyleSpecification {
   const backgroundColor = getCssColor("--map-background", "#f6f2ea");
   const waterFillColor = getCssColor("--map-water-fill", "#c5d9dc");
@@ -192,6 +194,74 @@ function getBaseMapStyle(baselayerData: GeoJSON.FeatureCollection | null = null)
   };
 }
 
+function getOsmMapStyle(): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      "osm-tiles": {
+        type: "raster",
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        attribution: "© OpenStreetMap contributors"
+      }
+    },
+    layers: [
+      {
+        id: "osm-layer",
+        type: "raster",
+        source: "osm-tiles",
+        paint: { "raster-opacity": 1 }
+      }
+    ]
+  };
+}
+
+function getCustomTileStyle(tileUrl: string): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      "custom-baselayer": {
+        type: "raster",
+        tiles: [tileUrl],
+        tileSize: 256,
+      }
+    },
+    layers: [
+      {
+        id: "custom-baselayer-layer",
+        type: "raster",
+        source: "custom-baselayer",
+        paint: { "raster-opacity": 1 }
+      }
+    ]
+  };
+}
+
+export function setBaselayer(
+  targetMap: maplibregl.Map,
+  baselayerId: BaselayerId,
+  onStyleLoaded: () => void,
+  customTileUrl?: string
+): void {
+  let nextStyle: maplibregl.StyleSpecification;
+  if (baselayerId === 'osm') {
+    nextStyle = getOsmMapStyle();
+  } else if (baselayerId === 'custom' && customTileUrl) {
+    nextStyle = getCustomTileStyle(customTileUrl);
+  } else {
+    nextStyle = getBaseMapStyle(baselayerDataCache);
+  }
+
+  targetMap.once('styledata', () => {
+    if (baselayerId === 'scheldt') {
+      ensureIiifHoverLayers(targetMap);
+    }
+    onStyleLoaded();
+  });
+
+  targetMap.setStyle(nextStyle, { diff: false });
+}
+
 export function createMapContext(container: HTMLElement): maplibregl.Map {
   const nextMap = new maplibregl.Map({
     container,
@@ -200,8 +270,9 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
     zoom: 10,
     attributionControl: false,
     pitchWithRotate: false,
-    maxPitch: 0
-  });
+    maxPitch: 0,
+    preserveDrawingBuffer: true,
+  } as any);
 
   loadBaselayerData().then(baselayerData => {
     const updatedStyle = getBaseMapStyle(baselayerData);
