@@ -22,7 +22,10 @@
     const onMove = (ev: PointerEvent) => {
       if (!trackEl) return;
       const rect = trackEl.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      // getBoundingClientRect returns visual (post-zoom) coords; ev.clientX is layout.
+      // Scale clientX to visual so both are in the same coordinate space for pct calc.
+      const cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      const pct = Math.max(0, Math.min(1, (ev.clientX * cssZoom - rect.left) / rect.width));
       const val = Math.round((min + pct * (max - min)) / step) * step;
 
       if (handle === 'start') {

@@ -2,7 +2,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
   import type OpenSeadragonType from "openseadragon";
-  import type { IiifMapInfo, SpriteRef } from '$lib/artemis/shared/types';
+  import type { SpriteRef } from '$lib/artemis/shared/types';
   import {
     loadManifestDetails,
     type IiifManifestDetails,
@@ -14,14 +14,12 @@
   export let manifestAllmapsUrl: string = "";
   export let inline = false;
   export let mirrored = false;
-  export let historyItems: IiifMapInfo[] = [];
   export let spriteRef: SpriteRef | undefined = undefined;
   export let placeholderWidth = 0;
   export let placeholderHeight = 0;
 
   const dispatch = createEventDispatcher<{
     close: void;
-    'select-history': IiifMapInfo;
   }>();
 
   let container: HTMLElement;
@@ -332,21 +330,6 @@
               on:click={() => (metadataCollapsed = true)}
               aria-label="Hide metadata"
             >Hide metadata</button>
-          </div>
-        {/if}
-        {#if inline && historyItems.length > 1}
-          <div class="viewer-history viewer-history--sidebar">
-            <div class="ui-label">Recent manifests</div>
-            <div class="viewer-history-list">
-              {#each historyItems as item}
-                <button
-                  type="button"
-                  class="ui-list-item"
-                  class:is-active={item.sourceManifestUrl === sourceManifestUrl && (item.imageServiceUrl ?? '') === (imageServiceUrl ?? '')}
-                  on:click={() => dispatch('select-history', item)}
-                >{item.title}</button>
-              {/each}
-            </div>
           </div>
         {/if}
         <div class="viewer-meta-scroll">
@@ -771,17 +754,6 @@
     color: var(--text-error);
   }
 
-  .viewer-history {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .viewer-history--sidebar {
-    flex: 0 0 auto;
-    padding-top: 8px;
-  }
-
   .viewer-close--meta {
     padding: 4px;
     color: var(--text-primary);
@@ -800,12 +772,6 @@
     font-size: 11px;
     font-weight: 400;
     gap: 6px;
-  }
-
-  .viewer-history-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
   }
 
   .viewer-sprite-placeholder {

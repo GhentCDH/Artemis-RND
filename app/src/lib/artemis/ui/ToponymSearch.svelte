@@ -2,12 +2,14 @@
      dispatches events for map-level actions (fly-to, layer activation). -->
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { browser } from '$app/environment';
   import { normalizeSearchText, scoreText } from '$lib/artemis/search/text';
   import { MAIN_LAYER_LABELS } from '$lib/artemis/config/layers';
-  import type { ToponymIndexItem, ManifestSearchItem } from '$lib/artemis/shared/types';
+  import type { ToponymIndexItem, ManifestSearchItem, IiifMapInfo } from '$lib/artemis/shared/types';
 
   export let toponymIndex: ToponymIndexItem[] = [];
   export let manifestSearchIndex: ManifestSearchItem[] = [];
+  export let recentManifestItems: IiifMapInfo[] = [];
   export let massartIndex: any[] = [];
   export let activeMapIds: Set<string> = new Set();
   export let loading = false;
@@ -17,6 +19,7 @@
   const dispatch = createEventDispatcher<{
     'fly-to-toponym': ToponymIndexItem;
     'manifest-click': ManifestSearchItem;
+    'recent-manifest-click': IiifMapInfo;
     'massart-click': any;
   }>();
 
@@ -143,11 +146,15 @@
   function pointerWithinLeeway(event: PointerEvent): boolean {
     if (!panelEl) return false;
     const rect = panelEl.getBoundingClientRect();
+    // getBoundingClientRect is visual (post-zoom); convert event coords to match.
+    const cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    const ex = event.clientX * cssZoom;
+    const ey = event.clientY * cssZoom;
     return (
-      event.clientX >= rect.left - POINTER_LEEWAY_PX &&
-      event.clientX <= rect.right + POINTER_LEEWAY_PX &&
-      event.clientY >= rect.top - POINTER_LEEWAY_PX &&
-      event.clientY <= rect.bottom + POINTER_LEEWAY_PX
+      ex >= rect.left - POINTER_LEEWAY_PX &&
+      ex <= rect.right + POINTER_LEEWAY_PX &&
+      ey >= rect.top - POINTER_LEEWAY_PX &&
+      ey <= rect.bottom + POINTER_LEEWAY_PX
     );
   }
 
@@ -200,6 +207,13 @@
     dispatch('manifest-click', result);
   }
 
+  function selectRecentManifest(item: IiifMapInfo) {
+    locked = true;
+    query = item.title || item.sourceManifestUrl;
+    closeModal(false);
+    dispatch('recent-manifest-click', item);
+  }
+
   function selectMassart(result: any & { score: number }) {
     locked = true;
     query = result.title;
@@ -215,6 +229,14 @@
 
   $: if (isModalOpen && inputEl) {
     setTimeout(() => inputEl?.focus(), 0);
+  }
+
+  $: if (browser) {
+    console.log('[Artemis debug] ToponymSearch isModalOpen', {
+      isModalOpen,
+      modalMounted: Boolean(document.querySelector('.toponym-search-panel.is-modal')),
+      backdropMounted: Boolean(document.querySelector('.search-modal-backdrop')),
+    });
   }
 
   onDestroy(() => {
@@ -385,6 +407,16 @@
         {#if !loading && !error && manifestResults.length === 0 && toponymResults.length === 0 && massartResults.length === 0}
           <div class="ui-panel toponym-feedback">No matching results.</div>
         {/if}
+      {:else if recentManifestItems.length > 0}
+        <div class="result-category">
+          <div class="ui-label result-category-title">Recently visited</div>
+          {#each recentManifestItems as item (item.sourceManifestUrl + (item.imageServiceUrl ?? ''))}
+            <button type="button" class="ui-list-item result-item" on:click={() => selectRecentManifest(item)}>
+              <span class="toponym-text">{item.title || 'Untitled manifest'}</span>
+              <span class="ui-meta">{item.layerLabel || 'IIIF'}</span>
+            </button>
+          {/each}
+        </div>
       {/if}
     </div>
   {/if}

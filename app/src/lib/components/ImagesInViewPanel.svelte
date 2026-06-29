@@ -3,11 +3,12 @@
   import { fade } from 'svelte/transition';
   import Button from '$lib/artemis/ui/primitives/Button.svelte';
   import Window from '$lib/artemis/ui/primitives/Window.svelte';
-  import RangeSlider from '$lib/artemis/ui/primitives/RangeSlider.svelte';
   import type { SpriteRef, PreviewBubbleItem } from '$lib/artemis/shared/types';
 
   export let items: Array<{ title: string; year?: string; spriteRef?: SpriteRef; manifestUrl?: string; imageServiceUrl?: string; mmsId?: string }> = [];
+  export let filterItems: Array<{ year?: string }> = items;
   export let forceClose = false;
+  export let isOpen = false;
 
   const dispatch = createEventDispatcher<{
     click: PreviewBubbleItem;
@@ -18,7 +19,7 @@
   const THUMB_W = 40;
   const THUMB_H = 30;
 
-  let isOpen = false;
+  let lastDispatchedOpen = isOpen;
   let filterStart = 0;
   let filterEnd = 0;
 
@@ -34,8 +35,14 @@
     return Math.min(THUMB_H / s.height, THUMB_W / s.width);
   }
 
-  // Compute available year range from items
-  $: yearValues = items
+  function clampFilterRange() {
+    if (!hasYearRange) return;
+    filterStart = Math.max(yearMin, Math.min(filterStart, filterEnd));
+    filterEnd = Math.min(yearMax, Math.max(filterEnd, filterStart));
+  }
+
+  // Compute available year range from the full image collection, not only the current map view.
+  $: yearValues = (filterItems.length > 0 ? filterItems : items)
     .map(i => parseInt(i.year ?? ''))
     .filter(y => isFinite(y));
 
@@ -66,10 +73,9 @@
   }
 
   // Emit open/close events when panel visibility changes
-  $: if (isOpen) {
-    dispatch('open');
-  } else {
-    dispatch('close');
+  $: if (isOpen !== lastDispatchedOpen) {
+    dispatch(isOpen ? 'open' : 'close');
+    lastDispatchedOpen = isOpen;
   }
 
   function handleItemClick(item: any) {
@@ -117,7 +123,7 @@
     <div transition:fade={{ duration: 180 }}>
       <Window
         class="images-panel"
-        title="Images in view"
+        title="Images"
         variant="docked"
         placement="right"
         showClose={true}
@@ -125,16 +131,32 @@
         closeOnEscape={true}
         on:close={closePanel}
       >
-        {#if hasYearRange}
-          <div class="filter-bar">
-            <RangeSlider
-              min={yearMin}
-              max={yearMax}
-              bind:start={filterStart}
-              bind:end={filterEnd}
-            />
-          </div>
-        {/if}
+        <div class="filter-bar">
+          {#if hasYearRange}
+            <label class="filter-field">
+              <span>From</span>
+              <input
+                type="number"
+                min={yearMin}
+                max={filterEnd}
+                bind:value={filterStart}
+                on:change={clampFilterRange}
+              />
+            </label>
+            <label class="filter-field">
+              <span>To</span>
+              <input
+                type="number"
+                min={filterStart}
+                max={yearMax}
+                bind:value={filterEnd}
+                on:change={clampFilterRange}
+              />
+            </label>
+          {:else}
+            <div class="filter-empty">No date range available</div>
+          {/if}
+        </div>
 
         <div class="panel-content">
           {#if items.length === 0}
@@ -229,7 +251,7 @@
     right: 16px;
     width: 13vw;
     min-width: 240px;
-    max-height: calc(100vh - 200px);
+    max-height: calc(100% - 16px - var(--timeline-overlay-clearance, 190px));
     z-index: 98;
     background: var(--window-background) !important;
     backdrop-filter: blur(12px);
@@ -248,6 +270,7 @@
 
   :global(.images-panel .artemis-window-body) {
     min-height: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     background: var(--window-background);
@@ -256,13 +279,48 @@
 
   .filter-bar {
     flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
     padding: 8px 10px;
     border-bottom: 1px solid var(--window-border);
     background: var(--window-background);
   }
 
+  .filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .filter-field input {
+    width: 100%;
+    min-width: 0;
+    height: 24px;
+    padding: 3px 6px;
+    border: 1px solid var(--border-ui);
+    border-radius: var(--radius-xs);
+    background: var(--button-background);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 11px;
+  }
+
+  .filter-empty {
+    grid-column: 1 / -1;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
   .panel-content {
     flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     padding: 8px 10px;
   }

@@ -1,3 +1,5 @@
+import type { SubLayerKind } from '$lib/artemis/config/layers';
+
 export type PaneId = 'left' | 'right';
 
 export type LayerMetadata = {
@@ -31,5 +33,5 @@ export type CollectionInfo = {
   color: string;
   dateRange: string;
   info?: string;
-  sublayers: Array<{ id: string; subId: string; label: string; url?: string }>;
+  sublayers: Array<{ id: string; subId: string; label: string; kind?: SubLayerKind; url?: string }>;
 };

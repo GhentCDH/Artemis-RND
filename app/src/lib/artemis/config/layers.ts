@@ -13,7 +13,7 @@ export type MainLayerId =
   | 'Villaret'
   | 'Frickx'
   | 'HanddrawnCollection';
-export type SubLayerKind = 'iiif' | 'geojson' | 'wmts' | 'wms' | 'searchable';
+export type SubLayerKind = 'iiif' | 'geojson' | 'wmts' | 'wms' | 'wfs' | 'searchable';
 
 // Order is tuned for overlap windows. Gereduceerd should stay above Popp and
 // Vandermaelen in the 1847–1855 zone; later NGI basemaps can sit below older

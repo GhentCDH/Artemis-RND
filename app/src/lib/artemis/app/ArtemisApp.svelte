@@ -67,6 +67,7 @@
     makeInitialMainLayerEnabled, makeInitialSubLayerEnabled,
     type MainLayerId,
   } from '$lib/artemis/config/layers';
+  import { decodeAppState, encodeAppState, type UrlAppState } from '$lib/artemis/url/urlState';
   import type { HistCartLayerKey } from '$lib/artemis/map/mapInit';
   import type {
     ToponymIndexItem, ManifestSearchItem,
@@ -85,6 +86,43 @@
   import Button from '$lib/artemis/ui/primitives/Button.svelte';
   import type { CollectionInfo } from '$lib/components/timeslider/types';
 
+  // ─── URL state ─────────────────────────────────────────────────────────────
+
+  // Decode URL state before anything renders. DEFAULT_BASE_URL is the only safe
+  // value here because datasetBaseUrl isn't declared yet.
+  const _initialUrlState: UrlAppState = typeof window !== 'undefined'
+    ? decodeAppState(window.location.hash, 'https://ghentcdh.github.io/Artemis-RnD-Data/build')
+    : {};
+
+  let _urlUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+  let _urlReady = false;
+
+  function buildCurrentUrlState(): UrlAppState {
+    const center = map ? (() => { const c = map.getCenter(); return { lng: c.lng, lat: c.lat, zoom: map.getZoom() }; })() : _initialUrlState.center;
+    const leftMainId = mainLayerOrder.find(id => mainLayerEnabled[id]);
+    const rightMainId = mainLayerOrder.find(id => rightMainLayerVisible[id]);
+    return {
+      center,
+      leftMainId,
+      rightMainId,
+      viewMode: viewMode === 'split' ? 'split' : undefined,
+      viewerManifestUrl: viewerOpen && viewerItem ? viewerItem.sourceManifestUrl : undefined,
+      viewerPane: viewerOpen && viewerItem ? viewerPane : undefined,
+    };
+  }
+
+  function updateUrl() {
+    if (!_urlReady) return;
+    const encoded = encodeAppState(buildCurrentUrlState(), normalizeDatasetBaseUrl(datasetBaseUrl.trim()));
+    history.replaceState(null, '', encoded ? `#${encoded}` : window.location.pathname + window.location.search);
+  }
+
+  function scheduleUrlUpdate() {
+    if (!_urlReady) return;
+    if (_urlUpdateTimer) clearTimeout(_urlUpdateTimer);
+    _urlUpdateTimer = setTimeout(updateUrl, 400);
+  }
+
   // ─── Map ───────────────────────────────────────────────────────────────────
 
   type PaneId = 'left' | 'right';
@@ -96,8 +134,9 @@
   let rightMap: maplibregl.Map | null = null;
   let rightMapReady = false;
   let rightMapInitInFlight = false;
+  let layoutSyncPromise: Promise<void> | null = null;
   let suppressSyncPane: PaneId | null = null;
-  let viewMode: ViewMode = 'single';
+  let viewMode: ViewMode = _initialUrlState.viewMode === 'split' ? 'split' : 'single';
   let scaleWidthPx = 0;
   let scaleLabel = '';
   let siteMetadata: RuntimeSiteMetadata = {
@@ -121,6 +160,7 @@
   let rightMapInfoWindowOpen = false;
   let baselayersMenuOpen = false;
   let selectedBaselayer = 'scheldt';
+  let selectedBaselayerTileUrl: string | undefined = undefined;
   let customBaselayers: Array<{ id: string; label: string; tileUrl: string }> = [];
   let customBaselayerFormOpen = false;
   let customBaselayerUrl = '';
@@ -194,6 +234,70 @@
   let isRemoving = false;
   let promptCycleTimer: ReturnType<typeof setTimeout> | null = null;
   let charRemovalTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function describeDebugTarget(target: EventTarget | null): string | null {
+    if (!(target instanceof Element)) return null;
+    return [
+      target.tagName.toLowerCase(),
+      target.id ? `#${target.id}` : '',
+      typeof target.className === 'string' && target.className ? `.${target.className.replace(/\s+/g, '.')}` : '',
+    ].join('');
+  }
+
+  function debugOverlayState(label: string) {
+    console.log(`[Artemis debug] ${label}`, {
+      viewMode,
+      isSplitLayout,
+      searchModalOpen,
+      searchModalMounted: Boolean(document.querySelector('.toponym-search-panel.is-modal')),
+      searchBackdropMounted: Boolean(document.querySelector('.search-modal-backdrop')),
+      baselayersMenuOpen,
+      baselayersMenuMounted: Boolean(document.querySelector('.baselayers-menu')),
+      activeCollection: activeCollection?.key ?? null,
+      rightActiveCollection: rightActiveCollection?.key ?? null,
+    });
+  }
+
+  async function debugPostRenderState(label: string) {
+    await tick();
+    debugOverlayState(`post-tick state: ${label}`);
+  }
+
+  function debugToolbarClick(label: string, event: MouseEvent) {
+    console.log(`[Artemis debug] toolbar click: ${label}`, {
+      target: describeDebugTarget(event.target),
+      currentTarget: describeDebugTarget(event.currentTarget),
+      clientX: event.clientX,
+      clientY: event.clientY,
+      elementFromPoint: describeDebugTarget(document.elementFromPoint(event.clientX, event.clientY)),
+      defaultPrevented: event.defaultPrevented,
+      viewMode,
+      isSplitLayout,
+      searchModalOpen,
+      baselayersMenuOpen,
+    });
+    void debugPostRenderState(label);
+  }
+
+  function debugBaselayersWrapperEvent(label: string, event: Event) {
+    event.stopPropagation();
+    console.log(`[Artemis debug] baselayers wrapper ${label}`, {
+      target: describeDebugTarget(event.target),
+      currentTarget: describeDebugTarget(event.currentTarget),
+      viewMode,
+      isSplitLayout,
+      baselayersMenuOpen,
+    });
+  }
+
+  $: console.log('[Artemis debug] reactive overlay flags', {
+    viewMode,
+    isSplitLayout,
+    searchModalOpen,
+    baselayersMenuOpen,
+    activeCollection: activeCollection?.key ?? null,
+    rightActiveCollection: rightActiveCollection?.key ?? null,
+  });
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -286,6 +390,7 @@
   let massartSpriteSheetSize: [number, number] = [0, 0];
   let imagesInView: Array<MassartItem & { spriteRef?: any }> = [];
   let imagesInViewPanelOpen = false;
+  let restoreImagesInViewPanelAfterViewer = false;
   let closeImagesPanel = false;
 
   async function loadMassartData() {
@@ -373,7 +478,10 @@
 
   function setViewMode(nextMode: ViewMode) {
     viewMode = nextMode;
-    void syncMapsAfterLayoutChange(nextMode);
+    layoutSyncPromise = syncMapsAfterLayoutChange(nextMode).finally(() => {
+      layoutSyncPromise = null;
+    });
+    updateUrl();
   }
 
   function switchBaselayer(layerId: string, customTileUrl?: string) {
@@ -384,6 +492,7 @@
     clearLeftCollectionNonce += 1;
     clearRightCollectionNonce += 1;
     selectedBaselayer = layerId;
+    selectedBaselayerTileUrl = customTileUrl;
 
     const id = (layerId === 'scheldt' || layerId === 'osm') ? layerId : 'custom';
     setBaselayer(map, id, () => { void rehydratePaneMap(map, 'main'); }, customTileUrl);
@@ -394,6 +503,16 @@
 
   function waitForAnimationFrame() {
     return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  async function settleMapLayout() {
+    await tick();
+    await waitForAnimationFrame();
+    try { map?.resize(); } catch {}
+    try { rightMap?.resize(); } catch {}
+    await waitForAnimationFrame();
+    try { map?.resize(); } catch {}
+    try { rightMap?.resize(); } catch {}
   }
 
   async function syncMapsAfterLayoutChange(nextMode: ViewMode) {
@@ -532,32 +651,43 @@
       try { canvas.toDataURL(); return true; } catch { return false; }
     }
 
-    function drawCanvasAtScreenPos(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, stageRect: DOMRect, dpr: number) {
+    function getCssZoom(): number {
+      return parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    }
+
+    function drawCanvasAtScreenPos(
+      ctx: CanvasRenderingContext2D,
+      canvas: HTMLCanvasElement,
+      stageRect: DOMRect,
+      dpr: number,
+      cssZoom: number
+    ) {
       const rect = canvas.getBoundingClientRect();
-      const x = Math.round((rect.left - stageRect.left) * dpr);
-      const y = Math.round((rect.top  - stageRect.top)  * dpr);
+      const x = Math.round(((rect.left - stageRect.left) / cssZoom) * dpr);
+      const y = Math.round(((rect.top  - stageRect.top)  / cssZoom) * dpr);
       ctx.drawImage(canvas, x, y, canvas.width, canvas.height);
     }
 
     function doCapture() {
       const stageRect = mapStageEl!.getBoundingClientRect();
+      const cssZoom = getCssZoom();
 
-      // Derive true DPR from map canvas vs its container CSS size
+      // Derive true DPR from map canvas vs its unzoomed layout size.
       const mapCanvas = map.getCanvas();
       const mapContainer = mapDiv as HTMLElement;
       const dpr = mapContainer.clientWidth > 0 ? mapCanvas.width / mapContainer.clientWidth : (window.devicePixelRatio || 1);
 
-      // Export canvas covers the full stage at physical resolution
+      // Export canvas covers the full unzoomed map stage at physical resolution.
       const exportCanvas = document.createElement('canvas');
-      exportCanvas.width  = Math.round(stageRect.width  * dpr);
-      exportCanvas.height = Math.round(stageRect.height * dpr);
+      exportCanvas.width  = Math.round(mapStageEl!.clientWidth  * dpr);
+      exportCanvas.height = Math.round(mapStageEl!.clientHeight * dpr);
       const ctx = exportCanvas.getContext('2d');
       if (!ctx) return;
 
       // Draw all map canvases at their actual screen positions
       const mapCanvases = Array.from(mapStageEl!.querySelectorAll<HTMLCanvasElement>('.map-canvas canvas'));
       for (const c of mapCanvases) {
-        drawCanvasAtScreenPos(ctx, c, stageRect, dpr);
+        drawCanvasAtScreenPos(ctx, c, stageRect, dpr, cssZoom);
       }
 
       // Composite all OSD viewer canvases on top at their actual screen positions
@@ -566,12 +696,12 @@
         for (const c of osdCanvases) {
           if (!isCanvasReadable(c)) continue;
           const rect = c.getBoundingClientRect();
-          const x = Math.round((rect.left - stageRect.left) * dpr);
-          const y = Math.round((rect.top  - stageRect.top)  * dpr);
+          const x = Math.round(((rect.left - stageRect.left) / cssZoom) * dpr);
+          const y = Math.round(((rect.top  - stageRect.top)  / cssZoom) * dpr);
           // Fill with --window-background from theme.css before compositing transparent OSD canvas
           ctx.fillStyle = '#f8f5ed';
           ctx.fillRect(x, y, c.width, c.height);
-          drawCanvasAtScreenPos(ctx, c, stageRect, dpr);
+          drawCanvasAtScreenPos(ctx, c, stageRect, dpr, cssZoom);
         }
       }
 
@@ -681,10 +811,14 @@
   let rightIiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
   let parcelClickInfo: ParcelClickInfo | null = null;
   let pinnedCards: PinnedCard[] = [];
-  let viewerOpen = false;
-  let viewerItem: IiifMapInfo | null = null;
-  let viewerHistory: IiifMapInfo[] = [];
-  let viewerPane: PaneId = 'right';
+  // IiifViewer fetches imageServiceUrl from the manifest when the prop is empty,
+  // so we only need sourceManifestUrl to restore the viewer.
+  let viewerOpen = Boolean(_initialUrlState.viewerManifestUrl);
+  let viewerItem: IiifMapInfo | null = _initialUrlState.viewerManifestUrl
+    ? { title: '', sourceManifestUrl: _initialUrlState.viewerManifestUrl, imageServiceUrl: '' }
+    : null;
+  let viewerHistory: IiifMapInfo[] = viewerItem ? [viewerItem] : [];
+  let viewerPane: PaneId = _initialUrlState.viewerPane ?? 'right';
   let viewerSpriteRef: SpriteRef | undefined = undefined;
   let viewerPlaceholderWidth = 0;
   let viewerPlaceholderHeight = 0;
@@ -782,6 +916,9 @@
     spriteRef?: SpriteRef,
     placeholderSize?: { width?: number; height?: number }
   ) {
+    if (!viewerOpen && imagesInViewPanelOpen) {
+      restoreImagesInViewPanelAfterViewer = true;
+    }
     viewerPane = targetPane ?? (isSplitLayout ? oppositePane(sourcePane) : 'right');
     viewerItem = next;
     viewerSpriteRef = spriteRef ?? next.spriteRef;
@@ -789,6 +926,23 @@
     viewerPlaceholderHeight = placeholderSize?.height ?? next.placeholderHeight ?? 0;
     viewerOpen = true;
     viewerHistory = [next, ...viewerHistory.filter((item) => !sameViewerItem(item, next))].slice(0, 10);
+    layoutSyncPromise = settleMapLayout().finally(() => {
+      layoutSyncPromise = null;
+    });
+    updateUrl();
+  }
+
+  function closeViewer() {
+    viewerOpen = false;
+    viewerSpriteRef = undefined;
+    viewerPlaceholderWidth = 0;
+    viewerPlaceholderHeight = 0;
+    if (restoreImagesInViewPanelAfterViewer) {
+      imagesInViewPanelOpen = true;
+      setMassartPinsVisible(true);
+      restoreImagesInViewPanelAfterViewer = false;
+    }
+    updateUrl();
   }
 
   function closeImageCollectionBubble() {
@@ -816,8 +970,11 @@
       return;
     }
 
-    imageCollectionBubbleX = rect.left + point.x;
-    imageCollectionBubbleY = rect.top + point.y;
+    // getBoundingClientRect returns visual (post-zoom) coords; convert to layout
+    // coords (which position:fixed uses) by dividing by the CSS zoom factor.
+    const cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    imageCollectionBubbleX = rect.left / cssZoom + point.x;
+    imageCollectionBubbleY = rect.top / cssZoom + point.y;
     imageCollectionBubblePlaceBelow = point.y < 260;
   }
 
@@ -1243,6 +1400,17 @@
     }
   }
 
+  async function flashLocationAfterLayout(lon: number, lat: number) {
+    if (!map || !Number.isFinite(lon) || !Number.isFinite(lat)) return;
+    if (layoutSyncPromise) {
+      await layoutSyncPromise;
+    }
+    await waitForAnimationFrame();
+    await waitForAnimationFrame();
+    try { map.resize(); } catch {}
+    flashLocationMarker(map, lon, lat);
+  }
+
   function applySearchFocus(focus: SearchFocusState | null) {
     if (!focus) return;
     searchFocusMainId = focus.mainId;
@@ -1253,7 +1421,7 @@
   // ─── ToponymSearch event handlers ─────────────────────────────────────────
 
   async function onFlyToToponym(item: ToponymIndexItem) {
-    flashLocationMarker(map, item.lon, item.lat);
+    void flashLocationAfterLayout(item.lon, item.lat);
     applySearchFocus(
       await handleToponymSelection(item, searchFocusNonce, {
         mainLayerLabels: MAIN_LAYER_LABELS,
@@ -1277,35 +1445,63 @@
   }
 
   async function onManifestClick(result: ManifestSearchItem) {
+    const focus = await handleManifestSelection(result, searchFocusNonce, {
+      mainLayerLabels: MAIN_LAYER_LABELS,
+      timelineYearByLayer: MAIN_LAYER_TIMELINE_YEAR,
+      currentMassartYear: massartYear,
+      setMassartYear: (year) => {
+        massartYear = year;
+      },
+      tick,
+      currentMainLayerOrder: mainLayerOrder,
+      setMainLayerOrder: (next) => {
+        mainLayerOrder = next;
+      },
+      mainLayerEnabled,
+      toggleMainLayer,
+      applyZOrder,
+      flyToCoordinates,
+      openPreviewBubbleAt: (preview, lon, lat) => openPreviewBubbleAt(preview, lon, lat),
+    });
+    applySearchFocus(focus);
+    openViewer({
+      title: result.label || result.text,
+      sourceManifestUrl: result.sourceManifestUrl,
+      imageServiceUrl: '',
+      layerLabel: result.mapName,
+      mainId: focus?.mainId,
+      centerLon: result.centerLon,
+      centerLat: result.centerLat,
+    }, 'left');
     if (result.centerLon != null && result.centerLat != null) {
-      flashLocationMarker(map, result.centerLon, result.centerLat);
+      void flashLocationAfterLayout(result.centerLon, result.centerLat);
     }
-    applySearchFocus(
-      await handleManifestSelection(result, searchFocusNonce, {
-        mainLayerLabels: MAIN_LAYER_LABELS,
-        timelineYearByLayer: MAIN_LAYER_TIMELINE_YEAR,
-        currentMassartYear: massartYear,
-        setMassartYear: (year) => {
-          massartYear = year;
-        },
-        tick,
-        currentMainLayerOrder: mainLayerOrder,
-        setMainLayerOrder: (next) => {
-          mainLayerOrder = next;
-        },
-        mainLayerEnabled,
-        toggleMainLayer,
-        applyZOrder,
-        flyToCoordinates,
-        openPreviewBubbleAt: (preview, lon, lat) => openPreviewBubbleAt(preview, lon, lat),
-      })
-    );
   }
 
   function onMassartClick(item: MassartItem) {
+    const year = Number.parseInt(item.year ?? '', 10);
+    if (Number.isFinite(year)) {
+      massartYear = year;
+      if (map) setMassartPins(map, massartItems, massartYear, MASSART_LEEWAY);
+    }
+    computeImagesInView();
+    imagesInViewPanelOpen = true;
+    setMassartPinsVisible(true);
+
     if (item.lat != null && item.lon != null) {
-      flashLocationMarker(map, item.lon, item.lat);
       flyToCoordinates(item.lon, item.lat, `Photo "${item.title ?? 'Untitled'}"`);
+    }
+    openViewer({
+      title: item.title,
+      sourceManifestUrl: item.manifestUrl,
+      imageServiceUrl: '',
+      layerLabel: item.location || 'Images',
+      centerLon: item.lon,
+      centerLat: item.lat,
+      spriteRef: massartSpriteRef(item),
+    }, 'left');
+    if (item.lat != null && item.lon != null) {
+      void flashLocationAfterLayout(item.lon, item.lat);
     }
   }
 
@@ -1361,6 +1557,21 @@
     closeImageCollectionBubble();
   }
 
+  function massartFeatureAt(targetMap: maplibregl.Map, point: { x: number; y: number }) {
+    const layers = getMassartClickLayerIds().filter((layerId) => targetMap.getLayer(layerId));
+    if (layers.length === 0) return null;
+    return targetMap.queryRenderedFeatures([point.x, point.y], { layers })[0] ?? null;
+  }
+
+  function openMassartFeature(feature: any, pane: PaneId) {
+    if (!feature?.properties) return false;
+    const { manifestUrl } = feature.properties as { manifestUrl: string };
+    const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
+    if (!item) return false;
+    openImageCollectionBubble({ ...item, spriteRef: massartSpriteRef(item) }, pane);
+    return true;
+  }
+
   // ─── Reactive derivations ──────────────────────────────────────────────────
 
   $: panelOpen = parcelClickInfo !== null || pinnedCards.length > 0;
@@ -1369,6 +1580,7 @@
 
   async function onTimesliderMainToggle(e: CustomEvent<{ mainId: string; enabled: boolean }>) {
     await toggleMainLayer(e.detail.mainId, e.detail.enabled);
+    updateUrl();
   }
 
   async function onTimesliderSublayerChange(e: CustomEvent<{ subId: string; enabled: boolean }>) {
@@ -1393,6 +1605,7 @@
       subLayerDefs: SUB_LAYER_DEFS,
       scheduleRightIiifMainLayerSync,
     });
+    updateUrl();
   }
 
   async function onTimesliderPaneSublayerChange(e: CustomEvent<{ pane: PaneId; subId: string; enabled: boolean }>) {
@@ -1426,8 +1639,8 @@
 
   // ─── MapInfoWindow wiring ──────────────────────────────────────────────────
 
-  $: mapInfoWindowOpen = activeCollection !== null;
-  $: rightMapInfoWindowOpen = dualPaneEnabled && rightActiveCollection !== null;
+  $: mapInfoWindowOpen = activeCollection !== null && !hasViewerPane;
+  $: rightMapInfoWindowOpen = dualPaneEnabled && rightActiveCollection !== null && !hasViewerPane;
   $: anyLayerLoading = Object.values(combinedMainLayerLoading).some(Boolean);
 
   function onMapInfoWindowClose(pane: PaneId = 'left') {
@@ -1469,14 +1682,6 @@
 
   function attachRightMassartHandlers(targetMap: maplibregl.Map) {
     for (const layerId of getMassartClickLayerIds()) {
-      targetMap.on('click', layerId, (e) => {
-        const feat = e.features?.[0];
-        if (!feat?.properties) return;
-        const { manifestUrl } = feat.properties as { manifestUrl: string };
-        const item = massartItems.find(entry => entry.manifestUrl === manifestUrl);
-        if (!item) return;
-        openImageCollectionBubble({ ...item, spriteRef: massartSpriteRef(item) }, 'right');
-      });
       targetMap.on('mouseenter', layerId, () => { targetMap.getCanvas().style.cursor = 'pointer'; });
       targetMap.on('mouseleave', layerId, () => { targetMap.getCanvas().style.cursor = ''; });
     }
@@ -1516,8 +1721,10 @@
       targetMap.getCanvas().style.cursor = '';
     };
 
-    const onClick = () => {
-      openFirstIiifHitInViewer(rightIiifHoveredMaps, 'right', 'right');
+    const onClick = (e: any) => {
+      if (openMassartFeature(massartFeatureAt(targetMap, e.point), 'right')) return;
+      const lngLat = targetMap.unproject([e.point.x, e.point.y] as [number, number]);
+      openFirstIiifHitInViewer(hitTestAllWarpedMaps(lngLat.lng, lngLat.lat, 'right'), 'right', 'right');
     };
 
     targetMap.on('mousemove', onMouseMove);
@@ -1567,6 +1774,15 @@
         rightMapReady = value;
       },
 	      onLoad: async (targetMap) => {
+          const baselayerId = (selectedBaselayer === 'scheldt' || selectedBaselayer === 'osm') ? selectedBaselayer : 'custom';
+          await new Promise<void>((resolve) => {
+            const timeout = window.setTimeout(resolve, 1200);
+            setBaselayer(targetMap, baselayerId, resolve, selectedBaselayerTileUrl);
+            targetMap.once('idle', () => {
+              window.clearTimeout(timeout);
+              resolve();
+            });
+          });
 	        updateScaleIndicator(targetMap);
 	        logViewLevel(targetMap, 'right');
 	        attachRightMassartHandlers(targetMap);
@@ -1678,6 +1894,13 @@
     document.addEventListener('click', handleDocumentClick);
 
 	    map = ensureMapContext(mapDiv);
+
+    // Apply camera from URL before the style loads so the map opens at the right position.
+    if (_initialUrlState.center) {
+      const { lng, lat, zoom } = _initialUrlState.center;
+      map.jumpTo({ center: [lng, lat], zoom });
+    }
+
 	    map.on('load', () => {
 	      updateScaleIndicator(map);
 	      logViewLevel(map, 'left');
@@ -1809,6 +2032,7 @@
 	      updateScaleIndicator(map);
 	      logViewLevel(map, 'left');
 	      computeImagesInView();
+        scheduleUrlUpdate();
 	    };
 
     map.on('mousemove', onMouseMove);
@@ -1816,6 +2040,10 @@
     map.on('click',     onClick);
     map.on('move',      onMapMove);
     void fetchIndex();
+
+    // Enable URL updates after the initial setup phase completes.
+    _urlReady = true;
+    updateUrl();
 
     return () => {
       map.off('mousemove', onMouseMove);
@@ -1854,12 +2082,10 @@
               title={viewerItem.title}
               sourceManifestUrl={viewerItem.sourceManifestUrl}
               manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ''}
-              historyItems={viewerHistory}
               spriteRef={viewerSpriteRef}
               placeholderWidth={viewerPlaceholderWidth}
               placeholderHeight={viewerPlaceholderHeight}
-              on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; viewerPlaceholderWidth = 0; viewerPlaceholderHeight = 0; }}
-              on:select-history={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, viewerPane, viewerPane)}
+              on:close={closeViewer}
             />
           {/key}
         {/if}
@@ -1878,12 +2104,10 @@
                 title={viewerItem.title}
                 sourceManifestUrl={viewerItem.sourceManifestUrl}
                 manifestAllmapsUrl={viewerItem.manifestAllmapsUrl ?? ''}
-                historyItems={viewerHistory}
                 spriteRef={viewerSpriteRef}
                 placeholderWidth={viewerPlaceholderWidth}
                 placeholderHeight={viewerPlaceholderHeight}
-                on:close={() => { viewerOpen = false; viewerSpriteRef = undefined; viewerPlaceholderWidth = 0; viewerPlaceholderHeight = 0; }}
-                on:select-history={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, viewerPane, viewerPane)}
+                on:close={closeViewer}
               />
             {/key}
           {/if}
@@ -1898,6 +2122,7 @@
       bind:isModalOpen={searchModalOpen}
       toponymIndex={toponymIndex}
       manifestSearchIndex={manifestSearchIndex}
+      recentManifestItems={viewerHistory}
       massartIndex={massartItems}
       activeMapIds={new Set([
         ...Object.entries(mainLayerEnabled).filter(([_, enabled]) => enabled).map(([id]) => id),
@@ -1907,6 +2132,7 @@
       error={toponymError}
       on:fly-to-toponym={(e) => onFlyToToponym(e.detail)}
       on:manifest-click={(e) => onManifestClick(e.detail)}
+      on:recent-manifest-click={(e: CustomEvent<IiifMapInfo>) => openViewer(e.detail, 'left')}
       on:massart-click={(e) => onMassartClick(e.detail)}
     />
 
@@ -1929,13 +2155,13 @@
             class:is-active={isSplitLayout}
             type="button"
             aria-pressed={isSplitLayout}
-            on:click={toggleSplitMode}
+            on:click={(event) => { debugToolbarClick('compare', event); toggleSplitMode(); }}
           >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
           <button
             class="search-toggle"
             type="button"
             aria-label="Open search"
-            on:click={() => { searchModalOpen = true; }}
+            on:click={(event) => { debugToolbarClick('search', event); searchModalOpen = true; }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -1956,14 +2182,18 @@
               <div class="map-scale-bar" style={`width:${scaleWidthPx}px;`}></div>
             </div>
           {/if}
-          <div class="baselayers-menu-wrapper">
+          <div
+            class="baselayers-menu-wrapper"
+            on:pointerdown={(event) => debugBaselayersWrapperEvent('pointerdown', event)}
+            on:click={(event) => debugBaselayersWrapperEvent('click', event)}
+          >
             <button
               class="baselayers-toggle"
               type="button"
               title="Select base layer"
               aria-label="Select base layer"
               aria-expanded={baselayersMenuOpen}
-              on:click={() => (baselayersMenuOpen = !baselayersMenuOpen)}
+              on:click|stopPropagation={(event) => { debugToolbarClick('baselayers', event); baselayersMenuOpen = !baselayersMenuOpen; }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12h2m2 0h2m2 0h2m2 0h2m2 0h2" />
@@ -2024,7 +2254,7 @@
             type="button"
             title="Screenshot without UI"
             aria-label="Screenshot without UI"
-            on:click={captureScreenshot}
+            on:click={(event) => { debugToolbarClick('screenshot', event); captureScreenshot(); }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
@@ -2039,10 +2269,11 @@
         dualPaneEnabled={dualPaneEnabled}
         {searchFocusMainId}
         {searchFocusNonce}
-        yearLeeway={MASSART_LEEWAY}
         loadingLayers={combinedMainLayerLoading}
         {clearLeftCollectionNonce}
         {clearRightCollectionNonce}
+        initialLeftMainId={_initialUrlState.leftMainId ?? null}
+        initialRightMainId={_initialUrlState.rightMainId ?? null}
         bind:activeCollection
         bind:rightActiveCollection
         on:mainToggle={onTimesliderMainToggle}
@@ -2085,7 +2316,9 @@
     {#if !viewerOpen}
       <ImagesInViewPanel
         items={imagesInView}
+        filterItems={massartItems}
         forceClose={closeImagesPanel}
+        bind:isOpen={imagesInViewPanelOpen}
         on:click={(e) => {
           const item = e.detail;
           openViewer({
@@ -2205,14 +2438,14 @@
   }
 
   .wrap {
-    height: 100dvh;
+    height: 100%;
     overflow: hidden;
   }
 
   .map-shell {
     position: relative;
-    width: 100vw;
-    height: 100dvh;
+    width: 100%;
+    height: 100%;
   }
 
   .map-stage {
@@ -2293,7 +2526,7 @@
     bottom: 14px;
     left: 0;
     right: 0;
-    z-index: 4;
+    z-index: 60;
     pointer-events: none;
   }
 
@@ -2473,6 +2706,8 @@
 
   .baselayers-menu-wrapper {
     position: relative;
+    pointer-events: auto;
+    z-index: 2;
   }
 
   .baselayers-toggle {
@@ -2500,7 +2735,7 @@
     position: absolute;
     bottom: calc(100% + 8px);
     right: 0;
-    z-index: 100;
+    z-index: 70;
     pointer-events: auto;
   }
 

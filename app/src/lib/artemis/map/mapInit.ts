@@ -275,6 +275,7 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
   } as any);
 
   loadBaselayerData().then(baselayerData => {
+    if (!nextMap.getSource(BASE_WATER_SOURCE_ID)) return;
     const updatedStyle = getBaseMapStyle(baselayerData);
     nextMap.setStyle(updatedStyle);
   }).catch(err => {
@@ -859,7 +860,7 @@ function ensureFlashStyles() {
       width: 36px; height: 36px;
       top: -18px; left: -18px;
       border-radius: 50%;
-      background: rgba(239, 108, 0, 0.8);
+      background: color-mix(in srgb, var(--button-primary-background, #3f789f) 80%, transparent);
       opacity: 0;
       animation: location-flash-pulse 1.0s ease-out forwards;
     }

@@ -3,14 +3,17 @@
   import { browser } from '$app/environment';
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import type { MassartItem } from '$lib/artemis/shared/types';
-  import { MAIN_LAYER_LABELS, MAIN_LAYER_META } from '$lib/artemis/config/layers';
+  import { MAIN_LAYER_LABELS, MAIN_LAYER_META, SUB_LAYER_DEFS } from '$lib/artemis/config/layers';
   import SliderLayer from '$lib/components/SliderLayer.svelte';
   import type { LayerMetadata, PaneId, SliderSource, CollectionInfo } from '$lib/components/timeslider/types';
 
   export let layerMetadataByMainId: Record<string, LayerMetadata> = {};
+  export let massartItems: MassartItem[] = [];
   export let loadingLayers: Record<string, boolean> = {};
   export let dualPaneEnabled = false;
   export let searchFocusMainId: string | null = null;
+  export let initialLeftMainId: string | null = null;
+  export let initialRightMainId: string | null = null;
   export let searchFocusNonce = 0;
   export let activeCollection: CollectionInfo | null = null;
   export let rightActiveCollection: CollectionInfo | null = null;
@@ -198,11 +201,14 @@
     hoveredSrc = src;
     const el = e.currentTarget as HTMLElement;
     const rect = el.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
+    // getBoundingClientRect is in visual (post-zoom) coords; position:fixed uses layout
+    // coords (html zoom scales fixed children too). Divide to convert.
+    const cssZoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    const cx = (rect.left + rect.width / 2) / cssZoom;
     if (sourceBulgeDirection(src) === 'above') {
-      tooltipFixedStyle = `left:${cx}px;top:${rect.bottom + 8}px;transform:translateX(-50%)`;
+      tooltipFixedStyle = `left:${cx}px;top:${rect.bottom / cssZoom + 8}px;transform:translateX(-50%)`;
     } else {
-      tooltipFixedStyle = `left:${cx}px;top:${rect.top - 8}px;transform:translate(-50%,-100%)`;
+      tooltipFixedStyle = `left:${cx}px;top:${rect.top / cssZoom - 8}px;transform:translate(-50%,-100%)`;
     }
   }
 
@@ -312,6 +318,7 @@
         id: sub.id,
         subId: sub.subId,
         label: sub.label,
+        kind: SUB_LAYER_DEFS[sub.subId]?.kind,
         url: undefined,
       })),
     };
@@ -540,6 +547,12 @@
       trackResizeObserver = new ResizeObserver(scheduleTrackWidthSync);
       trackResizeObserver.observe(trackEl);
     }
+
+    // Restore active layers from URL state if provided.
+    const leftInitSrc = initialLeftMainId ? SOURCES.find(s => s.mainId === initialLeftMainId) : null;
+    if (leftInitSrc) leftActiveSourceKey = leftInitSrc.key;
+    const rightInitSrc = initialRightMainId ? SOURCES.find(s => s.mainId === initialRightMainId) : null;
+    if (rightInitSrc) rightActiveSourceKey = rightInitSrc.key;
 
     for (const src of SOURCES) {
       const visible = leftActiveSourceKey === src.key;

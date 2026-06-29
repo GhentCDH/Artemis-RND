@@ -185,8 +185,11 @@
   }
 
   function syncViewport() {
-    viewportWidth = window.innerWidth;
-    viewportHeight = window.innerHeight;
+    // Use clientWidth/Height (layout viewport in CSS-zoomed space) rather than
+    // innerWidth/Height (visual viewport) so bubble clamping stays in the same
+    // coordinate space as the layout-pixel x/y props.
+    viewportWidth = document.documentElement.clientWidth;
+    viewportHeight = document.documentElement.clientHeight;
   }
 
   onMount(() => {
