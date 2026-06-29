@@ -411,6 +411,7 @@ export function getLandUsageLayerId(key: LandUsageLayerKey): string {
 }
 
 function ensureIiifHoverLayers(m: maplibregl.Map): void {
+  if (!isMapStyleUsable(m)) return;
   if (!m.getSource(IIIF_HOVER_SOURCE_ID)) {
     m.addSource(IIIF_HOVER_SOURCE_ID, {
       type: "geojson",
@@ -780,6 +781,7 @@ export function setMassartPins(
   year: number,
   leeway: number
 ): void {
+  if (!isMapStyleUsable(map)) return;
   ensureMassartIcons(map);
   const data = massartGeoJSON(items);
 
@@ -833,6 +835,7 @@ export function updateMassartActiveYear(
   year: number,
   leeway: number
 ): void {
+  if (!isMapStyleUsable(map)) return;
   if (!map.getSource(MASSART_SOURCE_ID)) return;
   if (map.getLayer(MASSART_LAYER_ACTIVE))
     map.setFilter(MASSART_LAYER_ACTIVE, massartActiveFilter(year, leeway));

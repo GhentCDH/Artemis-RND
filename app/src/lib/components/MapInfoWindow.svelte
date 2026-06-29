@@ -195,7 +195,8 @@
   }
 
   :global(.map-info-window.is-right) {
-    left: calc(50vw + 16px);
+    left: 50%;
+    transform: translateX(16px);
   }
 
   @media (max-width: 900px) {
