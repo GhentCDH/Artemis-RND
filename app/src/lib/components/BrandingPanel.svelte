@@ -153,33 +153,37 @@
     align-items: center;
     gap: 12px;
     padding: 8px 12px;
-    background: white;
-    border: 0.5px solid rgba(0, 0, 0, 0.1);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: var(--window-background);
+    border: 1px solid var(--window-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--window-shadow);
   }
 
   :global(.branding-button:hover) {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    border-color: rgba(0, 0, 0, 0.15);
+    background: var(--window-background);
+    box-shadow: var(--window-shadow);
+    border-color: var(--control-border-hover);
   }
 
   .branding-logo {
     width: 24px;
     height: 36px;
     flex: 0 0 auto;
-    color: #5c6fb1;
+    color: var(--button-primary-background);
   }
 
   .branding-text {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    align-items: flex-start;
   }
 
   .branding-title {
     font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 700;
+    letter-spacing: 0.24em;
     color: var(--text-primary);
     line-height: 1.1;
   }
@@ -187,9 +191,11 @@
   .branding-subtitle {
     font-family: var(--font-ui);
     font-size: 10px;
-    font-weight: 500;
-    color: var(--text-muted);
-    line-height: 1.1;
+    font-weight: 400;
+    letter-spacing: 0.16em;
+    color: var(--button-primary-background);
+    line-height: 1;
+    text-transform: uppercase;
   }
 
   :global(.info-panel) {
@@ -200,14 +206,14 @@
     width: min(600px, 100vw - 40px);
     max-height: min(80vh, 800px);
     z-index: 98;
-    background: rgba(255, 255, 255, 0.95) !important;
+    background: var(--window-background) !important;
     backdrop-filter: blur(12px);
   }
 
   :global(.info-panel .artemis-window-header) {
     padding: 16px;
-    border-bottom-color: rgba(0, 0, 0, 0.1);
-    background: white;
+    border-bottom-color: var(--window-border);
+    background: var(--window-header-background);
   }
 
   :global(.info-panel .artemis-window-heading h2) {
@@ -219,7 +225,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: white;
+    background: var(--window-background);
   }
 
   .panel-content {
@@ -239,10 +245,10 @@
 
   .tab-content p {
     margin: 0 0 12px;
-    font-family: var(--font-ui);
-    font-size: 13px;
-    line-height: 1.6;
-    color: color-mix(in srgb, var(--text-primary) 90%, white 10%);
+    font-family: var(--font-readable);
+    font-size: var(--text-readable-size);
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
   }
 
   .tab-content a {
@@ -261,7 +267,7 @@
   .attribution {
     margin-top: 20px;
     padding-top: 16px;
-    border-top: 0.5px solid rgba(0, 0, 0, 0.08);
+    border-top: 0.5px solid var(--window-border);
   }
 
   .team-section h4,
@@ -317,14 +323,14 @@
     align-items: center;
     justify-content: center;
     padding: 8px;
-    border: 0.5px solid rgba(0, 0, 0, 0.08);
+    border: 0.5px solid var(--window-border);
     border-radius: var(--radius-xs);
     transition: all 150ms ease;
   }
 
   .logos-grid a:hover {
-    border-color: rgba(0, 0, 0, 0.15);
-    background: rgba(0, 0, 0, 0.02);
+    border-color: var(--control-border-hover);
+    background: var(--button-background-hover);
   }
 
   .logos-grid img {
@@ -334,8 +340,9 @@
   }
 
   .attribution {
-    font-size: 11px;
-    color: var(--text-muted);
+    font-family: var(--font-readable);
+    font-size: var(--text-readable-size);
+    color: var(--text-readable);
   }
 
   .attribution p {
@@ -350,8 +357,8 @@
     right: 0;
     height: 60px;
     padding: 8px 16px;
-    border-top: 0.5px solid rgba(0, 0, 0, 0.1);
-    background: white;
+    border-top: 0.5px solid var(--window-border);
+    background: var(--window-background);
     display: flex;
     align-items: center;
     gap: 8px;

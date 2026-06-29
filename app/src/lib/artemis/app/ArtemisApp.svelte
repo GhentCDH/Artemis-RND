@@ -1889,9 +1889,9 @@
 
   .timeslider-wrap {
     position: absolute;
-    bottom: 12px;
-    left: 12px;
-    right: 12px;
+    bottom: 14px;
+    left: 0;
+    right: 0;
     z-index: 4;
     pointer-events: none;
   }
@@ -1902,6 +1902,7 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 8px;
+    padding: 0 12px;
     pointer-events: none;
   }
 
@@ -1948,7 +1949,7 @@
     border: 1px solid var(--window-border);
     color: var(--text-secondary);
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1;
     letter-spacing: 0.02em;
     box-shadow: var(--control-shadow);
@@ -1981,7 +1982,7 @@
     background: var(--button-background);
     color: var(--text-primary);
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 400;
     letter-spacing: 0.01em;
     box-shadow: var(--control-shadow);
     cursor: pointer;

@@ -369,7 +369,7 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 4;
-    width: min(560px, calc(100vw - 28px));
+    width: min(460px, calc(100vw - 28px));
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -379,7 +379,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 6px 9px;
   }
 
   .toponym-search-status {
@@ -424,7 +424,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 6px 6px 0 6px;
+    padding: 4px 5px 0;
     border-bottom: 1px solid var(--border-subtle);
   }
 
@@ -436,11 +436,11 @@
 
   .result-tab {
     flex: 1;
-    padding: 6px 8px;
+    padding: 5px 7px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     text-align: center;
     cursor: pointer;
@@ -502,7 +502,7 @@
   .result-category {
     display: flex;
     flex-direction: column;
-    padding: 8px 0 0 0;
+    padding: 6px 0 0;
   }
 
   .result-category-title {
@@ -516,11 +516,13 @@
   }
 
   .result-source-header {
-    padding: 4px 8px 4px 16px;
+    padding: 3px 7px 3px 14px;
     margin: 0;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
+    font-family: var(--font-readable);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
     background: transparent;
     border: none;
   }
@@ -530,7 +532,7 @@
   }
 
   .result-item {
-    padding: 5px 8px 5px 28px;
+    padding: 4px 7px 4px 24px;
     margin: 0;
     background: transparent;
     width: 100%;
@@ -542,15 +544,19 @@
   }
 
   .toponym-text {
+    font-family: var(--font-readable);
     font-size: 12px;
-    font-weight: 500;
-    color: var(--text-primary);
+    font-weight: 400;
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
   }
 
   .toponym-feedback {
     padding: 6px 8px;
-    font-size: 11px;
-    color: var(--text-muted);
+    font-family: var(--font-readable);
+    font-size: 12px;
+    line-height: var(--text-readable-line-height);
+    color: var(--text-readable);
   }
 
   .toponym-search-error { color: var(--text-error); }

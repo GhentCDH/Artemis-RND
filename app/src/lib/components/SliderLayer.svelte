@@ -18,10 +18,12 @@
   const axisYAbove = 64;
   const axisYBelow = 8;
   $: activeGradientId = `meander-active-gradient-${src.key}`;
+  $: activeFalloffGradientId = `meander-active-falloff-gradient-${src.key}`;
+  $: activeFalloffMaskId = `meander-active-falloff-mask-${src.key}`;
 
   function trackWaveFloor(lane: number): { primary: number; secondary: number } {
     if (lane === 1 || lane === 4) return { primary: 58, secondary: 46 };
-    if (lane === 2 || lane === 3) return { primary: 46, secondary: 32 };
+    if (lane === 2 || lane === 3) return { primary: 30, secondary: 22 };
     return { primary: 34, secondary: 22 };
   }
 
@@ -37,8 +39,10 @@
     `C 25 ${startY}, 25 ${apexY}, 50 ${apexY}`,
     `C 75 ${apexY}, 75 ${endY}, 100 ${endY}`,
   ].join(' ');
+  $: baseTimelinePath = `M 0 ${axisY} L 100 ${axisY}`;
   $: dotTrackY = apexY;
   $: dotTop = `${(dotTrackY / viewBoxHeight) * 100}%`;
+  $: labelStyle = `top:${dotTop}`;
 
   function onSourceKeydown(event: KeyboardEvent) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -81,6 +85,14 @@
           <stop class="meander-active-stop" offset="50%"></stop>
           <stop offset="100%" stop-color="currentColor"></stop>
         </linearGradient>
+        <linearGradient id={activeFalloffGradientId} x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="black"></stop>
+          <stop offset="50%" stop-color="white"></stop>
+          <stop offset="100%" stop-color="black"></stop>
+        </linearGradient>
+        <mask id={activeFalloffMaskId} maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="72">
+          <rect x="0" y="0" width="100" height="72" fill={`url(#${activeFalloffGradientId})`}></rect>
+        </mask>
       </defs>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <path
@@ -91,10 +103,17 @@
         on:mouseenter={(event) => onPillEnter(src, event)}
         on:mouseleave={onPillLeave}
       ></path>
+      <path class="meander-axis-redirect" d={baseTimelinePath}></path>
       <path class="meander-river" d={meanderPath}></path>
       <path class="meander-current" d={meanderPath} style={isCurrent ? `stroke:url(#${activeGradientId})` : ''}></path>
+      <path class="meander-active-apex" d={meanderPath} mask={`url(#${activeFalloffMaskId})`}></path>
       <path class="meander-flow" d={meanderPath}></path>
     </svg>
+    <span class="meander-label" style={labelStyle}>
+      <span class="meander-label-text">
+        <span class="meander-label-title">{src.label}</span>
+      </span>
+    </span>
     <span class="meander-dot" style={`top:${dotTop}`}></span>
   </button>
 </div>
@@ -175,7 +194,9 @@
   }
 
   .meander-river,
+  .meander-axis-redirect,
   .meander-current,
+  .meander-active-apex,
   .meander-flow {
     fill: none;
     stroke: currentColor;
@@ -187,8 +208,14 @@
   }
 
   .meander-river {
-    opacity: 0.24;
-    stroke-width: var(--river-stroke-width);
+    opacity: 0;
+    stroke-width: 0;
+  }
+
+  .meander-axis-redirect {
+    opacity: 0;
+    stroke: var(--timeline-layer-color);
+    stroke-width: calc(var(--river-stroke-width) * 0.42);
   }
 
   .meander-active-stop {
@@ -196,8 +223,15 @@
   }
 
   .meander-current {
-    opacity: 0.92;
+    opacity: 1;
+    stroke: var(--timeline-layer-color);
     stroke-width: calc(var(--river-stroke-width) * 0.42);
+  }
+
+  .meander-active-apex {
+    opacity: 0;
+    stroke: var(--timeline-layer-active-color);
+    stroke-width: calc(var(--river-stroke-width) * 0.62);
   }
 
   .meander-flow {
@@ -209,11 +243,20 @@
   }
 
   .source-block.is-current .meander-river {
-    stroke-width: var(--river-stroke-width);
+    stroke-width: 0;
+  }
+
+  .source-block.is-current .meander-axis-redirect {
+    opacity: 1;
   }
 
   .source-block.is-current .meander-current {
-    stroke-width: calc(var(--river-stroke-width) * 0.52);
+    stroke: var(--timeline-layer-active-color);
+    stroke-width: calc(var(--river-stroke-width) * 0.42);
+  }
+
+  .source-block.is-current .meander-active-apex {
+    opacity: 1;
   }
 
   .source-block.is-current .meander-flow {
@@ -222,11 +265,11 @@
   }
 
   .source-block.is-dimmed .meander-river {
-    opacity: 0.12;
+    opacity: 0;
   }
 
   .source-block.is-dimmed .meander-current {
-    opacity: 0.25;
+    opacity: 0.38;
   }
 
   @keyframes meander-flow {
@@ -258,5 +301,45 @@
     width: 10px;
     height: 10px;
     background: var(--timeline-layer-active-color);
+  }
+
+  .meander-label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+    color: var(--timeline-layer-active-color);
+    opacity: 0.9;
+    z-index: 3;
+  }
+
+  .meander-label-text {
+    position: absolute;
+    left: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: max-content;
+    transform: translateX(-50%);
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .meander-label-title {
+    font-family: var(--font-ui);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.05;
+    text-transform: uppercase;
+  }
+
+  .meander-label .meander-label-text {
+    top: 10px;
+  }
+
+  .source-pill-wrap:not(.is-below) .meander-label .meander-label-text {
+    top: auto;
+    bottom: 10px;
   }
 </style>
