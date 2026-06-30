@@ -1,7 +1,7 @@
 import { WarpedMapLayer } from "@allmaps/maplibre";
 import type maplibregl from "maplibre-gl";
 import type { RunResult, StepTiming, SpriteRef } from "$lib/artemis/shared/types";
-import { joinUrl, nowMs } from "$lib/artemis/shared/utils";
+import { fetchJson, joinUrl, nowMs } from "$lib/artemis/shared/utils";
 import { getAllmapsDebugMapOptions } from "$lib/artemis/config/allmapsDebug";
 import {
   loadNewIiifEntries,
@@ -17,6 +17,8 @@ import {
   waitForMapReady,
   type PaneRuntimeId,
 } from "./runtime";
+import { type GrSpriteManifest } from "./grSpritePlaceholder";
+import { GrSpriteWebGLLayer } from "./grSpriteWebGLLayer";
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -66,8 +68,10 @@ export async function initializeLayerGroup(opts: {
   spriteOnly?: boolean;
   parallelLoading?: boolean;
   spriteDebugMode?: boolean;
+  /** Skip the Allmaps pipeline entirely — gr_sprite WebGL layer stays visible. Use to benchmark the placeholder phase in isolation. */
+  grSpriteOnly?: boolean;
 }): Promise<RunResult[]> {
-  const { map, cfg, layerInfo, paneId = "main", initialRenderMaps = true, spriteOnly = false, parallelLoading = false, spriteDebugMode = false } = opts;
+  const { map, cfg, layerInfo, paneId = "main", initialRenderMaps = true, spriteOnly = false, parallelLoading = false, spriteDebugMode = false, grSpriteOnly = false } = opts;
   const runtime = getPaneRuntime(paneId);
   const layerLabel = layerInfo.renderLayerLabel?.trim() || layerInfo.sourceCollectionLabel;
   await waitForMapReady(map);
@@ -91,6 +95,7 @@ export async function initializeLayerGroup(opts: {
   const timeout = cfg.fetchTimeoutMs ?? 30000;
   const loaded = await loadNewIiifEntries(cfg, layerInfo, timeout, spriteDebugMode);
   const infoByServiceUrl = loaded.infoByServiceUrl;
+  const grSpritesPath = loaded.grSpritesPath;
   const entriesUnfiltered = loaded.entries;
   const entries = entriesUnfiltered.filter((entry) => {
     if (layerInfo.renderLayerKey === "verzamelblad") return entry.isVerzamelblad === true;
@@ -98,6 +103,9 @@ export async function initializeLayerGroup(opts: {
     return true;
   });
 
+  // GR sprite mode: show pre-warped tiles immediately, then progressively warp via Allmaps on zoom
+  // Load gr_sprites first — instant preview before Allmaps triangulates
+  // WarpedMapLayer goes in first (bottom of stack)
   const results: RunResult[] = [];
   const chunkCount = 1;
   const layerIds = Array.from({ length: chunkCount }, (_, i) => `warped-layer-${groupId.replace(/\//g, "-")}${chunkCount > 1 ? `-${i}` : ""}`);
@@ -108,7 +116,6 @@ export async function initializeLayerGroup(opts: {
     const l = new WarpedMapLayer({ layerId: layerIds[i] } as any);
     try {
       map.addLayer(l as any);
-      l.setLayerOptions({ visible: false } as any);
       layers.push(l);
     } catch (e: any) {
       return [];
@@ -117,13 +124,33 @@ export async function initializeLayerGroup(opts: {
   runtime.activeLayersByGroup.set(groupId, layerIds);
   runtime.activeWarpedLayersByGroup.set(groupId, layers);
 
+  // gr_sprites go on top — they mask WarpedMapLayer while it loads underneath
+  let grWebGLLayer: GrSpriteWebGLLayer | null = null;
+  if (grSpritesPath) {
+    try {
+      const grManifestUrl = joinUrl(cfg.datasetBaseUrl, grSpritesPath);
+      const grManifest = await fetchJson<GrSpriteManifest>(grManifestUrl, timeout);
+      const grManifestBase = grManifestUrl.replace(/\/[^/]+$/, "/");
+      const sheetUrl = joinUrl(grManifestBase, grManifest.spriteSheet);
+      grWebGLLayer = new GrSpriteWebGLLayer(`gr-sprite-webgl-${groupId}`, grManifest, sheetUrl);
+      map.addLayer(grWebGLLayer as any);
+      runtime.activeLayerCleanup.set(groupId, () => {
+        if (grWebGLLayer && map.getLayer(grWebGLLayer.id)) map.removeLayer(grWebGLLayer.id);
+      });
+    } catch {
+      // non-fatal — continue to normal Allmaps loading without placeholders
+    }
+  }
+
+  if (grSpriteOnly) return results;
+
   function nativeUpdateAll() {
     if (!safeHasMapLayer(map, layerIds[0])) return;
     for (const l of layers) (l as any).nativeUpdate?.();
   }
 
   type FetchedGeoreferencedMap =
-    | { url: string; raw: unknown; fetchMs: number; spriteRef?: SpriteRef; placeholderWidth?: number; placeholderHeight?: number }
+    | { url: string; raw: unknown; fetchMs: number; canvasAllmapsId?: string; spriteRef?: SpriteRef; placeholderWidth?: number; placeholderHeight?: number }
     | { url: string; error: string };
   type FetchedSprite = {
     imageUrl: string;
@@ -157,6 +184,7 @@ export async function initializeLayerGroup(opts: {
         url: a.url,
         raw: a.raw,
         fetchMs: 0,
+        canvasAllmapsId: a.canvasAllmapsId,
         spriteRef: a.spriteRef,
         placeholderWidth: a.placeholderWidth,
         placeholderHeight: a.placeholderHeight,
@@ -220,7 +248,7 @@ export async function initializeLayerGroup(opts: {
           );
         }
 
-        const okMaps = item.maps.filter((a): a is { url: string; raw: unknown; fetchMs: number; spriteRef?: SpriteRef; placeholderWidth?: number; placeholderHeight?: number } => "raw" in a);
+        const okMaps = item.maps.filter((a): a is { url: string; raw: unknown; fetchMs: number; canvasAllmapsId?: string; spriteRef?: SpriteRef; placeholderWidth?: number; placeholderHeight?: number } => "raw" in a);
         const failedMaps = item.maps.filter((a): a is { url: string; error: string } => "error" in a);
 
         const totalFetchMs = okMaps.reduce((sum, a) => sum + a.fetchMs, 0);
@@ -271,6 +299,7 @@ export async function initializeLayerGroup(opts: {
               placeholderWidth: sourceMap?.placeholderWidth,
               placeholderHeight: sourceMap?.placeholderHeight,
             });
+
           }
           steps.push({
             step: "allmaps_add_georeferenced_map",
@@ -372,11 +401,10 @@ export async function initializeLayerGroup(opts: {
 
   await initializeSpritesForItems(fetchedAll);
 
-  if (initialRenderMaps && !spriteOnly) {
-    for (const layer of layers) {
-      layer.setLayerOptions({ visible: true } as any);
-    }
-  }
+  // Allmaps is ready — remove gr_sprite WebGL layer
+  if (grWebGLLayer && map.getLayer(grWebGLLayer.id)) map.removeLayer(grWebGLLayer.id);
+  runtime.activeLayerCleanup.delete(groupId);
+
   nativeUpdateAll();
 
   return results;

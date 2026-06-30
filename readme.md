@@ -1,138 +1,124 @@
 # Artemis-RnD (Viewer)
 
-Svelte + MapLibre viewer for Artemis compiled IIIF data.
+SvelteKit web viewer for the Artemis project — historical Belgian maps of the Scheldt region, spanning 1700 to 1912.
 
-This app loads precompiled outputs from `Artemis-RnD-Data/build`, renders georeferenced layers with Allmaps, and provides unified search for manifests and toponyms.
+The app loads precompiled data from [`Artemis-RnD-Data`](https://github.com/GhentCDH/Artemis-RnD-Data), renders georeferenced IIIF map layers via Allmaps + MapLibre, and provides search across historical place names (toponyms) and IIIF manifests.
+
+**Live site:** `https://ghentcdh.github.io/Artemis-RND`
+
+---
 
 ## Stack
 
-- SvelteKit
-- MapLibre GL
-- `@allmaps/maplibre`
+| Dependency | Role |
+|---|---|
+| SvelteKit 2 / Svelte 5 | App framework + reactivity |
+| MapLibre GL 5 | Interactive map |
+| `@allmaps/maplibre` | IIIF georeferencing on MapLibre |
+| OpenSeadragon 6 | Deep-zoom IIIF image viewer |
+| `@sveltejs/adapter-static` | Static SPA output for GitHub Pages |
+
+---
+
+## Historical Map Layers
+
+Ten map collections are available, displayed on a visual timeline from 1690–1930:
+
+| Layer | Period | Type |
+|---|---|---|
+| Handdrawn Collection | ~1700–1715 | IIIF (Allmaps) |
+| Frickx | 1712 | WMTS tile |
+| Villaret | 1745–1748 | WMTS tile |
+| Ferraris | 1770–1778 | WMTS tile + land-use overlay |
+| Primitief Kadaster | 1808–1834 | IIIF (Allmaps) + cadastral parcels |
+| Vandermaelen | 1846–1854 | WMTS tile + land-use overlay |
+| Gereduceerd Kadaster | 1847–1855 | IIIF (Allmaps) |
+| Popp | 1842–1879 | WMTS tile |
+| NGI 1873 | 1873 | WMTS tile |
+| NGI 1904 | 1904 | WMTS tile |
+
+IIIF layers are georeferenced client-side via Allmaps. WMTS layers are served from external tile services.
+
+---
 
 ## Features
 
-- Layer toggles for compiled render layers
-- WMTS background overlays
-- Primitive parcel overlay + hover tooltip
-- Unified search overlay:
-  - IIIF manifest search (from `build/index.json`)
-  - Toponym search (from `build/Toponyms/index.json`)
-- Click search result to fly map to location
-- Manifest result opens Mirador URL modal (copy/open)
+### Map View
+- Interactive MapLibre GL map with pan, zoom, and rotation
+- Switchable basemaps: Scheldt NGI, OpenStreetMap, or any custom WMTS/XYZ tile URL
+- Live map scale bar
+- Per-layer opacity control
+- PNG screenshot export (composites all visible map and viewer canvases)
 
-## UI Refactor Instructions
+### Timeline & Layer Selection
+- Visual meander-style timeline (1690–1930) showing all 10 map collections as draggable pills
+- Click a pill to activate a layer; active layer loads on the map
+- Per-layer sublayer toggles: IIIF map, WMTS tiles, cadastral parcels, and land-use overlays
+- Layer metadata info panel with historical description per collection
 
-The current UI recreates buttons and floating panel/window shells in multiple Svelte files. This makes theming fragile because each feature owns slightly different CSS, radius values, hover states, and close behavior. The intended direction is a small set of semantic primitives that feature components compose.
+### Split / Compare Mode
+- Side-by-side view with two synchronized map panes
+- Each pane independently selects an active historical layer
+- Camera movement in one pane mirrors the other
 
-### 1. Add Shared UI Components
+### Search
+- Unified floating search panel (toponym search + IIIF manifest search + Massart image search)
+- Fuzzy text scoring with result grouping by source map
+- Click a toponym result → fly map to location + activate relevant historical layer
+- Click a manifest result → fly to location + open document in the IIIF viewer
+- "Active layers only" filter to restrict results to currently visible maps
 
-Create a shared component folder:
+### IIIF Viewer
+- Inline OpenSeadragon-based deep-zoom viewer, docked alongside the map
+- Loads any IIIF manifest; fetches `imageServiceUrl` automatically from the manifest
+- Sprite-sheet thumbnail shown as a placeholder while the image service loads
+- Metadata panel with title, date, canvas info
+- Fullscreen mode; viewer can be placed in left or right pane in split view
+- Recently viewed manifests tracked in the search panel
 
-- `app/src/lib/artemis/ui/primitives/Button.svelte`
-- `app/src/lib/artemis/ui/primitives/Window.svelte`
+### Massart Image Collection
+- Botanical survey photographs (1904–1912) from the Jean Massart collection
+- Map pins showing photo locations, colored by temporal proximity to the active timeline year
+- Click a pin → preview bubble with sprite-sheet thumbnail; open in IIIF viewer
+- "Images in View" panel: lists all Massart photos within the current map bounds, filterable by year range
 
-`Button.svelte` should be the only component used for user actions. Semantically, a button is an action trigger; its variant describes importance or interaction context, not the feature that owns it. Use props like:
+### Map Interaction
+- Hover over a georeferenced IIIF map → colored geo-mask outline + pointer cursor
+- Click a georeferenced map → info card (title, layer, open-in-viewer button)
+- Click a Primitief Kadaster parcel → parcel info card (parcel number, leaf ID, properties)
+- Parcel and map info cards can be pinned and re-focused
 
-- `variant="chrome"` for low-emphasis utility actions such as close, reload, copy, metadata toggles, and small panel actions.
-- `variant="primary"` for the main forward action in a surface, such as "Open in viewer".
-- `variant="toolbar"` for persistent map/view controls.
-- `variant="tab"` for mutually exclusive section selection.
-- `variant="list"` for clickable result/list rows that currently use button markup.
-- `iconOnly={true}` for close/focus/pin actions where the visible label is an icon and the accessible label is provided through `aria-label`.
-- `active={true}` and `disabled={true}` for stateful controls.
+### URL State
+- Hash-based URL persistence: camera position, active left/right layers, split mode, open viewer manifest
+- Shareable and bookmarkable links that restore the full view state on reload
 
-`Window.svelte` should be the only component used for framed floating or docked surfaces. Semantically, a window is a bounded UI surface above the map or viewer, not just a rectangle with a background. It owns the common frame concerns:
+---
 
-- Header layout with title, optional subtitle/meta, optional action slot, and optional close button.
-- Surface variants such as `floating`, `docked`, `modal`, `popover`, and `timeline`.
-- Placement variants such as `left`, `right`, `bottom`, `center`, and `anchored`.
-- Optional backdrop for modal/branding-panel behavior.
-- Escape-key close behavior when `closeOnEscape` is enabled.
-- Consistent border, background, shadow, radius, and overflow behavior.
+## Data Contract
 
-Feature-specific content stays inside the feature component. The primitive owns chrome; the feature owns data, copy, map behavior, and event dispatch.
+The viewer reads compiled output from the data pipeline. Default base URL:
 
-### 2. Centralize Radius Semantics
-
-In `app/src/lib/theme.css`, replace fixed independent radius values with one controlling value and derived semantic tokens:
-
-```css
-:root {
-  --radius-base: 8px;
-  --radius-xs: calc(var(--radius-base) * 0.75);
-  --radius-sm: var(--radius-base);
-  --radius-md: calc(var(--radius-base) * 1.5);
-  --radius-lg: calc(var(--radius-base) * 2);
-  --radius-pill: 999px;
-}
+```
+https://ghentcdh.github.io/Artemis-RnD-Data/build
 ```
 
-Use these meanings consistently:
+Files consumed at runtime:
 
-- `--radius-xs`: compact controls, thumbnails, small badges, list rows.
-- `--radius-sm`: standard buttons, inputs, and small inline panels.
-- `--radius-md`: regular floating windows and cards.
-- `--radius-lg`: large modal or viewer surfaces.
-- `--radius-pill`: pills, chips, sliders, and rounded tracks.
+| Path | Purpose |
+|---|---|
+| `index.json` | Render layer index + manifest list |
+| `IIIF/<mapId>_geomaps.json` | Georeferenced map bundle |
+| `IIIF/<mapId>/sprites/sprites.{jpg,json}` | Map thumbnail spritesheets |
+| `Image collections/Massart/Massart_index.json` | Massart photo index |
+| `Image collections/Massart/Massart_sprites.{jpg,json}` | Massart thumbnail spritesheets |
+| `Toponyms/<mapId>/<mapId>Toponyms.json` | Historical place names per map |
+| `Parcels/PrimitiefKadaster/PrimitiefKadasterParcels.geojson` | Cadastral parcel polygons |
+| `static/site.json` | Site metadata (title, team, logos, attribution) |
+| `static/layers.json` | Runtime layer metadata (historical descriptions) |
 
-Implementation rule: normal UI must use the semantic tokens, never hard-coded `px` radii. Circular icon controls may use `50%`; pill controls may use `--radius-pill`. All other corner changes should happen by changing `--radius-base`, so small controls and large windows scale together.
+The `index.json` manifest entries should include `centerLon` / `centerLat` for fly-to navigation.
 
-### 3. Update Shared CSS
-
-Refactor `app/src/lib/ui.css` so it supports the primitives instead of acting as a collection of feature-specific escape hatches:
-
-- Keep only generic classes or CSS custom properties that are genuinely shared.
-- Move button frame styles behind `Button.svelte`.
-- Move floating panel/window frame styles behind `Window.svelte`.
-- Keep utility text styles such as `.ui-label`, `.ui-meta`, `.ui-alert`, and `.ui-mono` if they remain useful.
-- Remove or deprecate `.ui-btn`, `.ui-btn-primary`, `.ui-icon-btn`, `.ui-panel`, `.ui-panel-overlay`, `.ui-card`, and `.ui-card-header` once their consumers are migrated.
-
-### 4. Migrate Existing Components
-
-Convert the highest-duplication components first:
-
-- `app/src/lib/components/MapInfoWindow.svelte`
-  Replace `.map-info-window`, `.window-header`, `.close-button`, `.copy-url-button`, and local sublayer button styling with `Window.svelte` and `Button.svelte`.
-- `app/src/lib/components/BrandingPanel.svelte`
-  Replace the branding trigger, modal frame, backdrop, close button, and tab buttons with shared primitives. Keep brand-specific logo layout inside the component.
-- `app/src/lib/artemis/ui/ImageCollectionBubble.svelte`
-  Replace the bubble frame and close/open buttons with shared primitives. Keep anchored positioning and image metadata rendering inside this component.
-- `app/src/lib/components/Timeslider.svelte`
-  Replace timeline panel chrome and info modal chrome with `Window.svelte`; replace layer/info/close controls with `Button.svelte`.
-- `app/src/lib/artemis/viewer/IiifViewer.svelte`
-  Replace viewer frame/header/action buttons where possible, but keep viewer-specific canvas and metadata layout local.
-- `app/src/lib/artemis/app/ArtemisApp.svelte`
-  Replace compare/toolbar button styling with `Button.svelte` or the new toolbar variant.
-
-Do not migrate every component in one large unreviewable edit. Start with `MapInfoWindow.svelte`, `ImageCollectionBubble.svelte`, and `BrandingPanel.svelte`, then run `pnpm check` before continuing to `Timeslider.svelte` and `IiifViewer.svelte`.
-
-### 5. Cleanup Rules
-
-After each migration pass:
-
-- Search for `border-radius:` and remove hard-coded values except `50%` and deliberate `--radius-pill` uses.
-- Search for raw `<button` usage. Raw buttons are acceptable only inside `Button.svelte`; all feature components should use the primitive unless there is a clear browser-native form reason.
-- Keep semantic component props stable. Avoid creating feature-named variants such as `variant="branding"` or `variant="map-info"`; use semantic variants like `primary`, `chrome`, `tab`, `toolbar`, or `list`.
-- Run `cd app && pnpm check`.
-
-## Data Dependency
-
-Default dataset base URL points to:
-
-- `https://ghentcdh.github.io/Artemis-RnD-Data/build`
-
-Required files at dataset base:
-
-- `index.json`
-- `Toponyms/index.json` (for toponym search)
-
-Recommended in `index.json` manifest entries:
-
-- `centerLon`
-- `centerLat`
-
-These are used for manifest click-to-location.
+---
 
 ## Quick Start
 
@@ -142,39 +128,67 @@ pnpm install
 pnpm run dev
 ```
 
-## Useful Commands
+## Commands
 
 ```bash
 cd app
 
-# type + svelte checks
+# Type + Svelte checks
 pnpm run check
 
-# production build
+# Production build
 pnpm run build
 
-# preview build
+# Preview production build locally
 pnpm run preview
 ```
 
+---
+
 ## Deployment
 
-The app is deployed to GitHub Pages via GitHub Actions.
+The app deploys to GitHub Pages via GitHub Actions.
 
 **Branch workflow:**
-- `dev` — active development
-- `main` — stable source code; pushing here triggers a deploy
-- `gh-pages` — compiled static output, managed by CI (never commit here manually)
+- `main` — stable source; pushing here triggers a deploy
+- `meander` — active development branch
+- `gh-pages` — compiled static output managed by CI; never commit here manually
 
-**Live site:** `https://ghentcdh.github.io/Artemis-RND`
+**Deploy process** (`.github/workflows/deploy.yml`):
+1. Install dependencies with pnpm
+2. Build with `BASE_PATH=/Artemis-RND`
+3. Push `app/build` output to `gh-pages`
 
-Deployment is handled by `.github/workflows/deploy.yml`, which:
-1. Installs dependencies with pnpm
-2. Builds the app with `BASE_PATH=/Artemis-RND`
-3. Pushes the output of `app/build` to the `gh-pages` branch
+Uses `@sveltejs/adapter-static` with SPA fallback (`index.html`), so no server is required at runtime.
 
-The app uses `@sveltejs/adapter-static` with SPA fallback (`index.html`), so no server is required at runtime.
+---
 
-## Related Repo
+## Project Structure
 
-- Data pipeline: [GhentCDH/Artemis-RnD-Data](https://github.com/GhentCDH/Artemis-RnD-Data) — preprocessing pipeline + GitHub Pages publisher
+```
+app/src/
+  routes/+page.svelte                  # Thin route mount
+  lib/artemis/
+    app/ArtemisApp.svelte              # Top-level orchestration shell
+    config/layers.ts                   # Layer IDs, labels, colors, sublayer definitions
+    dataset/                           # Runtime metadata, manifest index, toponym loading
+    iiif/                              # Allmaps runtime, bundle loader, layer lifecycle
+    map/mapInit.ts                     # MapLibre setup, basemap, parcel + Massart layers
+    panes/splitView.ts                 # Split-view lifecycle and camera sync
+    search/                            # Text normalization, scoring, result navigation
+    timeline/layerControls.ts          # Layer ordering and visibility logic
+    ui/                                # Feature UI components + primitives
+    viewer/                            # IiifViewer + manifest metadata loader
+    url/urlState.ts                    # Hash-based URL encode/decode
+  lib/components/
+    Timeslider.svelte                  # Main timeline UI
+    MapInfoWindow.svelte               # Collection detail panel
+    BrandingPanel.svelte               # Project info modal
+    ImagesInViewPanel.svelte           # Massart images-in-view panel
+```
+
+---
+
+## Related Repos
+
+- **Data pipeline:** [GhentCDH/Artemis-RnD-Data](https://github.com/GhentCDH/Artemis-RnD-Data) — preprocessing pipeline and GitHub Pages publisher

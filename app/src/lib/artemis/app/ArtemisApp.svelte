@@ -998,36 +998,38 @@
     const baseLayers = index.renderLayers ?? [];
     const nextIiifLayers = Array.isArray((index as any).iiifLayers) ? (index as any).iiifLayers : [];
 
-	    if (baseLayers.length === 0 && nextIiifLayers.length > 0) {
-	      const normalized = nextIiifLayers.map((layer: any) => {
-	        const sourceCollectionLabel = cleanLayerLabel(
-	          String(layer.map ?? layer.label ?? layer.sourceCollectionLabel ?? '')
-	        );
-          const layerMapId = String(layer.map ?? deriveIiifMapId(sourceCollectionLabel) ?? '').trim() || undefined;
-	        const normalizedLayer: UILayerInfo = {
-	          sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
-	          sourceCollectionLabel,
-	          compiledCollectionPath: layer.compiledCollectionPath,
-	          map: layerMapId ?? layer.map,
-	          geomapsPath: resolveIiifGeomapsPath(layerMapId, (layer as any).geomapsPath),
-	          spritesPath: layer.spritesPath,
-	          renderLayerKey: String(layer.renderLayerKey ?? 'default'),
-	          renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
-	          hidden: Boolean(layer.hidden),
-	          uiLayerId: getLayerGroupId({
-	            sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
-	            sourceCollectionLabel,
-	            compiledCollectionPath: layer.compiledCollectionPath,
-	            map: layerMapId ?? layer.map,
-	            geomapsPath: resolveIiifGeomapsPath(layerMapId, (layer as any).geomapsPath),
-	            spritesPath: layer.spritesPath,
-	            renderLayerKey: String(layer.renderLayerKey ?? 'default'),
-	            renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
-	            hidden: Boolean(layer.hidden),
-	          }),
-	        };
-	        return normalizedLayer;
-	      });
+    if (baseLayers.length === 0 && nextIiifLayers.length > 0) {
+      const normalized = nextIiifLayers.map((layer: any) => {
+        const sourceCollectionLabel = cleanLayerLabel(
+          String(layer.map ?? layer.label ?? layer.sourceCollectionLabel ?? '')
+        );
+        const layerMapId = String(layer.map ?? deriveIiifMapId(sourceCollectionLabel) ?? '').trim() || undefined;
+        const normalizedLayer: UILayerInfo = {
+          sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
+          sourceCollectionLabel,
+          compiledCollectionPath: layer.compiledCollectionPath,
+          map: layerMapId ?? layer.map,
+          geomapsPath: resolveIiifGeomapsPath(layerMapId, (layer as any).geomapsPath),
+          spritesPath: layer.spritesPath,
+          grSpritesPath: (layer as any).grSpritesPath,
+          renderLayerKey: String(layer.renderLayerKey ?? 'default'),
+          renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
+          hidden: Boolean(layer.hidden),
+          uiLayerId: getLayerGroupId({
+            sourceCollectionUrl: String(layer.sourceCollectionUrl ?? ''),
+            sourceCollectionLabel,
+            compiledCollectionPath: layer.compiledCollectionPath,
+            map: layerMapId ?? layer.map,
+            geomapsPath: resolveIiifGeomapsPath(layerMapId, (layer as any).geomapsPath),
+            spritesPath: layer.spritesPath,
+            grSpritesPath: (layer as any).grSpritesPath,
+            renderLayerKey: String(layer.renderLayerKey ?? 'default'),
+            renderLayerLabel: cleanLayerLabel(String(layer.renderLayerLabel ?? 'Map')),
+            hidden: Boolean(layer.hidden),
+          }),
+        };
+        return normalizedLayer;
+      });
 
       return normalized;
     }
@@ -1046,6 +1048,7 @@
           ? resolveIiifGeomapsPath(map, undefined)
           : resolveIiifGeomapsPath((layer as any).map, (layer as any).geomapsPath),
         spritesPath: map ? `IIIF/${map}/sprites/` : (layer as any).spritesPath,
+        grSpritesPath: (layer as any).grSpritesPath,
         compiledCollectionPath: map ? undefined : layer.compiledCollectionPath,
         renderLayerLabel: layer.renderLayerLabel ? cleanLayerLabel(layer.renderLayerLabel) : layer.renderLayerLabel,
       };
