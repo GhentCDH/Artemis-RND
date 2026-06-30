@@ -8,6 +8,7 @@ export type LayerInfo = {
   map?: string;
   geomapsPath?: string;
   spritesPath?: string;
+  grSpritesPath?: string;
   renderLayerKey?: string;
   renderLayerLabel?: string;
   hidden?: boolean;
@@ -44,6 +45,8 @@ type RuntimeLayerEntry = {
   inlineMaps?: Array<{
     url: string;
     raw: unknown;
+    canvasAllmapsId?: string;
+    imageServiceUrl?: string;
     spriteRef?: SpriteRef;
     placeholderWidth?: number;
     placeholderHeight?: number;
@@ -75,7 +78,29 @@ type BundleSprite = {
 };
 
 let cachedIndex: CompiledIndex | null = null;
-const cachedNewIiifBundles = new Map<string, Promise<{ entries: RuntimeLayerEntry[]; infoByServiceUrl: Map<string, any> }>>();
+const cachedNewIiifBundles = new Map<string, Promise<{ entries: RuntimeLayerEntry[]; infoByServiceUrl: Map<string, any>; grSpritesPath?: string }>>();
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function resolveGrSpritesPath(bundle: any, layerInfo: LayerInfo): string | undefined {
+  const bundleSprites = bundle?.sprites;
+  const explicitPath =
+    readString(layerInfo.grSpritesPath) ??
+    readString(bundleSprites?.grJson) ??
+    readString(bundleSprites?.georeferencedJson) ??
+    readString(bundleSprites?.warpedJson);
+
+  if (explicitPath) return explicitPath;
+
+  const mapId = readString(bundle?.mapId) ?? readString(layerInfo.map);
+  if (mapId === "GereduceerdeKadaster" || mapId === "PrimitiefKadaster") {
+    return `IIIF/${mapId}/sprites/gr_sprites.json`;
+  }
+
+  return undefined;
+}
 
 export function resetBundleLoaderCache() {
   cachedIndex = null;
@@ -85,8 +110,9 @@ export function resetBundleLoaderCache() {
 export async function loadCompiledIndex(cfg: CompiledRunnerConfig): Promise<CompiledIndex> {
   if (cachedIndex) return cachedIndex;
   const indexUrl = joinUrl(cfg.datasetBaseUrl, cfg.indexPath ?? "index.json");
-  cachedIndex = await fetchJson<CompiledIndex>(indexUrl, cfg.fetchTimeoutMs ?? 30000);
-  return cachedIndex;
+  const index = await fetchJson<CompiledIndex>(indexUrl, cfg.fetchTimeoutMs ?? 30000);
+  cachedIndex = index;
+  return index;
 }
 
 export async function loadNewIiifEntries(
@@ -94,8 +120,8 @@ export async function loadNewIiifEntries(
   layerInfo: LayerInfo,
   timeout: number,
   spriteDebugMode = false
-): Promise<{ entries: RuntimeLayerEntry[]; infoByServiceUrl: Map<string, any> }> {
-  const cacheKey = [cfg.datasetBaseUrl.replace(/\/+$/, ""), layerInfo.geomapsPath].join("::");
+): Promise<{ entries: RuntimeLayerEntry[]; infoByServiceUrl: Map<string, any>; grSpritesPath?: string }> {
+  const cacheKey = [cfg.datasetBaseUrl.replace(/\/+$/, ""), layerInfo.geomapsPath, layerInfo.grSpritesPath ?? ""].join("::");
   const cached = cachedNewIiifBundles.get(cacheKey);
   if (cached) return cached;
 
@@ -112,6 +138,7 @@ export async function loadNewIiifEntries(
         : null;
     const spritePath = typeof bundleSprites?.image === "string" ? String(bundleSprites.image) : "";
     const spriteJsonPath = typeof bundleSprites?.json === "string" ? String(bundleSprites.json) : "";
+    const grSpritesPath = resolveGrSpritesPath(bundle, layerInfo);
     const spriteImageUrl = spritePath
       ? joinUrl(cfg.datasetBaseUrl, spriteDebugMode ? spritePath.replace(/(\.[^.]+)$/, "_debug$1") : spritePath)
       : "";
@@ -120,7 +147,7 @@ export async function loadNewIiifEntries(
     if (spriteJsonPath) {
       const spritesUrl = joinUrl(cfg.datasetBaseUrl, spriteJsonPath);
       const sprites = await fetchJson<Record<string, BundleSprite>>(spritesUrl, timeout);
-      for (const [canvasAllmapsId, sprite] of Object.entries(sprites ?? {})) {
+      for (const [canvasAllmapsId, sprite] of Object.entries(sprites)) {
         const key = String(canvasAllmapsId).trim();
         if (!key || !sprite) continue;
         spritesByCanvasAllmapsId.set(key, sprite);
@@ -135,6 +162,7 @@ export async function loadNewIiifEntries(
       const inlineMaps = canvases.flatMap((canvas: any) => {
         if (!canvas.georeferencedMap) return [];
         const canvasAllmapsId = String(canvas?.canvasAllmapsId ?? "").trim();
+        const imageServiceUrl = String(canvas?.info?.["@id"] ?? canvas?.info?.id ?? "").replace(/\/+$/, "") || undefined;
         const sprite = canvasAllmapsId ? spritesByCanvasAllmapsId.get(canvasAllmapsId) : undefined;
         const spriteRef =
           sprite && spriteImageSize && spriteImageUrl
@@ -153,6 +181,8 @@ export async function loadNewIiifEntries(
         return [{
           url: `${geomapsUrl}#${encodeURIComponent(canvas.id)}`,
           raw: canvas.georeferencedMap,
+          canvasAllmapsId: canvasAllmapsId || undefined,
+          imageServiceUrl,
           spriteRef,
           placeholderWidth: Number.isFinite(placeholderWidth) && placeholderWidth > 0 ? placeholderWidth : undefined,
           placeholderHeight: Number.isFinite(placeholderHeight) && placeholderHeight > 0 ? placeholderHeight : undefined,
@@ -194,7 +224,7 @@ export async function loadNewIiifEntries(
       });
     }
 
-    return { entries, infoByServiceUrl };
+    return { entries, infoByServiceUrl, grSpritesPath };
   })().catch((err) => {
     cachedNewIiifBundles.delete(cacheKey);
     throw err;
