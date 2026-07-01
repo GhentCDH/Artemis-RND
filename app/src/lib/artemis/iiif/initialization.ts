@@ -31,22 +31,36 @@ function nextFrame(): Promise<void> {
 // to Allmaps at overview zoom, but free of the multi-second triangulation cost. 11.5 sits just
 // below the pyramid's native max detail (z12), giving triangulation a head start before the user
 // reaches zooms where the raster starts to soften and Allmaps' full-resolution warp is worth it.
-const ALLMAPS_TRIGGER_ZOOM = 11.5;
+const ALLMAPS_TRIGGER_ZOOM = 12.5;
+
+// Viewport-driven loading (Phase 1): only canvases whose footprint intersects the current viewport
+// expanded by this fraction on each side are triangulated. 0.5 → a 2×-linear margin, so a modest
+// pan reveals already-loaded maps instead of blank/raster. Loaded maps are kept (no eviction).
+const ALLMAPS_VIEWPORT_MARGIN = 0.5;
+// How many entries (manifests) to triangulate per animation frame while draining the load queue —
+// same yield-friendly cadence the old background batch used, so a big reconcile never blocks a frame.
+const RECONCILE_CHUNK = 6;
+
+// TEMP DIAGNOSTIC: when true, the pre-rendered sprite atlas is NOT fed to Allmaps, forcing it to
+// fetch full-resolution IIIF tiles instead. Use to check whether Allmaps ever shows real IIIF detail
+// (sharp = full-res works and sprites were masking it; blank/errors = the IIIF tile path is broken).
+// Flip back to false for normal operation.
+const DEBUG_SKIP_SPRITES = false;
+
+// TEMP DIAGNOSTIC: subscribe to Allmaps' renderer events and log, per second, how many tiles came
+// from real IIIF fetches (`maptileloaded`) vs the sprite atlas (`maptilesloadedfromsprites`), plus
+// any tile fetch errors. Definitively answers "does Allmaps ever upgrade sprites → full-res tiles?".
+const DEBUG_LOG_TILE_SOURCE = true;
 
 function toAbsoluteUrl(baseUrl: string, maybePathOrUrl: string): string {
   if (/^https?:\/\//i.test(maybePathOrUrl)) return maybePathOrUrl;
   return joinUrl(baseUrl, maybePathOrUrl);
 }
 
-function scoreEntryForViewport(
-  entry: { inlineMaps?: Array<{ raw: unknown }> },
-  viewportCenter: [number, number] | null
-): number {
-  if (!viewportCenter) return Number.POSITIVE_INFINITY;
-  const entryCenter = getEntryGeoCenter(entry);
-  if (!entryCenter) return Number.POSITIVE_INFINITY;
-  const dx = entryCenter[0] - viewportCenter[0];
-  const dy = entryCenter[1] - viewportCenter[1];
+function squaredDistance(a: [number, number] | null, to: [number, number]): number {
+  if (!a) return Number.POSITIVE_INFINITY;
+  const dx = a[0] - to[0];
+  const dy = a[1] - to[1];
   return dx * dx + dy * dy;
 }
 
@@ -66,6 +80,30 @@ function getEntryGeoCenter(entry: { inlineMaps?: Array<{ raw: unknown }> }): [nu
   if (coords.length === 0) return null;
   const [sumLon, sumLat] = coords.reduce(([accLon, accLat], [lon, lat]) => [accLon + lon, accLat + lat], [0, 0]);
   return [sumLon / coords.length, sumLat / coords.length];
+}
+
+// Geographic bounding box [minLon, minLat, maxLon, maxLat] of an entry, from its GCPs — used to test
+// which entries intersect the viewport for viewport-driven loading. Null if it has no usable GCPs.
+function getEntryGeoBbox(entry: { inlineMaps?: Array<{ raw: unknown }> }): [number, number, number, number] | null {
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+  let found = false;
+  for (const item of entry.inlineMaps ?? []) {
+    const gcps = (item.raw as any)?.gcps;
+    if (!Array.isArray(gcps)) continue;
+    for (const gcp of gcps) {
+      const geo = gcp?.geo;
+      if (!Array.isArray(geo) || geo.length < 2) continue;
+      const lon = Number(geo[0]);
+      const lat = Number(geo[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      found = true;
+    }
+  }
+  return found ? [minLon, minLat, maxLon, maxLat] : null;
 }
 
 export async function initializeLayerGroup(opts: {
@@ -131,6 +169,36 @@ export async function initializeLayerGroup(opts: {
       return [];
     }
   }
+
+  // TEMP: instrument Allmaps' renderer (an EventTarget) to report real-tile vs sprite-tile loads.
+  // The renderer is created lazily in the layer's onAdd, so poll briefly until it exists.
+  if (DEBUG_LOG_TILE_SOURCE) {
+    for (const l of layers) {
+      let tries = 0;
+      const attach = () => {
+        const renderer = (l as any).renderer as EventTarget | undefined;
+        if (!renderer?.addEventListener) {
+          if (tries++ < 50 && safeHasMapLayer(map, (l as any).id)) setTimeout(attach, 100);
+          return;
+        }
+        let real = 0, fromSprites = 0, errors = 0, dirty = false;
+        renderer.addEventListener("maptileloaded", () => { real++; dirty = true; });
+        renderer.addEventListener("maptilesloadedfromsprites", () => { fromSprites++; dirty = true; });
+        renderer.addEventListener("tilefetcherror", (e: any) => {
+          errors++; dirty = true;
+          log(`tile fetch ERROR: ${e?.error?.message ?? "?"} ${e?.data?.tileUrl ?? ""}`);
+        });
+        log(`tile-source logging attached`);
+        const timer = setInterval(() => {
+          if (!safeHasMapLayer(map, (l as any).id)) { clearInterval(timer); return; } // layer/style gone
+          if (!dirty) return;
+          dirty = false;
+          log(`tiles source @ zoom ${map.getZoom().toFixed(1)}: ${real} real (IIIF) / ${fromSprites} from sprites / ${errors} errors`);
+        }, 1000);
+      };
+      attach();
+    }
+  }
   // Deferred-Allmaps trigger state (see ALLMAPS_TRIGGER_ZOOM). The pipeline is loaded lazily on
   // zoom-in rather than eagerly on activation; `detachZoomTrigger` is folded into the raster
   // cleanup below so tearing down the group (or removeLayerGroup) also unhooks the pending trigger.
@@ -145,12 +213,17 @@ export async function initializeLayerGroup(opts: {
     }
     zoomTriggerHandler = null;
   };
+  // Set once viewport-driven loading starts; detaches the `moveend` reconcile listener on teardown.
+  let detachMoveReconcile: (() => void) | null = null;
 
-  // The pre-warped raster tile pyramid goes on top — it's the group's base renderer while Allmaps
-  // is deferred, and masks WarpedMapLayer once Allmaps does load underneath. Native MapLibre
-  // `raster` source, resolved synchronously from `layerInfo` (no manifest fetch): MapLibre requests
-  // only the visible {z}/{x}/{y} tiles on demand. Its id joins `layerIds` so reorder/teardown track
-  // it like any other group layer.
+  // The pre-warped raster pyramid is the group's permanent **base** — it must sit BENEATH the
+  // WarpedMapLayer so Allmaps' full-res warp renders on top of it (where loaded), with the raster
+  // showing through only where Allmaps hasn't triangulated yet. (It is inserted with the warped
+  // layer as `beforeId`; if it went on top it would occlude the IIIF detail with overzoomed tiles.)
+  // Native MapLibre `raster` source, resolved synchronously from `layerInfo` (no manifest fetch):
+  // MapLibre requests only the visible {z}/{x}/{y} tiles on demand. Its id joins `layerIds` (at the
+  // bottom) so reorder/teardown track it like any other group layer.
+  const warpedBaseLayerId = layerIds[0]; // bottom WarpedMapLayer; raster goes directly beneath it
   const tilesConfig = resolveTilesConfig(layerInfo);
   const tilesSourceId = `iiif-tiles-source-${groupId.replace(/\//g, "-")}`;
   const tilesLayerId = `iiif-tiles-layer-${groupId.replace(/\//g, "-")}`;
@@ -175,15 +248,17 @@ export async function initializeLayerGroup(opts: {
         });
       }
       if (!map.getLayer(tilesLayerId)) {
+        // beforeId = the WarpedMapLayer → raster is inserted directly beneath it (above the base map).
         map.addLayer({
           id: tilesLayerId,
           type: "raster",
           source: tilesSourceId,
           paint: { "raster-opacity": 0.85 },
-        });
-        layerIds.push(tilesLayerId);
+        }, map.getLayer(warpedBaseLayerId) ? warpedBaseLayerId : undefined);
+        // Front of layerIds = bottom of the group's stack, so reorderLayerGroups keeps it below warp.
+        layerIds.unshift(tilesLayerId);
       }
-      log(`tiles: raster placeholder added (z${tilesConfig.minZoom}-${tilesConfig.maxZoom}) +${(nowMs() - activationT0).toFixed(0)}ms`);
+      log(`tiles: raster base added beneath warp (z${tilesConfig.minZoom}-${tilesConfig.maxZoom}) +${(nowMs() - activationT0).toFixed(0)}ms`);
       const onTilesData = (e: any) => {
         if (e?.sourceId !== tilesSourceId || !e?.tile) return;
         log(`tiles: first tile painted ${(nowMs() - tilesT0).toFixed(0)}ms`);
@@ -194,11 +269,14 @@ export async function initializeLayerGroup(opts: {
         detachTilesProbe = null;
       };
       map.on("sourcedata", onTilesData);
-      // The presence of this cleanup entry is also how `parkLayerGroup` detects that Allmaps is
-      // still deferred for this group (nothing expensive triangulated yet) — startAllmaps() deletes
-      // it once the pipeline runs.
+      // The raster pyramid is now the group's permanent base (it is NOT removed when Allmaps loads —
+      // Allmaps loads viewport-driven on top of it), so this cleanup entry lives for the whole group
+      // lifetime and only runs on full teardown. Its persistent presence is also what makes
+      // `parkLayerGroup` always fully remove an IIIF group on toggle-off (see runtime.ts) — correct
+      // now, since re-showing re-inits cheaply and only re-triangulates the viewport.
       runtime.activeLayerCleanup.set(groupId, () => {
         detachZoomTrigger();
+        detachMoveReconcile?.();
         detachTilesProbe?.();
         if (map.getLayer(tilesLayerId)) map.removeLayer(tilesLayerId);
         if (map.getSource(tilesSourceId)) map.removeSource(tilesSourceId);
@@ -346,30 +424,6 @@ export async function initializeLayerGroup(opts: {
       sprites: entry.inlineSprites ?? [],
     };
   }));
-
-  const viewportCenter = (() => {
-    try {
-      const center = map.getCenter();
-      return [center.lng, center.lat] as [number, number];
-    } catch {
-      return null;
-    }
-  })();
-
-  const BOOTSTRAP_MAP_LIMIT = 24;
-  const prioritizedFetched = [...fetchedAll].sort((a, b) => scoreEntryForViewport(a.entry, viewportCenter) - scoreEntryForViewport(b.entry, viewportCenter));
-  const bootstrapFetched: Fetched[] = [];
-  const backgroundFetched: Fetched[] = [];
-  let bootstrapMapBudget = 0;
-  for (const item of prioritizedFetched) {
-    const itemMapCount = "maps" in item ? item.maps.filter((m) => "raw" in m).length : 0;
-    if (bootstrapFetched.length < 1 || bootstrapMapBudget < BOOTSTRAP_MAP_LIMIT) {
-      bootstrapFetched.push(item);
-      bootstrapMapBudget += itemMapCount;
-    } else {
-      backgroundFetched.push(item);
-    }
-  }
 
   async function applyFetchedBatch(batch: Fetched[], startIndex: number, mode: "sequential" | "parallel" | "chunked"): Promise<RunResult[]> {
     const runOne = async (item: Fetched, idx: number): Promise<RunResult> =>
@@ -546,55 +600,128 @@ export async function initializeLayerGroup(opts: {
     }
   }
 
-  // The expensive part (per-canvas triangulation via addGeoreferencedMap + sprites) — run once,
-  // lazily, when the user zooms in past ALLMAPS_TRIGGER_ZOOM. Until then the raster pyramid above
-  // is the sole renderer. Idempotent: guarded by `allmapsStarted` and detaches its own trigger.
-  async function startAllmaps(): Promise<void> {
+  // ── Viewport-driven Allmaps loading (Phase 1) ──────────────────────────────────────────────────
+  // Rather than triangulating every canvas at the trigger, load only those whose footprint intersects
+  // the current viewport (+ margin), and reconcile again on every `moveend`. Loaded canvases are kept
+  // (no eviction — panning back is instant); the raster pyramid stays as the permanent base so
+  // not-yet-loaded areas always show something. See IIIF-OPTIMIZATION.md "Viewport-driven Allmaps".
+  type SpatialItem = { item: Fetched; index: number; bbox: [number, number, number, number] | null; center: [number, number] | null };
+  const spatialItems: SpatialItem[] = fetchedAll.map((item, index) => ({
+    item,
+    index,
+    bbox: getEntryGeoBbox(item.entry),
+    center: getEntryGeoCenter(item.entry),
+  }));
+  const loadedKeys = new Set<number>(); // entry indices already loaded or queued
+  const pendingQueue: SpatialItem[] = [];
+  let draining = false;
+  let spritesUploaded = false;
+
+  function currentCenter(): [number, number] | null {
+    try { const c = map.getCenter(); return [c.lng, c.lat]; } catch { return null; }
+  }
+
+  function paddedViewportBounds(): [number, number, number, number] | null {
+    try {
+      const b = map.getBounds();
+      const px = (b.getEast() - b.getWest()) * ALLMAPS_VIEWPORT_MARGIN;
+      const py = (b.getNorth() - b.getSouth()) * ALLMAPS_VIEWPORT_MARGIN;
+      return [b.getWest() - px, b.getSouth() - py, b.getEast() + px, b.getNorth() + py];
+    } catch { return null; }
+  }
+
+  function bboxIntersects(a: [number, number, number, number], b: [number, number, number, number]): boolean {
+    return !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
+  }
+
+  // The sprite atlas is a shared per-layer resource (like addImageInfos above) — upload it once,
+  // before the first maps are added, so every canvas samples it as soon as it's triangulated.
+  async function ensureSpritesUploaded(): Promise<void> {
+    if (spritesUploaded) return;
+    spritesUploaded = true;
+    if (DEBUG_SKIP_SPRITES) {
+      log(`warp: sprites SKIPPED (DEBUG_SKIP_SPRITES) — forcing full-res IIIF tile fetches`);
+      return;
+    }
+    const t0 = nowMs();
+    await initializeSpritesForItems(fetchedAll);
+    log(`warp: sprite atlas uploaded ${(nowMs() - t0).toFixed(0)}ms`);
+  }
+
+  // Single drainer: triangulates the queue RECONCILE_CHUNK entries per frame, re-prioritising by the
+  // current viewport centre between chunks so the nearest maps always load first even mid-pan. Bails
+  // if the group is parked/removed (its layers leave activeLayersByGroup).
+  async function drainQueue(): Promise<void> {
+    if (draining) return;
+    draining = true;
+    try {
+      await ensureSpritesUploaded();
+      while (pendingQueue.length > 0) {
+        if (!runtime.activeLayersByGroup.has(groupId)) break;
+        const center = currentCenter();
+        if (center) pendingQueue.sort((a, b) => squaredDistance(a.center, center) - squaredDistance(b.center, center));
+        const chunk = pendingQueue.splice(0, RECONCILE_CHUNK);
+        const t0 = nowMs();
+        results.push(...await applyFetchedBatch(chunk.map((s) => s.item), 0, "parallel"));
+        nativeUpdateAll();
+        log(`warp: +${chunk.length} canvases ${(nowMs() - t0).toFixed(0)}ms (${pendingQueue.length} queued)`);
+        if (pendingQueue.length > 0) await nextFrame();
+      }
+    } finally {
+      draining = false;
+    }
+  }
+
+  // Queue every not-yet-loaded entry intersecting the padded viewport, then kick the drainer. Only
+  // runs while actually zoomed in — at overview the raster base suffices and a wide viewport would
+  // otherwise pull in the whole collection.
+  function reconcileViewport(): void {
+    if (!runtime.activeLayersByGroup.has(groupId)) return;
+    if (map.getZoom() < ALLMAPS_TRIGGER_ZOOM) return;
+    const padded = paddedViewportBounds();
+    if (!padded) return;
+    let queued = 0;
+    for (const s of spatialItems) {
+      if (loadedKeys.has(s.index)) continue;
+      // No bbox (entry without usable GCPs) → load it defensively rather than silently drop it.
+      if (!s.bbox || bboxIntersects(s.bbox, padded)) {
+        loadedKeys.add(s.index);
+        pendingQueue.push(s);
+        queued++;
+      }
+    }
+    if (queued > 0) {
+      log(`warp: viewport reconcile — queued ${queued} (${loadedKeys.size}/${spatialItems.length} total)`);
+      void drainQueue();
+    }
+  }
+
+  // Begin viewport-driven loading: reconcile the current view now, then on every settle. Idempotent
+  // (guarded by `allmapsStarted`), detaches the one-shot zoom trigger, and registers the `moveend`
+  // teardown so removeLayerGroup unhooks it.
+  function startAllmaps(): void {
     if (allmapsStarted) return;
     allmapsStarted = true;
     detachZoomTrigger();
-    const warpT0 = nowMs();
-    const bootstrapCount = bootstrapFetched.reduce((s, f) => s + ("maps" in f ? f.maps.length : 0), 0);
-    const backgroundCount = backgroundFetched.reduce((s, f) => s + ("maps" in f ? f.maps.length : 0), 0);
-    log(`warp: start at zoom ${map.getZoom().toFixed(2)} — triangulating ${bootstrapCount + backgroundCount} canvases`);
-
-    if (parallelLoading) {
-      results.push(...await applyFetchedBatch(fetchedAll, 0, "parallel"));
-      log(`warp: all ${bootstrapCount + backgroundCount} canvases (parallel) ${(nowMs() - warpT0).toFixed(0)}ms`);
-    } else {
-      const bootT0 = nowMs();
-      results.push(...await applyFetchedBatch(bootstrapFetched, 0, "sequential"));
-      log(`warp: bootstrap ${bootstrapCount} canvases ${(nowMs() - bootT0).toFixed(0)}ms`);
-      const bgT0 = nowMs();
-      results.push(...await applyFetchedBatch(backgroundFetched, bootstrapFetched.length, "chunked"));
-      log(`warp: background ${backgroundCount} canvases ${(nowMs() - bgT0).toFixed(0)}ms`);
-    }
-
-    const spriteT0 = nowMs();
-    await initializeSpritesForItems(fetchedAll);
-    log(`warp: sprites ${(nowMs() - spriteT0).toFixed(0)}ms`);
-
-    // Allmaps is ready — remove the raster tile placeholder layer/source. Clearing the cleanup
-    // entry also flips this group out of the "Allmaps deferred" state that parkLayerGroup checks.
-    if (map.getLayer(tilesLayerId)) map.removeLayer(tilesLayerId);
-    if (map.getSource(tilesSourceId)) map.removeSource(tilesSourceId);
-    detachTilesProbe?.();
-    runtime.activeLayerCleanup.delete(groupId);
-
-    nativeUpdateAll();
-    log(`warp: ready in ${(nowMs() - warpT0).toFixed(0)}ms — placeholder removed, WarpedMapLayer live`);
+    log(`warp: start at zoom ${map.getZoom().toFixed(2)} — viewport-driven (margin ${ALLMAPS_VIEWPORT_MARGIN}×, ${spatialItems.length} canvases available)`);
+    const onMoveEnd = () => reconcileViewport();
+    map.on("moveend", onMoveEnd);
+    detachMoveReconcile = () => {
+      try { map.off("moveend", onMoveEnd); } catch { /* map torn down */ }
+      detachMoveReconcile = null;
+    };
+    reconcileViewport();
   }
 
-  // Load Allmaps now if the map is already zoomed in (e.g. a deep-linked/persistent URL that opens
-  // at reading zoom); otherwise arm a one-shot zoom listener. Fire-and-forget in both branches so
-  // the layer's raster preview appears immediately either way — callers don't await triangulation.
+  // Start now if already zoomed in (e.g. a deep-linked/persistent URL that opens at reading zoom);
+  // otherwise arm a one-shot zoom listener. The raster preview shows immediately either way.
   if (map.getZoom() >= ALLMAPS_TRIGGER_ZOOM) {
-    log(`warp: already at zoom ${map.getZoom().toFixed(2)} (≥ ${ALLMAPS_TRIGGER_ZOOM}) — loading Allmaps immediately`);
-    void startAllmaps();
+    log(`warp: already at zoom ${map.getZoom().toFixed(2)} (≥ ${ALLMAPS_TRIGGER_ZOOM}) — starting viewport loading`);
+    startAllmaps();
   } else {
     log(`warp: deferred — armed zoom trigger at ≥ ${ALLMAPS_TRIGGER_ZOOM} (now ${map.getZoom().toFixed(2)}); tiles-only until then`);
     zoomTriggerHandler = () => {
-      if (map.getZoom() >= ALLMAPS_TRIGGER_ZOOM) void startAllmaps();
+      if (map.getZoom() >= ALLMAPS_TRIGGER_ZOOM) startAllmaps();
     };
     map.on("zoom", zoomTriggerHandler);
   }
