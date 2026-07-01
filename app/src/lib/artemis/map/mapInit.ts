@@ -1,6 +1,16 @@
 // $lib/artemis/map/mapInit.ts
 import maplibregl from "maplibre-gl";
+import { Protocol as PMTilesProtocol } from "pmtiles";
 import { ngiTileUrl } from "$lib/artemis/config/ngi";
+import { registerIiifTileProtocol } from "$lib/artemis/iiif/tileProtocol";
+
+// Registers the `pmtiles://` URL scheme once, module-wide, so any `vector`/`raster` source can
+// reference a PMTiles archive directly (used for the IIIF canvas-footprint mask vector tiles).
+maplibregl.addProtocol("pmtiles", new PMTilesProtocol().tile);
+
+// Registers the `iiiftiles://` scheme so IIIF raster-pyramid tiles are gated against each pyramid's
+// tiles_manifest.json — tiles outside the irregular coverage answer transparently instead of 404ing.
+registerIiifTileProtocol();
 
 let map: maplibregl.Map | null = null;
 
@@ -96,8 +106,6 @@ const LAND_USAGE_LAYERS: Record<
 };
 
 const BELGIUM_BOUNDS: [number, number, number, number] = [2.53, 50.685, 5.92, 51.52];
-const IIIF_HOVER_SOURCE_ID = "iiif-hover-mask-source";
-const IIIF_HOVER_LINE_LAYER_ID = "iiif-hover-mask-line";
 
 const PRIMITIVE_SOURCE_ID = "primitive-parcels-source";
 const PRIMITIVE_FILL_LAYER_ID = "primitive-parcels-fill-layer";
@@ -253,9 +261,6 @@ export function setBaselayer(
   }
 
   targetMap.once('styledata', () => {
-    if (baselayerId === 'scheldt') {
-      ensureIiifHoverLayers(targetMap);
-    }
     onStyleLoaded();
   });
 
@@ -274,6 +279,22 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
     preserveDrawingBuffer: true,
   } as any);
 
+  // MapLibre fires a map `error` event for every tile that fails to load and, with no listener,
+  // console-errors each one. The IIIF raster pyramids have irregular coverage (the real surveyed
+  // extent, not a rectangle), so MapLibre probes the full viewport grid but only tiles on the
+  // extent exist — out-of-extent tiles 404 by design and MapLibre simply skips them. Those are
+  // expected and harmless, so swallow tile-load failures for our `iiif-tiles-source-*` sources to
+  // keep the console usable; re-log everything else exactly as the default handler would.
+  nextMap.on("error", (e: any) => {
+    const sourceId: string = typeof e?.sourceId === "string" ? e.sourceId : "";
+    const err = e?.error ?? {};
+    const url = String(err?.url ?? "");
+    const isIiifTile =
+      sourceId.startsWith("iiif-tiles-source-") || /_tiles\/\d+\/\d+\/\d+\.webp(?:$|\?)/.test(url);
+    if (isIiifTile) return; // expected 404 / NetworkError for missing tiles outside coverage
+    console.error(e?.error ?? e);
+  });
+
   loadBaselayerData().then(baselayerData => {
     if (!nextMap.getSource(BASE_WATER_SOURCE_ID)) return;
     const updatedStyle = getBaseMapStyle(baselayerData);
@@ -289,7 +310,6 @@ export function createMapContext(container: HTMLElement): maplibregl.Map {
     } catch {
       // ignore
     }
-    ensureIiifHoverLayers(nextMap);
   });
 
   return nextMap;
@@ -410,46 +430,55 @@ export function getLandUsageLayerId(key: LandUsageLayerKey): string {
   return LAND_USAGE_LAYERS[key].layerId;
 }
 
-function ensureIiifHoverLayers(m: maplibregl.Map): void {
+const IIIF_MASK_HOVER_SOURCE_ID = "iiif-mask-hover-source";
+const IIIF_MASK_HOVER_LINE_LAYER_ID = "iiif-mask-hover-line";
+
+function ensureIiifMaskHoverLayer(m: maplibregl.Map): void {
   if (!isMapStyleUsable(m)) return;
-  if (!m.getSource(IIIF_HOVER_SOURCE_ID)) {
-    m.addSource(IIIF_HOVER_SOURCE_ID, {
+  if (!m.getSource(IIIF_MASK_HOVER_SOURCE_ID)) {
+    m.addSource(IIIF_MASK_HOVER_SOURCE_ID, {
       type: "geojson",
-      data: { type: "FeatureCollection", features: [] }
+      data: { type: "FeatureCollection", features: [] },
     });
   }
-  if (!m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) {
+  if (!m.getLayer(IIIF_MASK_HOVER_LINE_LAYER_ID)) {
     m.addLayer({
-      id: IIIF_HOVER_LINE_LAYER_ID,
+      id: IIIF_MASK_HOVER_LINE_LAYER_ID,
       type: "line",
-      source: IIIF_HOVER_SOURCE_ID,
+      source: IIIF_MASK_HOVER_SOURCE_ID,
       paint: {
-        "line-color": ["get", "lineColor"] as any,
+        "line-color": ["get", "color"] as any,
         "line-width": 1.5,
-        "line-opacity": 0.9
-      }
+        "line-opacity": 0.9,
+      },
     });
   }
 }
 
-export type IiifHoverMask = { ring: Array<[number, number]>; fillColor: string; lineColor: string };
-
-export function setIiifHoverMasks(m: maplibregl.Map, masks: IiifHoverMask[] | null): void {
-  const source = m.getSource(IIIF_HOVER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+/**
+ * Draws the IIIF canvas hover outline from the exact geometry of the currently-hovered
+ * PMTiles mask feature (one shared layer per map, at most one feature at a time) — not a filter
+ * on the underlying vector `masks` layer, since `manifestUrl` there isn't guaranteed unique per
+ * canvas (a manifest can have multiple canvases), so filtering by it can highlight more than the
+ * one feature actually under the cursor.
+ */
+export function setIiifMaskHover(m: maplibregl.Map, hover: { geometry: any; color: string } | null): void {
+  ensureIiifMaskHoverLayer(m);
+  const source = m.getSource(IIIF_MASK_HOVER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
   if (!source) return;
-  if (!masks || masks.length === 0) {
+  if (!hover) {
     source.setData({ type: "FeatureCollection", features: [] });
     return;
   }
-  const features = masks
-    .filter(({ ring }) => ring.length >= 3)
-    .map(({ ring, fillColor, lineColor }) => ({
-      type: "Feature" as const,
-      geometry: { type: "Polygon" as const, coordinates: [[...ring, ring[0]]] },
-      properties: { fillColor, lineColor }
-    }));
-  source.setData({ type: "FeatureCollection", features });
-  try { if (m.getLayer(IIIF_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_HOVER_LINE_LAYER_ID); } catch { /* ignore */ }
+  source.setData({
+    type: "FeatureCollection",
+    features: [{ type: "Feature", geometry: hover.geometry, properties: { color: hover.color } }],
+  });
+  try {
+    if (m.getLayer(IIIF_MASK_HOVER_LINE_LAYER_ID)) m.moveLayer(IIIF_MASK_HOVER_LINE_LAYER_ID);
+  } catch {
+    // ignore
+  }
 }
 
 export function setPrimitiveLayerVisible(map: maplibregl.Map | null | undefined, visible: boolean, geojsonUrl: string): void {

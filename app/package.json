@@ -1,7 +1,7 @@
 {
   "name": "app",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -34,6 +34,7 @@
     "@allmaps/id": "1.0.0-beta.37",
     "@allmaps/maplibre": "1.0.0-beta.43",
     "maplibre-gl": "^5.19.0",
-    "openseadragon": "^6.0.1"
+    "openseadragon": "^6.0.1",
+    "pmtiles": "^4.4.1"
   }
 }

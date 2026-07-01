@@ -2,7 +2,6 @@
      dispatches events for map-level actions (fly-to, layer activation). -->
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-  import { browser } from '$app/environment';
   import { normalizeSearchText, scoreText } from '$lib/artemis/search/text';
   import { MAIN_LAYER_LABELS } from '$lib/artemis/config/layers';
   import type { ToponymIndexItem, ManifestSearchItem, IiifMapInfo } from '$lib/artemis/shared/types';
@@ -231,13 +230,6 @@
     setTimeout(() => inputEl?.focus(), 0);
   }
 
-  $: if (browser) {
-    console.log('[Artemis debug] ToponymSearch isModalOpen', {
-      isModalOpen,
-      modalMounted: Boolean(document.querySelector('.toponym-search-panel.is-modal')),
-      backdropMounted: Boolean(document.querySelector('.search-modal-backdrop')),
-    });
-  }
 
   onDestroy(() => {
     if (typeof document !== 'undefined') {
