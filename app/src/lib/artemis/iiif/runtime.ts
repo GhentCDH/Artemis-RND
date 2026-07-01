@@ -230,10 +230,13 @@ export async function parkLayerGroup(map: maplibregl.Map, groupId: string, paneI
   await waitForMapReady(map);
   const runtime = getPaneRuntime(paneId);
 
-  // Parking exists to cheaply preserve Allmaps' triangulated meshes across a hide/show. If Allmaps
-  // hasn't loaded yet (raster placeholder still up — tracked by the activeLayerCleanup entry), there
-  // is nothing expensive to preserve, and the raster preview must not linger while the group is
-  // toggled off. Fully remove instead; a later re-show re-inits cheaply (raster + masks, no warp).
+  // IIIF groups keep a permanent raster-pyramid base (tracked by the activeLayerCleanup entry, which
+  // now lives for the group's whole lifetime), and Allmaps loads viewport-driven on top of it. That
+  // base must not linger on screen while the group is toggled off, so rather than an opacity-park we
+  // fully remove — a later re-show re-inits cheaply (raster + masks are instant, and only the current
+  // viewport's canvases re-triangulate, not the whole collection). The entry is effectively always
+  // present for these groups, so this is the normal toggle-off path; the opacity-park below remains
+  // only for any group without a raster base.
   if (runtime.activeLayerCleanup.has(groupId)) {
     return removeLayerGroup(map, groupId, paneId);
   }

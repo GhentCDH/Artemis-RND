@@ -243,6 +243,8 @@
     // Load all IIIF maps in parallel vs phased (bootstrap → background). Flip to test performance.
     parallelIiifLoading: false,
     // Use debug spritesheets (with pink tint) to visualize sprite loading. Flip to test.
+    // NOTE: requires `*_debug.jpg` atlases in the data repo — not currently generated, so leaving
+    // this on 404s the atlas and breaks Allmaps. Use DEBUG_SKIP_SPRITES in initialization.ts instead.
     spriteDebugMode: false,
   };
   let datasetBaseUrl = DEFAULT_BASE_URL;
