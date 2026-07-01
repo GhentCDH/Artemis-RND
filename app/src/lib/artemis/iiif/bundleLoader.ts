@@ -9,10 +9,75 @@ export type LayerInfo = {
   geomapsPath?: string;
   spritesPath?: string;
   grSpritesPath?: string;
+  tilesPath?: string;
+  tilesMinZoom?: number;
+  tilesMaxZoom?: number;
+  masksPath?: string;
   renderLayerKey?: string;
   renderLayerLabel?: string;
   hidden?: boolean;
 };
+
+export type TilesConfig = {
+  /** Path or URL containing literal `{z}/{x}/{y}` placeholders. */
+  template: string;
+  minZoom: number;
+  maxZoom: number;
+};
+
+/** Known pre-warped XYZ tile pyramids (gdal2tiles output) by mapId, keyed until the data
+ *  pipeline records this in the geomaps bundle itself (mirrors the gr_sprites convention
+ *  fallback below). Directory names aren't derivable from mapId — they vary per pipeline run.
+ *
+ *  Full z8-12 range (everything the pipeline generates): the raster pyramid is the persistent
+ *  base renderer now (Allmaps is loaded lazily only when the user zooms in past the pyramid's
+ *  native detail — see `ALLMAPS_TRIGGER_ZOOM` in initialization.ts), so it needs the sharpest
+ *  tiles available at whatever zoom the user is actually at, not a single overzoomed level.
+ *  MapLibre requests only the handful of tiles intersecting the viewport, so the full range costs
+ *  nothing extra at render time. Both collections use identical treatment — no per-layer pinning. */
+const KNOWN_TILE_DIRS: Record<string, { dir: string; minZoom: number; maxZoom: number }> = {
+  GereduceerdeKadaster: { dir: "GereduceerdeKadaster/Gereduceerd_Kadaster_tiles", minZoom: 8, maxZoom: 12 },
+  PrimitiefKadaster: { dir: "PrimitiefKadaster/primitief_kadaster_tiles", minZoom: 8, maxZoom: 12 },
+};
+
+/**
+ * Resolves the pre-warped raster tile pyramid for a layer, if one exists. Replaces the gr_sprites
+ * WebGL placeholder: native MapLibre raster tiles need no manifest fetch, so this can be resolved
+ * synchronously from `layerInfo` alone (no geomaps bundle fetch required) and used immediately.
+ */
+export function resolveTilesConfig(layerInfo: LayerInfo): TilesConfig | undefined {
+  const explicitPath = readString(layerInfo.tilesPath);
+  if (explicitPath) {
+    return {
+      template: explicitPath,
+      minZoom: Number.isFinite(layerInfo.tilesMinZoom) ? (layerInfo.tilesMinZoom as number) : 0,
+      maxZoom: Number.isFinite(layerInfo.tilesMaxZoom) ? (layerInfo.tilesMaxZoom as number) : 22,
+    };
+  }
+  const mapId = readString(layerInfo.map);
+  const known = mapId ? KNOWN_TILE_DIRS[mapId] : undefined;
+  if (!known) return undefined;
+  return { template: `IIIF/${known.dir}/{z}/{x}/{y}.webp`, minZoom: known.minZoom, maxZoom: known.maxZoom };
+}
+
+/**
+ * Known pre-baked canvas-footprint vector tiles (PMTiles, single "masks" layer, one polygon per
+ * canvas with a `manifestUrl` property) by mapId — replaces building clickable canvas outlines
+ * from Allmaps' live `geoMask` geometry at runtime. Static data, so unlike Allmaps geoMask it's
+ * available the instant the layer's pmtiles source loads, independent of triangulation progress.
+ */
+const KNOWN_MASK_PMTILES: Record<string, string> = {
+  GereduceerdeKadaster: "GereduceerdeKadaster/Gereduceerd_Kadaster_masks.pmtiles",
+  PrimitiefKadaster: "PrimitiefKadaster/primitief_kadaster_masks.pmtiles",
+};
+
+export function resolveMasksPath(layerInfo: LayerInfo): string | undefined {
+  const explicitPath = readString(layerInfo.masksPath);
+  if (explicitPath) return explicitPath;
+  const mapId = readString(layerInfo.map);
+  const known = mapId ? KNOWN_MASK_PMTILES[mapId] : undefined;
+  return known ? `IIIF/${known}` : undefined;
+}
 
 export type CompiledIndex = {
   renderLayers?: LayerInfo[];

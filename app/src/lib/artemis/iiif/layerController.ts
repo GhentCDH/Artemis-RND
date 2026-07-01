@@ -3,10 +3,14 @@ import { initializeLayerGroup } from "./initialization";
 import { resetBundleLoaderCache, loadCompiledIndex, type CompiledIndex, type CompiledRunnerConfig, type LayerInfo } from "./bundleLoader";
 import {
   clearAllLayerGroups,
+  getActiveGroupIds,
   getAllActiveWarpedMaps,
   getLayerGroupId,
   getLayerGroupLayerIds,
   getManifestInfoForMapId,
+  getManifestInfoForSourceManifestUrl,
+  getManifestInfoForCanvasKey,
+  getMaskLayerIds,
   isLayerGroupParked,
   isLayerGroupRendered,
   parkLayerGroup,
@@ -30,10 +34,14 @@ export type {
 
 export {
   clearAllLayerGroups,
+  getActiveGroupIds,
   getAllActiveWarpedMaps,
   getLayerGroupId,
   getLayerGroupLayerIds,
   getManifestInfoForMapId,
+  getManifestInfoForSourceManifestUrl,
+  getManifestInfoForCanvasKey,
+  getMaskLayerIds,
   isLayerGroupParked,
   isLayerGroupRendered,
   loadCompiledIndex,

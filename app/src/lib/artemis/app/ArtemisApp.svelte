@@ -14,7 +14,7 @@
     setPrimitiveLayerVisible, isPrimitiveLayerVisible,
     setPrimitiveLayerOpacity, getPrimitiveLayerIds,
     setPrimitiveHoverFeature, setPrimitiveSelectFeature,
-    setIiifHoverMasks,
+    setIiifMaskHover,
     setMassartPins, getMassartClickLayerIds,
     flashLocationMarker,
   } from '$lib/artemis/map/mapInit';
@@ -22,7 +22,7 @@
     loadCompiledIndex, runLayerGroup, removeLayerGroup, parkLayerGroup, clearAllLayerGroups,
     isLayerGroupParked, setLayerGroupOpacity, getLayerGroupLayerIds,
     resetCompiledIndexCache, resetPaneRuntime, getLayerGroupId, refreshActiveLayerGroups,
-    getAllActiveWarpedMaps, getManifestInfoForMapId,
+    getActiveGroupIds, getManifestInfoForSourceManifestUrl, getManifestInfoForCanvasKey, getMaskLayerIds,
     type LayerInfo, type CompiledIndex, type CompiledRunnerConfig,
   } from '$lib/artemis/iiif/layerController';
   import {
@@ -235,69 +235,6 @@
   let promptCycleTimer: ReturnType<typeof setTimeout> | null = null;
   let charRemovalTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function describeDebugTarget(target: EventTarget | null): string | null {
-    if (!(target instanceof Element)) return null;
-    return [
-      target.tagName.toLowerCase(),
-      target.id ? `#${target.id}` : '',
-      typeof target.className === 'string' && target.className ? `.${target.className.replace(/\s+/g, '.')}` : '',
-    ].join('');
-  }
-
-  function debugOverlayState(label: string) {
-    console.log(`[Artemis debug] ${label}`, {
-      viewMode,
-      isSplitLayout,
-      searchModalOpen,
-      searchModalMounted: Boolean(document.querySelector('.toponym-search-panel.is-modal')),
-      searchBackdropMounted: Boolean(document.querySelector('.search-modal-backdrop')),
-      baselayersMenuOpen,
-      baselayersMenuMounted: Boolean(document.querySelector('.baselayers-menu')),
-      activeCollection: activeCollection?.key ?? null,
-      rightActiveCollection: rightActiveCollection?.key ?? null,
-    });
-  }
-
-  async function debugPostRenderState(label: string) {
-    await tick();
-    debugOverlayState(`post-tick state: ${label}`);
-  }
-
-  function debugToolbarClick(label: string, event: MouseEvent) {
-    console.log(`[Artemis debug] toolbar click: ${label}`, {
-      target: describeDebugTarget(event.target),
-      currentTarget: describeDebugTarget(event.currentTarget),
-      clientX: event.clientX,
-      clientY: event.clientY,
-      elementFromPoint: describeDebugTarget(document.elementFromPoint(event.clientX, event.clientY)),
-      defaultPrevented: event.defaultPrevented,
-      viewMode,
-      isSplitLayout,
-      searchModalOpen,
-      baselayersMenuOpen,
-    });
-    void debugPostRenderState(label);
-  }
-
-  function debugBaselayersWrapperEvent(label: string, event: Event) {
-    event.stopPropagation();
-    console.log(`[Artemis debug] baselayers wrapper ${label}`, {
-      target: describeDebugTarget(event.target),
-      currentTarget: describeDebugTarget(event.currentTarget),
-      viewMode,
-      isSplitLayout,
-      baselayersMenuOpen,
-    });
-  }
-
-  $: console.log('[Artemis debug] reactive overlay flags', {
-    viewMode,
-    isSplitLayout,
-    searchModalOpen,
-    baselayersMenuOpen,
-    activeCollection: activeCollection?.key ?? null,
-    rightActiveCollection: rightActiveCollection?.key ?? null,
-  });
 
   // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -587,13 +524,13 @@
 
     if (paneId === 'right') {
       rightIiifHoveredMaps = [];
-      setIiifHoverMasks(targetMap, null);
+      updateIiifMaskHighlights(targetMap, [], 'right');
     } else {
       primitiveHoveredFeature = null;
       setPrimitiveHoverFeature(targetMap, null);
       setPrimitiveSelectFeature(targetMap, null);
       iiifHoveredMaps = [];
-      setIiifHoverMasks(targetMap, null);
+      updateIiifMaskHighlights(targetMap, []);
       parcelClickInfo = null;
     }
 
@@ -807,8 +744,8 @@
   // ─── IIIF hover / click state ──────────────────────────────────────────────
 
   let primitiveHoveredFeature: any = null;
-  let iiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
-  let rightIiifHoveredMaps: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
+  let iiifHoveredMaps: Array<{ imageId?: string; manifestUrl: string; groupId: string; geometry?: any }> = [];
+  let rightIiifHoveredMaps: Array<{ imageId?: string; manifestUrl: string; groupId: string; geometry?: any }> = [];
   let parcelClickInfo: ParcelClickInfo | null = null;
   let pinnedCards: PinnedCard[] = [];
   // IiifViewer fetches imageServiceUrl from the manifest when the prop is empty,
@@ -1342,26 +1279,109 @@
 
   // ─── Map interaction ───────────────────────────────────────────────────────
 
-  function pointInPolygon(point: [number, number], ring: Array<[number, number]>): boolean {
-    const [x, y] = point;
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [xi, yi] = ring[i], [xj, yj] = ring[j];
-      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
+  // Cheap proxy for a polygon/multipolygon's on-screen size: bounding-box area in degrees².
+  // Only used to rank overlapping hits relative to each other (e.g. a small individual cadastral
+  // sheet vs. a verzamelblad/index sheet whose footprint covers dozens of others) — doesn't need
+  // to be a precise geodesic area.
+  function geometryBboxArea(geometry: any): number {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const visit = (coords: any) => {
+      if (typeof coords[0] === 'number') {
+        const [x, y] = coords as [number, number];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        return;
+      }
+      for (const c of coords) visit(c);
+    };
+    visit(geometry?.coordinates ?? []);
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return Infinity;
+    return Math.max(0, maxX - minX) * Math.max(0, maxY - minY);
   }
 
-  function hitTestAllWarpedMaps(lon: number, lat: number, paneId: PaneId | 'main' = 'main') {
-    const hits: Array<{ mapId: string; warpedMap: any; groupId: string }> = [];
-    for (const { mapId, warpedMap, groupId } of getAllActiveWarpedMaps(paneId)) {
-      const mask: Array<[number, number]> = warpedMap.geoMask ?? [];
-      if (mask.length < 3) continue;
-      const bbox: [number, number, number, number] | undefined = warpedMap.geoMaskBbox;
-      if (bbox && (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3])) continue;
-      if (pointInPolygon([lon, lat], mask)) hits.push({ mapId, warpedMap, groupId });
+  // Hit-testing/hover-outline for IIIF canvas footprints, backed by pre-baked PMTiles vector
+  // masks (one "masks" layer per active layer group, `manifestUrl` property per feature) instead
+  // of a JS point-in-polygon loop over Allmaps' live geoMask geometry. This is native MapLibre
+  // queryRenderedFeatures against an (invisible) fill layer, so cost scales with what's near the
+  // cursor/in-view rather than total canvas count, and works the instant a layer's masks source
+  // loads — independent of how far Allmaps has gotten triangulating underneath.
+  //
+  // Returns at most one hit: the smallest-footprint feature under the cursor. Overlapping
+  // canvases are common (verzamelblad/index sheets cover many individual sheets, and vector-tile
+  // clipping can duplicate a feature across a tile boundary near the query point) — picking the
+  // smallest match is the "most specific" one, matching what a user actually expects when
+  // pointing at a single sheet rather than lighting up everything underneath it too.
+  function hitTestIiifMasks(
+    targetMap: maplibregl.Map,
+    point: { x: number; y: number },
+    paneId: PaneId | 'main' = 'main'
+  ): Array<{ imageId: string; manifestUrl: string; groupId: string; geometry: any }> {
+    const groupByFillLayerId = new Map<string, string>();
+    const fillLayerIds: string[] = [];
+    for (const groupId of getActiveGroupIds(paneId)) {
+      const { fillLayerId } = getMaskLayerIds(groupId);
+      if (!targetMap.getLayer(fillLayerId)) continue;
+      fillLayerIds.push(fillLayerId);
+      groupByFillLayerId.set(fillLayerId, groupId);
     }
-    return hits;
+    if (fillLayerIds.length === 0) return [];
+
+    // Rank every raw hit by footprint size and keep only the smallest — NOT deduped by
+    // manifestUrl first, since that property can be shared by multiple distinct canvases (a
+    // manifest with multiple canvases): grouping by it would risk merging two genuinely different
+    // overlapping features and losing one's geometry. `imageId` (the per-canvas key) is what
+    // downstream click resolution uses to open the exact clicked canvas; `manifestUrl` is fallback.
+    let best: { imageId: string; manifestUrl: string; groupId: string; geometry: any; area: number } | null = null;
+    for (const feature of targetMap.queryRenderedFeatures([point.x, point.y], { layers: fillLayerIds })) {
+      const manifestUrl = String(feature.properties?.manifestUrl ?? '').trim();
+      const imageId = String(feature.properties?.imageId ?? '').trim();
+      const groupId = groupByFillLayerId.get(feature.layer.id);
+      if (!manifestUrl || !groupId) continue;
+      const area = geometryBboxArea(feature.geometry);
+      if (!best || area < best.area) best = { imageId, manifestUrl, groupId, geometry: feature.geometry, area };
+    }
+    return best ? [{ imageId: best.imageId, manifestUrl: best.manifestUrl, groupId: best.groupId, geometry: best.geometry }] : [];
+  }
+
+  // Draws the hover outline from the exact geometry of the current (single) hit, rather than
+  // filtering the underlying vector `masks` layer by `manifestUrl` — see hitTestIiifMasks above
+  // for why that property can't be used as a unique filter key.
+  function updateIiifMaskHighlights(
+    targetMap: maplibregl.Map,
+    hits: Array<{ manifestUrl: string; groupId: string; geometry: any }>,
+    paneId: PaneId | 'main' = 'main'
+  ) {
+    void paneId;
+    const hit = hits[0];
+    setIiifMaskHover(targetMap, hit ? { geometry: hit.geometry, color: colorForGroupId(hit.groupId) } : null);
+  }
+
+  function geometryBboxKey(geometry: any): string {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const visit = (coords: any) => {
+      if (typeof coords?.[0] === 'number') {
+        const [x, y] = coords as [number, number];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        return;
+      }
+      for (const c of coords ?? []) visit(c);
+    };
+    visit(geometry?.coordinates);
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return '';
+    return `${minX.toFixed(6)},${minY.toFixed(6)},${maxX.toFixed(6)},${maxY.toFixed(6)}`;
+  }
+
+  function iiifHoverKey(hit: { imageId?: string; manifestUrl: string; groupId: string; geometry?: any }): string {
+    return `${hit.groupId}:${hit.imageId || hit.manifestUrl}:${geometryBboxKey(hit.geometry)}`;
+  }
+
+  function iiifHoverKeys(hits: Array<{ imageId?: string; manifestUrl: string; groupId: string; geometry?: any }>): string {
+    return hits.map(iiifHoverKey).join(',');
   }
 
   function parcelHoverDetailsFromFeature(feature: any): { parcelLabel: string; leafId: string } | null {
@@ -1522,25 +1542,34 @@
   }
 
   function buildIiifInfoPanelItems(
-    hits: Array<{ mapId: string; warpedMap: any; groupId: string }>,
+    hits: Array<{ imageId?: string; manifestUrl: string; groupId: string }>,
     paneId: PaneId | 'main' = 'main'
   ): IiifMapInfo[] {
     const items: IiifMapInfo[] = [];
+    const seen = new Set<string>();
     for (const hit of hits) {
-      const info = getManifestInfoForMapId(hit.mapId, paneId);
+      // Resolve the exact clicked canvas by its `imageId` first (a manifest can hold many
+      // canvases); fall back to manifest-level info only when the canvas key doesn't resolve
+      // (e.g. older mask data without `imageId`). Dedup by whichever key we resolved on.
+      const info =
+        (hit.imageId ? getManifestInfoForCanvasKey(hit.imageId, paneId) : null) ??
+        getManifestInfoForSourceManifestUrl(hit.manifestUrl, paneId);
       if (!info) continue;
+      const dedupKey = hit.imageId || hit.manifestUrl;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
       const mainId = groupIdToMainId.get(hit.groupId) ?? '';
-      const bbox: [number, number, number, number] | undefined = hit.warpedMap?.geoMaskBbox;
       items.push({
         title: info.label,
         sourceManifestUrl: info.sourceManifestUrl,
-        imageServiceUrl: hit.warpedMap?.georeferencedMap?.resource?.id ?? undefined,
+        // The specific canvas's image service, when known — this is what makes IiifViewer open the
+        // exact clicked canvas instead of the manifest's first. Falls back to undefined (viewer
+        // then resolves the first canvas from sourceManifestUrl) only when unavailable.
+        imageServiceUrl: info.imageServiceUrl,
         manifestAllmapsUrl: info.manifestAllmapsUrl,
         layerLabel: MAIN_LAYER_LABELS[mainId] ?? '',
         layerColor: colorForGroupId(hit.groupId),
         mainId,
-        centerLon: bbox ? (bbox[0] + bbox[2]) / 2 : undefined,
-        centerLat: bbox ? (bbox[1] + bbox[3]) / 2 : undefined,
         spriteRef: info.spriteRef,
         placeholderWidth: info.placeholderWidth,
         placeholderHeight: info.placeholderHeight,
@@ -1550,7 +1579,7 @@
   }
 
   function openFirstIiifHitInViewer(
-    hits: Array<{ mapId: string; warpedMap: any; groupId: string }>,
+    hits: Array<{ imageId?: string; manifestUrl: string; groupId: string }>,
     sourcePane: PaneId,
     paneId: PaneId | 'main' = 'main'
   ) {
@@ -1702,16 +1731,12 @@
         const point = rightHoverPendingPoint;
         if (!point) return;
 
-        const lngLat = targetMap.unproject([point.x, point.y] as [number, number]);
-        const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat, 'right');
-        const prevIds = rightIiifHoveredMaps.map((h) => h.mapId).join(',');
-        const nextIds = hits.map((h) => h.mapId).join(',');
+        const hits = hitTestIiifMasks(targetMap, point, 'right');
+        const prevIds = iiifHoverKeys(rightIiifHoveredMaps);
+        const nextIds = iiifHoverKeys(hits);
         if (prevIds !== nextIds) {
           rightIiifHoveredMaps = hits;
-          setIiifHoverMasks(targetMap, hits.length === 0 ? null : hits.map((h) => {
-            const color = colorForGroupId(h.groupId);
-            return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
-          }));
+          updateIiifMaskHighlights(targetMap, hits, 'right');
         }
 
         targetMap.getCanvas().style.cursor = hits.length > 0 ? 'pointer' : '';
@@ -1719,15 +1744,19 @@
     };
 
     const onMouseOut = () => {
+      if (rightHoverRafId !== null) {
+        cancelAnimationFrame(rightHoverRafId);
+        rightHoverRafId = null;
+      }
+      rightHoverPendingPoint = null;
       rightIiifHoveredMaps = [];
-      setIiifHoverMasks(targetMap, null);
+      updateIiifMaskHighlights(targetMap, [], 'right');
       targetMap.getCanvas().style.cursor = '';
     };
 
     const onClick = (e: any) => {
       if (openMassartFeature(massartFeatureAt(targetMap, e.point), 'right')) return;
-      const lngLat = targetMap.unproject([e.point.x, e.point.y] as [number, number]);
-      openFirstIiifHitInViewer(hitTestAllWarpedMaps(lngLat.lng, lngLat.lat, 'right'), 'right', 'right');
+      openFirstIiifHitInViewer(hitTestIiifMasks(targetMap, e.point, 'right'), 'right', 'right');
     };
 
     targetMap.on('mousemove', onMouseMove);
@@ -1986,17 +2015,13 @@
           setPrimitiveHoverFeature(map, null);
         }
 
-        // IIIF warped map hover
-        const lngLat = map.unproject([point.x, point.y] as [number, number]);
-        const hits = hitTestAllWarpedMaps(lngLat.lng, lngLat.lat);
-        const prevIds = iiifHoveredMaps.map(h => h.mapId).join(',');
-        const nextIds = hits.map(h => h.mapId).join(',');
+        // IIIF canvas mask hover
+        const hits = hitTestIiifMasks(map, point);
+        const prevIds = iiifHoverKeys(iiifHoveredMaps);
+        const nextIds = iiifHoverKeys(hits);
         if (prevIds !== nextIds) {
           iiifHoveredMaps = hits;
-          setIiifHoverMasks(map, hits.length === 0 ? null : hits.map(h => {
-            const color = colorForGroupId(h.groupId);
-            return { ring: h.warpedMap.geoMask, fillColor: color, lineColor: color };
-          }));
+          updateIiifMaskHighlights(map, hits);
         }
 
         map.getCanvas().style.cursor = (parcelHit || hits.length > 0) ? 'pointer' : '';
@@ -2004,10 +2029,15 @@
     };
 
     const onMouseOut = () => {
+      if (hoverRafId !== null) {
+        cancelAnimationFrame(hoverRafId);
+        hoverRafId = null;
+      }
+      hoverPendingPoint = null;
       primitiveHoveredFeature = null;
       setPrimitiveHoverFeature(map, null);
       iiifHoveredMaps = [];
-      setIiifHoverMasks(map, null);
+      updateIiifMaskHighlights(map, []);
       map.getCanvas().style.cursor = '';
     };
 
@@ -2024,8 +2054,9 @@
         setPrimitiveSelectFeature(map, null);
       }
 
-      // IIIF click
-      openFirstIiifHitInViewer(iiifHoveredMaps, 'left');
+      // IIIF click — hit-test fresh at the exact click point rather than reusing
+      // `iiifHoveredMaps` (RAF-throttled hover state can be a frame stale relative to the click).
+      openFirstIiifHitInViewer(hitTestIiifMasks(map, e.point), 'left');
     };
 
 	    const onMapMove = () => {
@@ -2158,13 +2189,13 @@
             class:is-active={isSplitLayout}
             type="button"
             aria-pressed={isSplitLayout}
-            on:click={(event) => { debugToolbarClick('compare', event); toggleSplitMode(); }}
+            on:click={toggleSplitMode}
           >{isSplitLayout ? 'Exit Compare' : 'Compare'}</button>
           <button
             class="search-toggle"
             type="button"
             aria-label="Open search"
-            on:click={(event) => { debugToolbarClick('search', event); searchModalOpen = true; }}
+            on:click={() => (searchModalOpen = true)}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -2187,8 +2218,8 @@
           {/if}
           <div
             class="baselayers-menu-wrapper"
-            on:pointerdown={(event) => debugBaselayersWrapperEvent('pointerdown', event)}
-            on:click={(event) => debugBaselayersWrapperEvent('click', event)}
+            on:pointerdown={(event) => event.stopPropagation()}
+            on:click={(event) => event.stopPropagation()}
           >
             <button
               class="baselayers-toggle"
@@ -2196,7 +2227,7 @@
               title="Select base layer"
               aria-label="Select base layer"
               aria-expanded={baselayersMenuOpen}
-              on:click|stopPropagation={(event) => { debugToolbarClick('baselayers', event); baselayersMenuOpen = !baselayersMenuOpen; }}
+              on:click|stopPropagation={() => (baselayersMenuOpen = !baselayersMenuOpen)}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12h2m2 0h2m2 0h2m2 0h2m2 0h2" />
@@ -2257,7 +2288,7 @@
             type="button"
             title="Screenshot without UI"
             aria-label="Screenshot without UI"
-            on:click={(event) => { debugToolbarClick('screenshot', event); captureScreenshot(); }}
+            on:click={captureScreenshot}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>

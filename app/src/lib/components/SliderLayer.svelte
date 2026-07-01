@@ -50,27 +50,7 @@
     onMeanderClick(src, event);
   }
 
-  function describeDebugTarget(target: EventTarget | null): string | null {
-    if (!(target instanceof Element)) return null;
-    return [
-      target.tagName.toLowerCase(),
-      target.id ? `#${target.id}` : '',
-      typeof target.className === 'string' && target.className ? `.${target.className.replace(/\s+/g, '.')}` : '',
-    ].join('');
-  }
-
   function onMeanderPathClick(event: MouseEvent) {
-    console.log('[Artemis debug] meander click', {
-      sourceKey: src.key,
-      mainId: src.mainId,
-      label: src.label,
-      target: describeDebugTarget(event.target),
-      currentTarget: describeDebugTarget(event.currentTarget),
-      clientX: event.clientX,
-      clientY: event.clientY,
-      elementFromPoint: describeDebugTarget(document.elementFromPoint(event.clientX, event.clientY)),
-      defaultPrevented: event.defaultPrevented,
-    });
     onMeanderClick(src, event);
   }
 

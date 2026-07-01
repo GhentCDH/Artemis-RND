@@ -10,6 +10,10 @@ export type ManifestInfo = {
   label: string;
   compiledManifestPath: string;
   manifestAllmapsUrl?: string;
+  /** The specific canvas's IIIF image service `@id`, when this info is canvas-level (populated in
+   *  `canvasKeyToManifestInfo`). Lets a click resolve to the exact canvas rather than a manifest's
+   *  first canvas — required for manifests that contain multiple canvases. */
+  imageServiceUrl?: string;
   spriteRef?: SpriteRef;
   placeholderWidth?: number;
   placeholderHeight?: number;
@@ -19,6 +23,11 @@ type PaneRuntime = {
   activeLayersByGroup: Map<string, string[]>;
   activeWarpedLayersByGroup: Map<string, WarpedMapLayer[]>;
   mapIdToManifestInfo: Map<string, ManifestInfo>;
+  sourceManifestUrlToManifestInfo: Map<string, ManifestInfo>;
+  /** Per-canvas manifest info, keyed by every identifier a mask feature's `imageId` might carry
+   *  (the canvas's `canvasAllmapsId` and its `imageServiceUrl`). Resolves a masked click to the
+   *  exact canvas even when several canvases share one `manifestUrl`. */
+  canvasKeyToManifestInfo: Map<string, ManifestInfo>;
   activeLayerCleanup: Map<string, () => void>;
   parkedLayersByGroup: Map<string, { layerIds: string[]; warpedLayers: WarpedMapLayer[] }>;
 };
@@ -26,6 +35,8 @@ type PaneRuntime = {
 const activeLayersByGroup = new Map<string, string[]>();
 const activeWarpedLayersByGroup = new Map<string, WarpedMapLayer[]>();
 const mapIdToManifestInfo = new Map<string, ManifestInfo>();
+const sourceManifestUrlToManifestInfo = new Map<string, ManifestInfo>();
+const canvasKeyToManifestInfo = new Map<string, ManifestInfo>();
 const activeLayerCleanup = new Map<string, () => void>();
 const parkedLayersByGroup = new Map<string, { layerIds: string[]; warpedLayers: WarpedMapLayer[] }>();
 const paneRuntimes = new Map<PaneRuntimeId, PaneRuntime>();
@@ -45,6 +56,8 @@ export function getPaneRuntime(paneId: PaneRuntimeId = "main"): PaneRuntime {
       activeLayersByGroup,
       activeWarpedLayersByGroup,
       mapIdToManifestInfo,
+      sourceManifestUrlToManifestInfo,
+      canvasKeyToManifestInfo,
       activeLayerCleanup,
       parkedLayersByGroup,
     };
@@ -55,6 +68,8 @@ export function getPaneRuntime(paneId: PaneRuntimeId = "main"): PaneRuntime {
       activeLayersByGroup: new Map<string, string[]>(),
       activeWarpedLayersByGroup: new Map<string, WarpedMapLayer[]>(),
       mapIdToManifestInfo: new Map<string, ManifestInfo>(),
+      sourceManifestUrlToManifestInfo: new Map<string, ManifestInfo>(),
+      canvasKeyToManifestInfo: new Map<string, ManifestInfo>(),
       activeLayerCleanup: new Map<string, () => void>(),
       parkedLayersByGroup: new Map<string, { layerIds: string[]; warpedLayers: WarpedMapLayer[] }>(),
     });
@@ -67,6 +82,8 @@ export function resetAllIiifRuntime() {
   activeLayersByGroup.clear();
   activeWarpedLayersByGroup.clear();
   mapIdToManifestInfo.clear();
+  sourceManifestUrlToManifestInfo.clear();
+  canvasKeyToManifestInfo.clear();
   activeLayerCleanup.clear();
   parkedLayersByGroup.clear();
   paneRuntimes.clear();
@@ -77,6 +94,8 @@ export function resetPaneRuntime(paneId: PaneRuntimeId = "main") {
   runtime.activeLayersByGroup.clear();
   runtime.activeWarpedLayersByGroup.clear();
   runtime.mapIdToManifestInfo.clear();
+  runtime.sourceManifestUrlToManifestInfo.clear();
+  runtime.canvasKeyToManifestInfo.clear();
   runtime.activeLayerCleanup.clear();
   runtime.parkedLayersByGroup.clear();
   if (paneId !== "main") {
@@ -86,6 +105,34 @@ export function resetPaneRuntime(paneId: PaneRuntimeId = "main") {
 
 export function getManifestInfoForMapId(mapId: string, paneId: PaneRuntimeId = "main") {
   return getPaneRuntime(paneId).mapIdToManifestInfo.get(mapId) ?? null;
+}
+
+export function getManifestInfoForSourceManifestUrl(sourceManifestUrl: string, paneId: PaneRuntimeId = "main") {
+  return getPaneRuntime(paneId).sourceManifestUrlToManifestInfo.get(sourceManifestUrl) ?? null;
+}
+
+export function getManifestInfoForCanvasKey(canvasKey: string, paneId: PaneRuntimeId = "main") {
+  return getPaneRuntime(paneId).canvasKeyToManifestInfo.get(canvasKey) ?? null;
+}
+
+/** Group IDs currently active (not parked) for a pane — used to enumerate which groups' mask
+ *  vector layers should be queried for hover/click hit-testing. */
+export function getActiveGroupIds(paneId: PaneRuntimeId = "main"): string[] {
+  return [...getPaneRuntime(paneId).activeLayersByGroup.keys()];
+}
+
+/** Deterministic MapLibre source/layer ids for a group's mask vector tiles — computed from groupId
+ *  rather than tracked in a separate map, since the naming is stable and both `initialization.ts`
+ *  (creates them) and click/hover handlers (query them) need the same ids. Only a `fill` layer
+ *  exists (invisible, for hit-testing) — the hover outline itself is drawn separately from the
+ *  exact queried feature's geometry (see `setIiifMaskHover` in mapInit.ts), not a filtered vector
+ *  layer, since `manifestUrl` isn't guaranteed unique per canvas. */
+export function getMaskLayerIds(groupId: string): { sourceId: string; fillLayerId: string } {
+  const safe = groupId.replace(/\//g, "-");
+  return {
+    sourceId: `iiif-masks-source-${safe}`,
+    fillLayerId: `iiif-masks-fill-${safe}`,
+  };
 }
 
 export function getAllActiveWarpedMaps(paneId: PaneRuntimeId = "main"): { mapId: string; warpedMap: any; groupId: string }[] {
@@ -149,6 +196,15 @@ export function safeHasMapLayer(map: maplibregl.Map, layerId: string): boolean {
   }
 }
 
+function removeMaskSource(map: maplibregl.Map, groupId: string) {
+  try {
+    const { sourceId } = getMaskLayerIds(groupId);
+    if (map.getSource(sourceId)) map.removeSource(sourceId);
+  } catch {
+    // ignore
+  }
+}
+
 export async function removeLayerGroup(map: maplibregl.Map, groupId: string, paneId: PaneRuntimeId = "main") {
   await waitForMapReady(map);
   const runtime = getPaneRuntime(paneId);
@@ -157,6 +213,7 @@ export async function removeLayerGroup(map: maplibregl.Map, groupId: string, pan
     const parked = runtime.parkedLayersByGroup.get(groupId)!;
     runtime.parkedLayersByGroup.delete(groupId);
     for (const id of parked.layerIds) await removeMaplibreLayer(map, id);
+    removeMaskSource(map, groupId);
     return;
   }
 
@@ -166,11 +223,21 @@ export async function removeLayerGroup(map: maplibregl.Map, groupId: string, pan
   for (const id of ids) await removeMaplibreLayer(map, id);
   runtime.activeLayersByGroup.delete(groupId);
   runtime.activeWarpedLayersByGroup.delete(groupId);
+  removeMaskSource(map, groupId);
 }
 
 export async function parkLayerGroup(map: maplibregl.Map, groupId: string, paneId: PaneRuntimeId = "main") {
   await waitForMapReady(map);
   const runtime = getPaneRuntime(paneId);
+
+  // Parking exists to cheaply preserve Allmaps' triangulated meshes across a hide/show. If Allmaps
+  // hasn't loaded yet (raster placeholder still up — tracked by the activeLayerCleanup entry), there
+  // is nothing expensive to preserve, and the raster preview must not linger while the group is
+  // toggled off. Fully remove instead; a later re-show re-inits cheaply (raster + masks, no warp).
+  if (runtime.activeLayerCleanup.has(groupId)) {
+    return removeLayerGroup(map, groupId, paneId);
+  }
+
   const warpedLayers = runtime.activeWarpedLayersByGroup.get(groupId);
   const layerIds = runtime.activeLayersByGroup.get(groupId);
   if (!warpedLayers || !layerIds || layerIds.length === 0) return;
